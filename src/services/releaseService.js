@@ -37,7 +37,7 @@ export const OFFICIAL_RELEASES = [
       'دعم كامل للموازين الإلكترونية وطباعة الفواتير والباركود',
       'فحص تلقائي للتحديثات الجديدة عند الإقلاع'
     ],
-    downloadUrl: 'https://khodar-pos.pages.dev/downloads/KhodarPOS-Setup.exe',
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.4.0/KhodarPOS-Setup.exe',
     fileSizeBytes: 120716182,
     publishedAt: '2026-09-18T00:00:00Z'
   },
