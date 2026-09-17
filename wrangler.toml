@@ -1,0 +1,17 @@
+name = "khodar-pos"
+compatibility_date = "2024-09-01"
+pages_build_output_dir = "./dist"
+
+# Cloudflare D1 Database Binding
+# To create the database run: npx wrangler d1 create khodar_pos_production
+# Then paste the database_id below:
+[[d1_databases]]
+binding = "DB"
+database_name = "khodar_pos_production"
+database_id = "bf2fbfa3-eb13-4687-ac97-b17740c300de"
+
+# Cloudflare R2 Bucket Binding (for automated database dumps, invoices & receipts backup)
+# To create bucket: npx wrangler r2 bucket create khodar-pos-backups
+# [[r2_buckets]]
+# binding = "BACKUPS"
+# bucket_name = "khodar-pos-backups"
