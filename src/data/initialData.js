@@ -29,7 +29,8 @@ export const INITIAL_SETTINGS = {
   allowNegativeStock: false, // false: منع البيع عند نفاد الرصيد | true: السماح بالبيع على ذمة التوريد
   defaultLowStockAlert: 15, // حد التنبيه الافتراضي لانخفاض المخزون (كجم)
   allowCashierDiscounts: true, // السماح للكاشير بإجراء خصومات يدوية
-  maxDiscountPercent: 15 // الحد الأقصى المسموح للخصم (%)
+  maxDiscountPercent: 15, // الحد الأقصى المسموح للخصم (%)
+  fontSizeScale: 100 // نسبة تكبير/تصغير خطوط البرنامج (80% إلى 130%)
 };
 
 export const INITIAL_INVOICES = [];

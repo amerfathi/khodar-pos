@@ -234,6 +234,13 @@ export default function App() {
     checkForUpdates();
   }, []);
 
+  // Dynamic Global Font Scaling (ضبط حجم خطوط وشاشات البرنامج ديناميكياً عبر السلايدر)
+  useEffect(() => {
+    const scale = Number(settings?.fontSizeScale) || 100;
+    const rootFontSize = `${(scale / 100) * 16}px`;
+    document.documentElement.style.fontSize = rootFontSize;
+  }, [settings?.fontSizeScale]);
+
   // PWA Install prompt handling
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [canInstall, setCanInstall] = useState(false);

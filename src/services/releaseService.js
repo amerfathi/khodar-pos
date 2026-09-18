@@ -37,8 +37,8 @@ export const OFFICIAL_RELEASES = [
       'شاشة تسجيل دخول بيضاء نقية مع إزالة بيانات الاختبار لسرية الحسابات',
       'تحكم فوري بحصة الفروع وربط كامل مع السحابة'
     ],
-    downloadUrl: 'https://khodar-pos.pages.dev/downloads/KhodarPOS-Setup.exe',
-    fileSizeBytes: 122500000,
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.0/KhodarPOS-Setup.exe',
+    fileSizeBytes: 128524688,
     publishedAt: '2026-09-19T00:00:00Z'
   },
   {

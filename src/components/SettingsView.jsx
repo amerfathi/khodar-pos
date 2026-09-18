@@ -7,7 +7,7 @@ import {
   Database, Wifi, WifiOff, HardDrive, ShieldAlert, Users, Plus, 
   Trash2, Edit3, UserCheck, Key, Shield, UserX, ShieldBan, X,
   User, CheckSquare, Square as SquareIcon, Eye, EyeOff,
-  ArrowUpCircle, Sparkles, Laptop
+  ArrowUpCircle, Sparkles, Laptop, Type, Sliders, ZoomIn, ZoomOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ROLE_PERMISSIONS_PRESETS, DEFAULT_PERMISSIONS } from '../data/initialData';
@@ -281,13 +281,14 @@ export default function SettingsView({
 
   const subTabs = [
     { id: 'profile', label: 'المنشأة والضرائب', icon: Building2, desc: 'الاسم التجاري، السجل، الرقم الضريبي' },
+    { id: 'appearance', label: 'المظهر وحجم الخط', icon: Type, desc: 'سلايدر تكبير وتصغير نصوص وشاشات النظام' },
     { id: 'invoices', label: 'الفواتير والطباعة', icon: Receipt, desc: 'الطابعة الحرارية، المقاس، الترويسة والـ QR' },
     { id: 'scales', label: 'الميزان وسياسات البيع', icon: Scale, desc: 'الوزن الفارغ، دقة الجرام، خصومات الكاشير' },
     { id: 'inventory', label: 'المخزون والخزينة', icon: PackageCheck, desc: 'البيع على ذمة التوريد، عهدة الصندوق' },
     { id: 'users', label: 'المستخدمون والصلاحيات', icon: Users, desc: 'إدارة الكاشير، المحاسبين، وتعيين الصلاحيات' },
     { id: 'cloud', label: 'السحابة والنسخ الاحتياطي', icon: Cloud, desc: 'Cloudflare D1، مزامنة وتصدير' },
     { id: 'security', label: 'الحساب والأمان', icon: ShieldCheck, desc: 'بيانات الاشتراك، كلمة المرور، الفروع' },
-    { id: 'updates', label: 'التحديثات وإصدار النظام', icon: ArrowUpCircle, desc: 'إصدار v2.4.0، الفحص والتحديث الداخلي' },
+    { id: 'updates', label: 'التحديثات وإصدار النظام', icon: ArrowUpCircle, desc: 'إصدار v2.5.0، الفحص والتحديث الداخلي' },
   ];
 
   const activeBranch = branches.find(b => b.id === activeBranchId) || branches[0];
@@ -598,6 +599,151 @@ export default function SettingsView({
                         </div>
                       </>
                     )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* TAB: Appearance & Font Size Slider */}
+            {activeSubTab === 'appearance' && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-6"
+              >
+                <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-2xs space-y-6">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold border border-emerald-200">
+                        <Type size={20} />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-sm text-navy-850">ضبط حجم خطوط وشاشات البرنامج</h3>
+                        <p className="text-[11px] text-slate-400">
+                          حرك المؤشر (Slider) يميناً أو يساراً لتكبير أو تصغير جميع نصوص وأزرار وفواتير النظام لتناسب نظرك بكل راحة
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-500">الحجم الحالي:</span>
+                      <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-mono font-bold">
+                        {form.fontSizeScale || 100}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Range Slider Control */}
+                  <div className="bg-slate-50/80 rounded-2xl p-6 border border-slate-200/80 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <Sliders size={16} className="text-emerald-600" />
+                        <span className="text-xs font-bold">مؤشر التحكم في مقاس الخط (لاين التكبير والتصغير)</span>
+                      </div>
+                      <span className="text-xs font-bold text-slate-600">
+                        {Number(form.fontSizeScale || 100) < 95 ? 'خط صغير' : 
+                         Number(form.fontSizeScale || 100) <= 105 ? 'حجم متوازن (افتراضي)' : 
+                         Number(form.fontSizeScale || 100) <= 120 ? 'خط كبير وواضح' : 'خط كبير جداً'}
+                      </span>
+                    </div>
+
+                    {/* The Interactive Slider Track */}
+                    <div className="space-y-2 pt-2">
+                      <input
+                        type="range"
+                        min="80"
+                        max="130"
+                        step="5"
+                        value={form.fontSizeScale || 100}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setForm(prev => ({ ...prev, fontSizeScale: val }));
+                          document.documentElement.style.fontSize = `${(val / 100) * 16}px`;
+                        }}
+                        className="w-full h-3 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600 hover:accent-emerald-700 transition-all"
+                      />
+
+                      {/* Scale ticks / labels */}
+                      <div className="flex justify-between text-[11px] font-mono text-slate-500 pt-1 select-none">
+                        <span className="text-slate-400">80% (أصغر)</span>
+                        <span className="text-slate-500">90%</span>
+                        <span className="font-bold text-emerald-700 bg-emerald-100/60 px-2 py-0.5 rounded-md border border-emerald-200">100% (الافتراضي)</span>
+                        <span className="text-slate-500">115%</span>
+                        <span className="text-slate-600 font-bold">130% (أكبر)</span>
+                      </div>
+                    </div>
+
+                    {/* Quick Presets Buttons */}
+                    <div className="pt-3 border-t border-slate-200/60 flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-slate-500 font-medium">مقاسات سريعة:</span>
+                      {[
+                        { label: 'صغير (85%)', value: 85 },
+                        { label: 'الافتراضي (100%)', value: 100 },
+                        { label: 'كبير (115%)', value: 115 },
+                        { label: 'كبير جداً (130%)', value: 130 }
+                      ].map((preset) => (
+                        <button
+                          key={preset.value}
+                          type="button"
+                          onClick={() => {
+                            setForm(prev => ({ ...prev, fontSizeScale: preset.value }));
+                            document.documentElement.style.fontSize = `${(preset.value / 100) * 16}px`;
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                            Number(form.fontSizeScale || 100) === preset.value
+                              ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                              : 'bg-white text-slate-700 hover:bg-slate-100 border-slate-200'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Live Preview Card */}
+                  <div className="border border-slate-200 rounded-2xl p-5 bg-white space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <span className="text-xs font-bold text-slate-700">معاينة حية للمظهر كما سيظهر في شاشات الكاشير والفواتير:</span>
+                      <span className="text-[11px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md">يتغير الحجم لحظياً</span>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-black text-slate-900 text-base">طماطم بلدي فرز أول (صندوق)</h4>
+                          <p className="text-xs text-slate-500">الوزن الصافي: 12.50 كجم &bull; السعر: 4.50 ريال/كجم</p>
+                        </div>
+                        <div className="text-left font-mono">
+                          <span className="text-xs text-slate-400 block">الإجمالي</span>
+                          <span className="text-lg font-black text-emerald-700">56.25 ريال</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-200/60">
+                        <button type="button" className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold">
+                          إضافة للسلة وإصدار الفاتورة
+                        </button>
+                        <span className="text-xs text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+                          رقم الفاتورة: #INV-00249
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Save Button for Appearance */}
+                  <div className="pt-2 flex items-center justify-between">
+                    <p className="text-xs text-slate-500">
+                      سيتم تذكر وحفظ هذا الحجم تلقائياً لجميع شاشات وأقسام النظام.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleSave}
+                      className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-2 transition-all cursor-pointer"
+                    >
+                      <Save size={15} />
+                      <span>حفظ مقاس الخط المفضل</span>
+                    </button>
                   </div>
                 </div>
               </motion.div>
