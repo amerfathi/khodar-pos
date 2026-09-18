@@ -185,17 +185,31 @@ ipcMain.handle('install-update', async (event, installerPath) => {
   }
 
   try {
-    // Launch NSIS installer with /S for silent upgrade without erasing user settings or SQLite
-    const child = spawn(targetPath, ['/S'], {
+    // Generate a detached launcher batch script that:
+    // 1. Waits 2 seconds for Electron to fully exit and release all file locks
+    // 2. Ensures any lingering KhodarPOS process handles are terminated
+    // 3. Executes the installer silently (/S)
+    const tempDir = app.getPath('temp');
+    const updaterBat = path.join(tempDir, `khodar-updater-${Date.now()}.bat`);
+    const batContent = `@echo off
+timeout /t 2 /nobreak >nul
+taskkill /F /IM KhodarPOS.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
+start "" "${targetPath}" /S
+exit
+`;
+    fs.writeFileSync(updaterBat, batContent, 'utf-8');
+
+    const child = spawn('cmd.exe', ['/c', updaterBat], {
       detached: true,
       stdio: 'ignore'
     });
     child.unref();
 
-    // Close Electron immediately so the installer can replace application files
+    // Immediately exit Electron cleanly to release all file locks
     setTimeout(() => {
-      app.quit();
-    }, 500);
+      app.exit(0);
+    }, 200);
 
     return { success: true };
   } catch (err) {

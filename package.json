@@ -30,6 +30,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
       "shortcutName": "سوق الخضار - كاشير ومحاسبة",
       "artifactName": "KhodarPOS-Setup.exe"
     }
