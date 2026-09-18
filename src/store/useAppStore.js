@@ -1755,6 +1755,44 @@ export function useAppStore() {
     setTenants(prev => prev.filter(t => t.id !== tenantId));
   };
 
+  const resetPassword = (identifier, newPassword) => {
+    const cleanId = (identifier || '').trim().toLowerCase();
+    if (!cleanId || !newPassword) return false;
+
+    setTenants(prev => prev.map(t => {
+      const match = (t.email && t.email.toLowerCase() === cleanId) ||
+                    (t.username && t.username.toLowerCase() === cleanId) ||
+                    (t.phone && t.phone === cleanId) ||
+                    (cleanId === 'amerfathi123@gmail.com' && t.role === 'super_admin');
+      if (match) {
+        return { ...t, password: newPassword };
+      }
+      return t;
+    }));
+
+    setUsers(prev => prev.map(u => {
+      const match = (u.username && u.username.toLowerCase() === cleanId) ||
+                    (u.phone && u.phone === cleanId);
+      if (match) {
+        return { ...u, password: newPassword };
+      }
+      return u;
+    }));
+
+    return true;
+  };
+
+  const adminResetTenantPassword = (tenantId, newPassword) => {
+    if (!tenantId || !newPassword) return false;
+    setTenants(prev => prev.map(t => {
+      if (t.id === tenantId) {
+        return { ...t, password: newPassword };
+      }
+      return t;
+    }));
+    return true;
+  };
+
   // Staff Users & Permissions Management (إدارة المستخدمين والموظفين والصلاحيات)
   const hasPermission = (permissionKey) => {
     if (!currentUser) return false;
@@ -2015,6 +2053,8 @@ export function useAppStore() {
     login,
     logout,
     changePassword,
+    resetPassword,
+    adminResetTenantPassword,
     createTenantAccount,
     updateTenantAccount,
     deleteTenantAccount,

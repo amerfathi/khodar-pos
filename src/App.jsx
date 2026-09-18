@@ -23,6 +23,7 @@ import ChangePasswordModal from './components/ChangePasswordModal';
 import SuperAdminPortal from './components/SuperAdminPortal';
 import BranchesManagementModal from './components/BranchesManagementModal';
 import UpdateNotificationModal from './components/UpdateNotificationModal';
+import DesktopUpdateModal from './components/DesktopUpdateModal';
 import { checkLatestRelease } from './services/releaseService';
 import { getClientPlatform } from './config/appVersion';
 import DesktopSidebar, { TAB_PERMISSION_MAP } from './components/DesktopSidebar';
@@ -201,6 +202,7 @@ export default function App() {
   });
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [isDesktopDownloadModalOpen, setIsDesktopDownloadModalOpen] = useState(false);
 
   useEffect(() => {
     // Only check and notify updates on native platforms (Desktop Electron and Mobile Capacitor)
@@ -825,6 +827,22 @@ export default function App() {
         isOpen={isUpdateModalOpen}
         onClose={() => setIsUpdateModalOpen(false)}
         updateInfo={updateInfo}
+        onApplyUpdate={() => {
+          if (getClientPlatform() === 'windows') {
+            setIsUpdateModalOpen(false);
+            setIsDesktopDownloadModalOpen(true);
+          } else if (updateInfo?.downloadUrl) {
+            window.open(updateInfo.downloadUrl, '_blank');
+          }
+        }}
+      />
+
+      {/* 8. Desktop In-App Silent Download & Install Engine */}
+      <DesktopUpdateModal
+        isOpen={isDesktopDownloadModalOpen}
+        onClose={() => setIsDesktopDownloadModalOpen(false)}
+        releaseInfo={updateInfo}
+        cartItemsCount={store?.cart?.length || 0}
       />
 
     </div>

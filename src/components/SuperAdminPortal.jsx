@@ -14,6 +14,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     createTenantAccount, 
     updateTenantAccount, 
     deleteTenantAccount,
+    adminResetTenantPassword,
     trialRequests = [],
     updateTrialRequest,
     deleteTrialRequest
@@ -25,6 +26,9 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   const [activatingTrialId, setActivatingTrialId] = useState(null);
   const [editingBranchTenant, setEditingBranchTenant] = useState(null);
   const [editBranchesCount, setEditBranchesCount] = useState('1');
+  const [resettingTenant, setResettingTenant] = useState(null);
+  const [newTenantPass, setNewTenantPass] = useState('');
+  const [resetSuccessMsg, setResetSuccessMsg] = useState('');
 
   // New Tenant Form State
   const [companyName, setCompanyName] = useState('');
@@ -476,9 +480,23 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                               type="button"
                               onClick={() => copyToClipboard(welcomeMsg, tenant.id)}
                               title="نسخ بيانات الدخول"
-                              className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
+                              className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors cursor-pointer"
                             >
                               {copiedTenantId === tenant.id ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                            </button>
+
+                            {/* Reset Password button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResettingTenant(tenant);
+                                setNewTenantPass(Math.floor(100000 + Math.random() * 900000).toString());
+                                setResetSuccessMsg('');
+                              }}
+                              title="إعادة تعيين كلمة مرور المشترك"
+                              className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Key size={13} />
                             </button>
 
                             {/* Extend 3 months button */}
@@ -1259,6 +1277,149 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Tenant Password Modal */}
+      {resettingTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in" dir="rtl">
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden space-y-4 p-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
+                  <Key size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">إعادة تعيين كلمة مرور المشترك</h3>
+                  <p className="text-xs text-slate-500">{resettingTenant.companyName || resettingTenant.name}</p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setResettingTenant(null)}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {resetSuccessMsg ? (
+              <div className="py-4 space-y-4 text-center">
+                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+                  <Check size={24} />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="font-bold text-slate-900 text-sm">تم تغيير كلمة المرور بنجاح!</h4>
+                  <p className="text-xs text-slate-500">كلمة المرور الجديدة هي:</p>
+                  <p className="font-mono font-bold text-base text-emerald-700 bg-emerald-50 py-2 rounded-xl border border-emerald-200">
+                    {newTenantPass}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  {resettingTenant.phone && (
+                    <a
+                      href={`https://wa.me/${resettingTenant.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`مرحباً ${resettingTenant.companyName}، تم إعادة تعيين كلمة المرور الخاصة بحسابكم على سوق الخضار بنجاح.\nاسم المستخدم: ${resettingTenant.username}\nكلمة المرور الجديدة: ${newTenantPass}\nرابط الدخول: https://khodar-pos.pages.dev`)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20"
+                    >
+                      <MessageCircle size={15} />
+                      <span>إرسال البيانات للمشترك عبر واتساب</span>
+                    </a>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`اسم المستخدم: ${resettingTenant.username}\nكلمة المرور الجديدة: ${newTenantPass}`);
+                      alert('تم نسخ البيانات للحافظة');
+                    }}
+                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2"
+                  >
+                    <Copy size={15} />
+                    <span>نسخ بيانات الدخول</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setResettingTenant(null)}
+                    className="w-full py-2 text-slate-400 hover:text-slate-600 text-xs font-medium"
+                  >
+                    إغلاق
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!newTenantPass || newTenantPass.length < 4) {
+                    alert('كلمة المرور يجب أن لا تقل عن 4 خانات');
+                    return;
+                  }
+                  if (adminResetTenantPassword) {
+                    adminResetTenantPassword(resettingTenant.id, newTenantPass);
+                  }
+                  setResetSuccessMsg('تم تعيين كلمة المرور بنجاح');
+                }}
+                className="space-y-4"
+              >
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">اسم المستخدم:</span>
+                    <span className="font-mono font-bold text-slate-800">{resettingTenant.username}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">البريد الإلكتروني:</span>
+                    <span className="font-mono text-slate-700">{resettingTenant.email || '—'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">رقم الهاتف:</span>
+                    <span className="font-mono text-slate-700">{resettingTenant.phone || '—'}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700">كلمة المرور الجديدة</label>
+                    <button
+                      type="button"
+                      onClick={() => setNewTenantPass(Math.floor(100000 + Math.random() * 900000).toString())}
+                      className="text-[11px] text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-1 font-semibold"
+                    >
+                      <RefreshCw size={11} />
+                      <span>توليد كلمة سر عشوائية</span>
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={newTenantPass}
+                    onChange={(e) => setNewTenantPass(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm font-bold text-slate-800 text-center tracking-wider focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setResettingTenant(null)}
+                    className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    className="w-2/3 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-md shadow-amber-600/20 flex items-center justify-center gap-2"
+                  >
+                    <Key size={14} />
+                    <span>تأكيد وتغيير كلمة المرور</span>
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

@@ -4,6 +4,7 @@ import {
   Store, Minus, Square, X, Database, CheckCircle2, AlertCircle
 } from 'lucide-react';
 import { APP_VERSION } from '../config/appVersion';
+import ForgotPasswordModal from './ForgotPasswordModal';
 
 export default function DesktopLoginView({ store }) {
   const { login, settings } = store;
@@ -13,6 +14,7 @@ export default function DesktopLoginView({ store }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -192,8 +194,16 @@ export default function DesktopLoginView({ store }) {
                     onChange={(e) => setRememberMe(e.target.checked)}
                     className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/30 cursor-pointer"
                   />
-                  <span className="font-medium">تذكر بيانات الدخول على هذا الجهاز</span>
+                  <span className="font-medium">تذكر بيانات الدخول</span>
                 </label>
+
+                <button
+                  type="button"
+                  onClick={() => setIsForgotPasswordOpen(true)}
+                  className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:underline cursor-pointer"
+                >
+                  نسيت كلمة المرور؟
+                </button>
               </div>
 
               <button
@@ -233,6 +243,12 @@ export default function DesktopLoginView({ store }) {
         </div>
 
       </div>
+
+      <ForgotPasswordModal 
+        isOpen={isForgotPasswordOpen} 
+        onClose={() => setIsForgotPasswordOpen(false)} 
+        store={store} 
+      />
 
     </div>
   );

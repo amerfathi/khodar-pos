@@ -5,55 +5,57 @@
 
 const FALLBACK_RELEASES = {
   web: {
-    version: '2.4.0',
+    version: '2.5.0',
     minimumVersion: '2.2.0',
     updateType: 'recommended',
     releaseNotes: [
+      'نظام استرداد كلمة المرور السحابي عبر البريد ورقم الهاتف وواتساب',
       'تحديث شامل لمنظومة واجهة وتجربة المستخدم المؤسسية (Quiet Luxury)',
-      'توحيد كامل لمنظومة التطبيق (Web / Desktop / Mobile) من مصدر كود واحد',
-      'إدارة الإصدارات والتحديثات المركزية'
+      'إدارة حصص الفروع والمتاجر المتعددة من لوحة المالك',
+      'فحص تلقائي ومباشر للتحديثات مع السحابة'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev',
-    fileSizeBytes: 950000,
-    publishedAt: '2026-09-18T00:00:00Z'
+    fileSizeBytes: 980000,
+    publishedAt: '2026-09-19T00:00:00Z'
   },
   windows: {
-    version: '2.4.0',
+    version: '2.5.0',
     minimumVersion: '2.2.0',
-    updateType: 'recommended',
+    updateType: 'required',
     releaseNotes: [
-      'إطار نافذة مدمج فائق الأناقة (Frameless Custom Window)',
-      'شريط جانبي مؤسسي متطور قابل للطي (Mini-rail 68px)',
-      'دعم كامل للموازين الإلكترونية وطباعة الفواتير والباركود'
+      'نظام استرداد كلمة المرور المباشر لحسابات المتاجر والمشتركين',
+      'تحديث تلقائي فوري وسلس دون المساس ببيانات وفواتير العميل',
+      'شاشة تسجيل دخول بيضاء نقية مع إزالة بيانات الاختبار لسرية الحسابات',
+      'تحكم فوري بحصة الفروع وربط كامل مع السحابة'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev/downloads/KhodarPOS-Setup.exe',
-    fileSizeBytes: 120716182,
-    publishedAt: '2026-09-18T00:00:00Z'
+    fileSizeBytes: 122500000,
+    publishedAt: '2026-09-19T00:00:00Z'
   },
   android: {
-    version: '2.4.0',
+    version: '2.5.0',
     minimumVersion: '2.2.0',
     updateType: 'recommended',
     releaseNotes: [
+      'نظام استرداد كلمة المرور وتأمين الحسابات',
       'واجهة رئيسية للهواتف الذكية (Mobile Home Hub) سريعة ومريحة للمس',
-      'شريط تنقل سفلي ذكي (Bottom Navigation) مع مؤشر تفاعلي ناعم',
-      'مزامنة سحابية فائقة السرعة مع قاعدة بيانات Cloudflare D1'
+      'شريط تنقل سفلي ذكي ومزامنة سحابية مع Cloudflare D1'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev/downloads/KhodarPOS.apk',
     fileSizeBytes: 3386842,
-    publishedAt: '2026-09-18T00:00:00Z'
+    publishedAt: '2026-09-19T00:00:00Z'
   },
   ios: {
-    version: '2.4.0',
+    version: '2.5.0',
     minimumVersion: '2.2.0',
     updateType: 'recommended',
     releaseNotes: [
-      'دعم كامل كتطبيق PWA لشاشات iPhone و iPad',
-      'سرعة فائقة في معالجة فواتير الخضار وحفظ سحابي فوري'
+      'نظام استرداد كلمة المرور وتأمين الحسابات',
+      'دعم كامل كتطبيق PWA لشاشات iPhone و iPad'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev',
     fileSizeBytes: 1200000,
-    publishedAt: '2026-09-18T00:00:00Z'
+    publishedAt: '2026-09-19T00:00:00Z'
   }
 };
 

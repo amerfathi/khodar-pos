@@ -8,55 +8,54 @@ import { UPDATE_TYPES } from '../types/contracts';
 // Embedded Fallback Releases (Offline-safe & Zero Mock Data)
 export const OFFICIAL_RELEASES = [
   {
-    id: 'rel-web-2-4-0',
+    id: 'rel-web-2-5-0',
     platform: 'web',
-    version: '2.4.0',
+    version: '2.5.0',
     minimumVersion: '2.2.0',
     status: 'published',
     updateType: 'recommended',
     releaseNotes: [
+      'نظام استرداد كلمة المرور السحابي عبر البريد ورقم الهاتف وواتساب',
       'تحديث شامل لمنظومة واجهة وتجربة المستخدم المؤسسية (Quiet Luxury)',
-      'توحيد كامل لمنظومة التطبيق (Web / Desktop / Mobile) من مصدر كود واحد',
-      'إضافة لوحة إدارة الإصدارات والتحديثات المركزية',
-      'تعزيز التوافق العكسي وتأمين كاش المتصفح'
+      'إدارة حصص الفروع والمتاجر المتعددة من لوحة المالك',
+      'فحص تلقائي ومباشر للتحديثات مع السحابة'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev',
-    fileSizeBytes: 950000,
-    publishedAt: '2026-09-18T00:00:00Z'
+    fileSizeBytes: 980000,
+    publishedAt: '2026-09-19T00:00:00Z'
   },
   {
-    id: 'rel-win-2-4-0',
+    id: 'rel-win-2-5-0',
     platform: 'windows',
-    version: '2.4.0',
+    version: '2.5.0',
     minimumVersion: '2.2.0',
     status: 'published',
-    updateType: 'recommended',
+    updateType: 'required',
     releaseNotes: [
-      'إطار نافذة مدمج فائق الأناقة (Frameless Custom Window)',
-      'شريط جانبي مؤسسي متطور قابل للطي (Mini-rail 68px)',
-      'دعم كامل للموازين الإلكترونية وطباعة الفواتير والباركود',
-      'فحص تلقائي للتحديثات الجديدة عند الإقلاع'
+      'نظام استرداد كلمة المرور المباشر لحسابات المتاجر والمشتركين',
+      'تحديث تلقائي فوري وسلس دون المساس ببيانات وفواتير العميل',
+      'شاشة تسجيل دخول بيضاء نقية مع إزالة بيانات الاختبار لسرية الحسابات',
+      'تحكم فوري بحصة الفروع وربط كامل مع السحابة'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.4.0/KhodarPOS-Setup.exe',
-    fileSizeBytes: 120716182,
-    publishedAt: '2026-09-18T00:00:00Z'
+    downloadUrl: 'https://khodar-pos.pages.dev/downloads/KhodarPOS-Setup.exe',
+    fileSizeBytes: 122500000,
+    publishedAt: '2026-09-19T00:00:00Z'
   },
   {
-    id: 'rel-and-2-4-0',
+    id: 'rel-and-2-5-0',
     platform: 'android',
-    version: '2.4.0',
+    version: '2.5.0',
     minimumVersion: '2.2.0',
     status: 'published',
     updateType: 'recommended',
     releaseNotes: [
+      'نظام استرداد كلمة المرور وتأمين الحسابات',
       'واجهة رئيسية للهواتف الذكية (Mobile Home Hub) سريعة ومريحة للمس',
-      'شريط تنقل سفلي ذكي (Bottom Navigation) مع مؤشر تفاعلي ناعم',
-      'مزامنة سحابية فائقة السرعة مع قاعدة بيانات Cloudflare D1',
-      'دعم كامل للعمل دون انترنت وحفظ المبيعات محلياً'
+      'شريط تنقل سفلي ذكي ومزامنة سحابية مع Cloudflare D1'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev/downloads/KhodarPOS.apk',
     fileSizeBytes: 3386842,
-    publishedAt: '2026-09-18T00:00:00Z'
+    publishedAt: '2026-09-19T00:00:00Z'
   }
 ];
 
@@ -64,9 +63,14 @@ export async function checkLatestRelease(customPlatform = null) {
   const platform = customPlatform || getClientPlatform();
   const currentVersion = APP_VERSION;
 
+  // Use live Cloudflare domain when on Electron desktop file:/// or mobile
+  const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
+    ? window.location.origin
+    : 'https://khodar-pos.pages.dev';
+
   try {
     // Attempt remote check first
-    const res = await fetch(`/api/releases/latest?platform=${platform}&current=${currentVersion}`, {
+    const res = await fetch(`${baseUrl}/api/releases/latest?platform=${platform}&current=${currentVersion}`, {
       headers: { 'Accept': 'application/json' }
     });
     if (res.ok) {

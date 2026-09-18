@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Button, Badge } from './ui';
 import { APP_VERSION } from '../config/appVersion';
+import ForgotPasswordModal from './ForgotPasswordModal';
 
 export default function LoginView({ store, onClose }) {
   const { login } = store;
@@ -14,6 +15,7 @@ export default function LoginView({ store, onClose }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isExpiredAlert, setIsExpiredAlert] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -172,7 +174,7 @@ export default function LoginView({ store, onClose }) {
                 </div>
               </div>
 
-              {/* Remember Session */}
+              {/* Remember Session & Forgot Password */}
               <div className="flex items-center justify-between pt-1">
                 <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-600 select-none font-medium">
                   <input
@@ -181,8 +183,16 @@ export default function LoginView({ store, onClose }) {
                     onChange={(e) => setRememberMe(e.target.checked)}
                     className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/30 w-3.5 h-3.5 cursor-pointer"
                   />
-                  <span>تذكر بيانات الدخول على هذا الجهاز</span>
+                  <span>تذكر بيانات الدخول</span>
                 </label>
+
+                <button
+                  type="button"
+                  onClick={() => setIsForgotPasswordOpen(true)}
+                  className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:underline cursor-pointer"
+                >
+                  نسيت كلمة المرور؟
+                </button>
               </div>
 
               {/* Submit Button */}
@@ -329,10 +339,16 @@ export default function LoginView({ store, onClose }) {
         )}
 
       </div>
+ 
+       <ForgotPasswordModal 
+         isOpen={isForgotPasswordOpen} 
+         onClose={() => setIsForgotPasswordOpen(false)} 
+         store={store} 
+       />
 
-      <p className="text-[11px] text-slate-400 mt-6 font-medium text-center font-mono">
-        نظام إدارة المتاجر المحاسبي © {new Date().getFullYear()} — جميع الحقوق محفوظة • إصدار v{APP_VERSION}
-      </p>
-    </div>
-  );
-}
+       <p className="text-[11px] text-slate-400 mt-6 font-medium text-center font-mono">
+         نظام إدارة المتاجر المحاسبي © {new Date().getFullYear()} — جميع الحقوق محفوظة • إصدار v{APP_VERSION}
+       </p>
+     </div>
+   );
+ }
