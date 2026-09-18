@@ -13,12 +13,16 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     currentUser, 
     createTenantAccount, 
     updateTenantAccount, 
-    deleteTenantAccount 
+    deleteTenantAccount,
+    trialRequests = [],
+    updateTrialRequest,
+    deleteTrialRequest
   } = store;
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedTenantId, setCopiedTenantId] = useState(null);
+  const [activatingTrialId, setActivatingTrialId] = useState(null);
 
   // New Tenant Form State
   const [companyName, setCompanyName] = useState('');
@@ -30,7 +34,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   const [notes, setNotes] = useState('');
   const [formError, setFormError] = useState('');
   const [createdWelcomeMsg, setCreatedWelcomeMsg] = useState(null);
-  const [activeTab, setActiveTab] = useState('tenants'); // 'tenants' | 'releases'
+  const [activeTab, setActiveTab] = useState('tenants'); // 'tenants' | 'releases' | 'trials'
   const [releasesList, setReleasesList] = useState(OFFICIAL_RELEASES);
   const [isReleaseModalOpen, setIsReleaseModalOpen] = useState(false);
   const [releaseForm, setReleaseForm] = useState({
@@ -89,6 +93,23 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     setPassword(pass);
   };
 
+  const handleActivateTrial = (req) => {
+    setCompanyName(req.shopName || req.name);
+    setPhone(req.phone || '');
+    setDurationMonths('1'); // 1 month free trial
+    setAllowedBranches('1');
+    setNotes(`طلب تجربة مجانية شهر من الموقع: ${req.name} (${req.city || 'المدينة غير محددة'}) - ${req.notes || ''}`);
+    
+    // Auto-generate clean unique username
+    const baseUser = (req.shopName || 'shop').toLowerCase().replace(/[^a-z0-9]/g, '') || `user${Math.floor(1000 + Math.random() * 9000)}`;
+    const randomSuffix = Math.floor(10 + Math.random() * 90);
+    setUsername(`${baseUser.slice(0, 10)}${randomSuffix}`);
+    generatePassword();
+    setFormError('');
+    setActivatingTrialId(req.id);
+    setIsAddModalOpen(true);
+  };
+
   const handleCreateTenant = (e) => {
     e.preventDefault();
     setFormError('');
@@ -104,8 +125,14 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
         notes
       });
 
+      // Mark trial request as activated if this was initiated from a trial request
+      if (activatingTrialId && updateTrialRequest) {
+        updateTrialRequest(activatingTrialId, { status: 'activated', tenantUsername: newTenant.username });
+        setActivatingTrialId(null);
+      }
+
       // Prepare welcome WhatsApp message
-      const welcomeText = `مرحباً بكم في نظام نقاط البيع والمحاسبة السحابي! 🥬✨\n\nتم تفعيل اشتراككم بنجاح:\n🏬 المتجر: ${newTenant.companyName}\n👤 اسم المستخدم (ثابت): ${newTenant.username}\n🔑 كلمة المرور المؤقتة: ${newTenant.password}\n📅 تاريخ انتهاء الاشتراك: ${newTenant.expiresAt}\n\n💡 يمكنك تسجيل الدخول والبدء مباشرة وتغيير كلمة المرور الخاصة بك من الإعدادات في أي وقت.`;
+      const welcomeText = `مرحباً بكم في نظام نقاط البيع والمحاسبة المركزي! 🥬✨\n\nتم تفعيل اشتراككم التجريبي المجاني (لمدة شهر كامل) بنجاح:\n🏬 المتجر: ${newTenant.companyName}\n👤 اسم المستخدم: ${newTenant.username}\n🔑 كلمة المرور المبدئية: ${newTenant.password}\n📅 تاريخ انتهاء الشهر المجاني: ${newTenant.expiresAt}\n🌐 رابط الدخول المباشر: https://khodar-pos.pages.dev/?login=true\n\n💡 يمكنك تسجيل الدخول والبدء مباشرة وتهيئة أصنافك وطباعة فواتيرك.`;
       
       setCreatedWelcomeMsg({
         text: welcomeText,
@@ -193,12 +220,26 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
             </button>
             <button
               type="button"
+              onClick={() => setActiveTab('trials')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'trials' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>طلبات التجربة (شهر مجاني)</span>
+              {trialRequests.length > 0 && (
+                <span className="px-1.5 py-0.2 bg-amber-400 text-slate-950 font-black rounded-full text-[10px]">
+                  {trialRequests.length}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('releases')}
               className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
                 activeTab === 'releases' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
               }`}
             >
-              إدارة الإصدارات والتحديثات ({releasesList.length})
+              إدارة الإصدارات ({releasesList.length})
             </button>
           </div>
 
@@ -642,6 +683,183 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 3: Free 1-Month Trial Requests (Leads) */}
+          {activeTab === 'trials' && (
+            <div className="space-y-6">
+              {/* Summary Metrics */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <span className="text-xs text-slate-500 font-bold block">إجمالي طلبات التجربة</span>
+                    <span className="text-2xl font-black text-slate-900 mt-1 block">{trialRequests.length}</span>
+                  </div>
+                  <div className="w-11 h-11 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+                    <Sparkles size={22} />
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <span className="text-xs text-slate-500 font-bold block">طلبات بانتظار التفعيل</span>
+                    <span className="text-2xl font-black text-amber-600 mt-1 block">
+                      {trialRequests.filter(r => r.status !== 'activated').length}
+                    </span>
+                  </div>
+                  <div className="w-11 h-11 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
+                    <Clock size={22} />
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <span className="text-xs text-slate-500 font-bold block">تم تفعيل اشتراكهم المجاني</span>
+                    <span className="text-2xl font-black text-emerald-600 mt-1 block">
+                      {trialRequests.filter(r => r.status === 'activated').length}
+                    </span>
+                  </div>
+                  <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                    <ShieldCheck size={22} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Trials Table Card */}
+              <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs">
+                <div className="p-4 bg-slate-50 border-b border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={18} className="text-amber-500" />
+                    <h3 className="font-bold text-slate-800 text-sm">طلبات تجربة المنظومة (شهر مجاني) الواردة من الموقع</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">
+                      {trialRequests.length} طلب
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium">
+                    يمكنك بضغطة زر واحدة إنشاء حساب المتجر وتوليد اسم المستخدم وكلمة المرور ومراسلتهم عبر واتساب
+                  </p>
+                </div>
+
+                {trialRequests.length === 0 ? (
+                  <div className="py-16 px-4 text-center">
+                    <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
+                      <Sparkles size={28} />
+                    </div>
+                    <h4 className="font-bold text-slate-800 text-sm">لا توجد طلبات تجربة واردة حالياً</h4>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+                      عند قيام أي تاجر أو عميل بالضغط على زر "طلب تجربة مجانية لمدة شهر" في الموقع وتعبئة بياناته، ستظهر بيانات طلبه هنا فوراً لمراجعتها وتفعيل حسابه.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold">
+                        <tr>
+                          <th className="py-3 px-4">تاريخ الطلب</th>
+                          <th className="py-3 px-4">التاجر / اسم المتجر</th>
+                          <th className="py-3 px-4">رقم الهاتف / واتساب</th>
+                          <th className="py-3 px-4">المدينة</th>
+                          <th className="py-3 px-4">ملاحظات العميل</th>
+                          <th className="py-3 px-4 text-center">الحالة</th>
+                          <th className="py-3 px-4 text-center">الإجراءات</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {trialRequests.map((req) => {
+                          const isActivated = req.status === 'activated';
+                          const cleanPhone = (req.phone || '').replace(/[^0-9]/g, '');
+                          const waUrl = cleanPhone ? `https://wa.me/${cleanPhone.startsWith('0') ? '20' + cleanPhone.slice(1) : cleanPhone}` : null;
+                          const formattedDate = req.createdAt 
+                            ? new Date(req.createdAt).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            : 'حديثاً';
+
+                          return (
+                            <tr key={req.id} className={`hover:bg-slate-50/80 transition-colors ${isActivated ? 'bg-slate-50/40' : 'bg-amber-50/20'}`}>
+                              <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
+                                {formattedDate}
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="font-bold text-slate-900 text-sm">{req.name}</div>
+                                <div className="text-slate-500 text-[11px] font-medium flex items-center gap-1 mt-0.5">
+                                  <Building2 size={11} className="text-slate-400" />
+                                  <span>{req.shopName || 'متجر جديد'}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 font-mono font-bold text-slate-800">
+                                <div className="flex items-center gap-2">
+                                  <span>{req.phone || '—'}</span>
+                                  {waUrl && (
+                                    <a
+                                      href={waUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-sans text-[11px] font-bold transition-colors"
+                                      title="فتح محادثة واتساب مع التاجر"
+                                    >
+                                      <MessageCircle size={12} />
+                                      <span>واتساب</span>
+                                    </a>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 font-medium">
+                                {req.city || 'غير محدد'}
+                              </td>
+                              <td className="py-3 px-4 text-slate-500 max-w-[200px] truncate" title={req.notes}>
+                                {req.notes || '—'}
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                {isActivated ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+                                    <ShieldCheck size={12} />
+                                    <span>تم التفعيل (شهر مجاني)</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 animate-pulse">
+                                    <Clock size={12} />
+                                    <span>بانتظار التفعيل</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  {!isActivated ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleActivateTrial(req)}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                                    >
+                                      <Plus size={13} />
+                                      <span>تفعيل شهر مجاني</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200">
+                                      الحساب: {req.tenantUsername || 'نشط'}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (confirm(`هل أنت متأكد من حذف طلب "${req.name}"؟`)) {
+                                        deleteTrialRequest(req.id);
+                                      }
+                                    }}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                    title="حذف الطلب"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}

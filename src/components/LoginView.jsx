@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Lock, User, KeyRound, ShieldCheck, AlertTriangle, Eye, EyeOff, 
   MessageCircle, HelpCircle, Store, Monitor, Smartphone, Globe, 
-  Download, ArrowLeft, CheckCircle2, Sparkles, Laptop
+  Download, ArrowLeft, CheckCircle2, Sparkles, Laptop, X, ArrowRight
 } from 'lucide-react';
 import { Button, Input, Badge } from './ui';
 import { APP_VERSION } from '../config/appVersion';
@@ -61,10 +61,11 @@ export default function LoginView({ store, onClose }) {
             <button
               type="button"
               onClick={onClose}
-              className="absolute left-4 top-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-              title="إغلاق"
+              className="absolute left-4 top-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 transition-all cursor-pointer border border-white/10 shadow-sm"
+              title="العودة إلى الموقع التسويقي"
             >
-              <X size={18} />
+              <span>العودة للموقع</span>
+              <ArrowLeft size={13} />
             </button>
           )}
           <div className="w-12 h-12 mx-auto mb-3 bg-white/10 border border-white/15 rounded-xl flex items-center justify-center text-primary-400 shadow-xs">

@@ -52,7 +52,8 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'khodar_pos_current_user_v1',
   BRANCHES: 'khodar_pos_branches_v1',
   ACTIVE_BRANCH_ID: 'khodar_pos_active_branch_id_v1',
-  STOCK_TRANSFERS: 'khodar_pos_stock_transfers_v1'
+  STOCK_TRANSFERS: 'khodar_pos_stock_transfers_v1',
+  TRIAL_REQUESTS: 'khodar_trial_leads_v1'
 };
 
 const getStoredItem = (key, fallback) => {
@@ -98,6 +99,7 @@ export function useAppStore() {
   const [branches, setBranches] = useState(() => getStoredItem(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES));
   const [activeBranchId, setActiveBranchId] = useState(() => getStoredItem(STORAGE_KEYS.ACTIVE_BRANCH_ID, 'branch-main'));
   const [stockTransfers, setStockTransfers] = useState(() => getStoredItem(STORAGE_KEYS.STOCK_TRANSFERS, INITIAL_STOCK_TRANSFERS));
+  const [trialRequests, setTrialRequests] = useState(() => getStoredItem(STORAGE_KEYS.TRIAL_REQUESTS, []));
 
   // Sync to localStorage
   useEffect(() => { setStoredItem(STORAGE_KEYS.PRODUCTS, products); }, [products]);
@@ -124,6 +126,7 @@ export function useAppStore() {
   useEffect(() => { setStoredItem(STORAGE_KEYS.BRANCHES, branches); }, [branches]);
   useEffect(() => { setStoredItem(STORAGE_KEYS.ACTIVE_BRANCH_ID, activeBranchId); }, [activeBranchId]);
   useEffect(() => { setStoredItem(STORAGE_KEYS.STOCK_TRANSFERS, stockTransfers); }, [stockTransfers]);
+  useEffect(() => { setStoredItem(STORAGE_KEYS.TRIAL_REQUESTS, trialRequests); }, [trialRequests]);
   
   // Background Auto-sync to Cloudflare Edge
   useEffect(() => {
@@ -1931,7 +1934,36 @@ export function useAppStore() {
     return transferRecord;
   };
 
+  // 1-Month Trial Requests Management (طلبات التجربة المجانية)
+  const addTrialRequest = (req) => {
+    const newReq = {
+      id: `trial-${Date.now()}`,
+      name: (req.name || '').trim(),
+      shopName: (req.shopName || '').trim(),
+      phone: (req.phone || '').trim(),
+      city: (req.city || '').trim(),
+      notes: (req.notes || '').trim(),
+      status: 'pending', // 'pending' | 'activated' | 'rejected'
+      createdAt: getCurrentDateFormatted(),
+      timestamp: Date.now()
+    };
+    setTrialRequests(prev => [newReq, ...prev]);
+    return newReq;
+  };
+
+  const updateTrialRequest = (id, patch) => {
+    setTrialRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  };
+
+  const deleteTrialRequest = (id) => {
+    setTrialRequests(prev => prev.filter(r => r.id !== id));
+  };
+
   return {
+    trialRequests,
+    addTrialRequest,
+    updateTrialRequest,
+    deleteTrialRequest,
     tenants,
     currentUser,
     branches,

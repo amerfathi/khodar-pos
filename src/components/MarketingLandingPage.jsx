@@ -3,12 +3,13 @@ import {
   Store, ShieldCheck, CheckCircle2, ArrowLeft, Download, 
   ShoppingCart, Truck, Users, Scale, FileText, Smartphone, Monitor,
   Globe, MessageCircle, Phone, Sparkles, ChevronRight, X, Clock,
-  DollarSign, Check, Award, BarChart3, Lock, HelpCircle
+  DollarSign, Check, Award, BarChart3, Lock, HelpCircle, ArrowDownToLine,
+  Layers, Package, AlertOctagon, Receipt, Sparkle, ExternalLink
 } from 'lucide-react';
-import { Button, Input, Badge } from './ui';
+import { Button, Badge } from './ui';
 import { APP_VERSION } from '../config/appVersion';
 
-export default function MarketingLandingPage({ onOpenLogin }) {
+export default function MarketingLandingPage({ onOpenLogin, store }) {
   const [isTrialModalOpen, setIsTrialModalOpen] = useState(false);
   const [trialForm, setTrialForm] = useState({
     name: '',
@@ -18,13 +19,29 @@ export default function MarketingLandingPage({ onOpenLogin }) {
     notes: ''
   });
   const [trialSubmitted, setTrialSubmitted] = useState(false);
-  const [activePreviewTab, setActivePreviewTab] = useState('sale');
 
   const handleTrialSubmit = (e) => {
     e.preventDefault();
     if (!trialForm.name || !trialForm.phone || !trialForm.shopName) return;
 
-    // Build WhatsApp message URL
+    // 1. Record lead into Central Platform Store
+    if (store && store.addTrialRequest) {
+      try {
+        store.addTrialRequest(trialForm);
+      } catch (err) {
+        console.warn('Could not add to store:', err);
+      }
+    }
+
+    // 2. Also save to localStorage fallback queue
+    try {
+      const leads = JSON.parse(localStorage.getItem('khodar_trial_leads_v1') || localStorage.getItem('khodar_trial_leads') || '[]');
+      leads.push({ ...trialForm, id: `trial-${Date.now()}`, status: 'pending', date: new Date().toISOString() });
+      localStorage.setItem('khodar_trial_leads_v1', JSON.stringify(leads));
+      localStorage.setItem('khodar_trial_leads', JSON.stringify(leads));
+    } catch (_) {}
+
+    // 3. Build WhatsApp notification
     const message = encodeURIComponent(
       `مرحباً، أود طلب تجربة مجانية لمدة شهر لنظام المحاسبة وسوق الخضار:\n` +
       `- الاسم: ${trialForm.name}\n` +
@@ -34,16 +51,9 @@ export default function MarketingLandingPage({ onOpenLogin }) {
       `- ملاحظات: ${trialForm.notes || 'لا يوجد'}`
     );
 
-    // Save lead in localStorage
-    try {
-      const leads = JSON.parse(localStorage.getItem('khodar_trial_leads') || '[]');
-      leads.push({ ...trialForm, date: new Date().toISOString() });
-      localStorage.setItem('khodar_trial_leads', JSON.stringify(leads));
-    } catch (_) {}
-
     setTrialSubmitted(true);
 
-    // Open WhatsApp in new tab if requested
+    // Open WhatsApp in new tab
     setTimeout(() => {
       window.open(`https://wa.me/201099684120?text=${message}`, '_blank');
     }, 600);
@@ -69,11 +79,10 @@ export default function MarketingLandingPage({ onOpenLogin }) {
 
           {/* Desktop Navigation Links */}
           <nav className="hidden md:flex items-center gap-6 text-xs font-semibold text-slate-600">
-            <a href="#features" className="hover:text-emerald-600 transition-colors">المميزات</a>
+            <a href="#about" className="hover:text-emerald-600 transition-colors">عن المنظومة</a>
             <a href="#steps" className="hover:text-emerald-600 transition-colors">تجربة مجانية شهر</a>
-            <a href="#showcase" className="hover:text-emerald-600 transition-colors">الشاشات والتقارير</a>
-            <a href="#pricing" className="hover:text-emerald-600 transition-colors">الأسعار</a>
-            <a href="#platforms" className="hover:text-emerald-600 transition-colors">المنصات</a>
+            <a href="#features" className="hover:text-emerald-600 transition-colors">المميزات المحاسبية</a>
+            <a href="#platforms" className="hover:text-emerald-600 transition-colors">التحميل والتشغيل</a>
           </nav>
 
           {/* Right Action Buttons */}
@@ -81,7 +90,7 @@ export default function MarketingLandingPage({ onOpenLogin }) {
             <button
               type="button"
               onClick={onOpenLogin}
-              className="py-2 px-3.5 rounded-xl border border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-bold transition-all cursor-pointer"
+              className="py-2 px-4 rounded-xl border border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-bold transition-all cursor-pointer shadow-2xs"
             >
               تسجيل الدخول
             </button>
@@ -91,7 +100,7 @@ export default function MarketingLandingPage({ onOpenLogin }) {
               className="py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-sm shadow-emerald-600/20 cursor-pointer flex items-center gap-1.5"
             >
               <Sparkles size={14} className="text-emerald-200" />
-              <span>اطلب تجربة مجانية</span>
+              <span>اطلب تجربة مجانية شهر</span>
             </button>
           </div>
 
@@ -106,7 +115,7 @@ export default function MarketingLandingPage({ onOpenLogin }) {
             {/* Top Pill */}
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-semibold mb-6 shadow-2xs">
               <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-              <span>الإصدار التجاري {APP_VERSION} متوفر الآن مع المزامنة السحابية</span>
+              <span>الإصدار المؤسسي {APP_VERSION} متوفر الآن مع المزامنة السحابية</span>
             </div>
 
             {/* Main Headline */}
@@ -135,7 +144,7 @@ export default function MarketingLandingPage({ onOpenLogin }) {
                 className="w-full sm:w-auto py-3 px-6 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-sm font-bold transition-all shadow-2xs cursor-pointer flex items-center justify-center gap-2"
               >
                 <Lock size={15} className="text-slate-500" />
-                <span>تسجيل دخول المشتركين</span>
+                <span>تسجيل الدخول للنظام</span>
               </button>
             </div>
 
@@ -147,7 +156,7 @@ export default function MarketingLandingPage({ onOpenLogin }) {
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 size={16} className="text-emerald-600" />
-                <span>تدريب وتهيئة مخصصة لمتجرك</span>
+                <span>تهيئة مخصصة لأصناف وأسعار متجرك</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 size={16} className="text-emerald-600" />
@@ -160,8 +169,211 @@ export default function MarketingLandingPage({ onOpenLogin }) {
         </div>
       </section>
 
-      {/* 3. 4-Step Process: "جرّب النظام لمدة شهر" */}
-      <section id="steps" className="py-16 sm:py-20 bg-white border-b border-slate-200/80">
+      {/* 3. Product Intro & Spotlight Cards (كروت تعريفية عن المنظومة) */}
+      <section id="about" className="py-16 sm:py-20 bg-white border-b border-slate-200/80">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          
+          <div className="text-center max-w-2xl mx-auto mb-14">
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 mb-2 block">
+              نظرة عامة على المنظومة
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+              كروت تعريفية عن إمكانيات البرنامج
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-2">
+              برنامج متكامل صُمم خصيصاً لتلبية احتياجات تجارة الخضار والفواكه بدقة فائقة وسرعة تشغيلية.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            
+            {/* Card 1 */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200/90 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+                    <Scale size={24} />
+                  </div>
+                  <Badge variant="success" size="sm">معتمد للموازين</Badge>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mb-2">محطة الكاشير والموازين الذكية</h3>
+                <p className="text-xs text-slate-600 leading-relaxed mb-4">
+                  منظومة كاشير سريعة مصممة لضغط طوابير الزبائن؛ تتصل مباشرة بالموازين الإلكترونية لقراءة الوزن تلقائياً، مع دعم باركود الوزن وحساب الفاتورة بالجرام في ثوانٍ معدودة.
+                </p>
+                <ul className="space-y-2 text-xs text-slate-500 border-t border-slate-100 pt-3">
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-emerald-600" />
+                    <span>تصفير الوزن التلقائي والوزن الفارغ (Tare)</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-emerald-600" />
+                    <span>طباعة حرارية فورية للفواتير مع QR معتمد</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-emerald-600" />
+                    <span>دعم البيع النقدي والشبكة والآجل</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Card 2 */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200/90 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                    <Truck size={24} />
+                  </div>
+                  <Badge variant="info" size="sm">إدارة التوريد</Badge>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mb-2">التوريد وحسابات الموردين والأمانات</h3>
+                <p className="text-xs text-slate-600 leading-relaxed mb-4">
+                  تسجيل حركات التوريد اليومية بالكيلو والقفص والشوال، مع متابعة دقيقة لحسابات الموردين والدفعات المسددة والمتبقية، وكشف حساب تفصيلي لكل مورد وسائق توريد.
+                </p>
+                <ul className="space-y-2 text-xs text-slate-500 border-t border-slate-100 pt-3">
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-blue-600" />
+                    <span>حساب التكلفة الفورية وهوامش الربح المتوقعة</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-blue-600" />
+                    <span>سندات صرف دفعات نقدية وبنكية للموردين</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-blue-600" />
+                    <span>توثيق أمانات ومرتجع المشتريات المباشر</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Card 3 */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200/90 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100">
+                    <Users size={24} />
+                  </div>
+                  <Badge variant="warning" size="sm">الديون والتحصيل</Badge>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mb-2">العملاء الآجلين وسجل الديون</h3>
+                <p className="text-xs text-slate-600 leading-relaxed mb-4">
+                  ملف متكامل لكل عميل دائم أو مطعم أو جهة تشتري بالآجل، مع إمكانية تحديد سقف الائتمان وتنبيهات فورية بمواعيد السداد وتوثيق سندات القبض بدقة محاسبية.
+                </p>
+                <ul className="space-y-2 text-xs text-slate-500 border-t border-slate-100 pt-3">
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-amber-600" />
+                    <span>كشوفات حساب تفصيلية جاهزة للطباعة والإرسال</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-amber-600" />
+                    <span>تسجيل دفعات جزئية أو كاملة وتحديث الرصيد فوراً</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-amber-600" />
+                    <span>منع البيع الآجل تلقائياً عند تجاوز السقف المحدد</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Card 4 */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200/90 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center border border-purple-100">
+                    <DollarSign size={24} />
+                  </div>
+                  <Badge variant="purple" size="sm">الرقابة المالية</Badge>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mb-2">مطابقة الدرج وجرد الخزينة</h3>
+                <p className="text-xs text-slate-600 leading-relaxed mb-4">
+                  رقابة صارمة على سيولة المحل ومبيعات الكاشير؛ نظام مطابقة الدرج يتيح إدخال النقدية الفعلية ومقارنتها بمبيعات النظام لرصد أي عجز أو زيادة بدقة متناهية.
+                </p>
+                <ul className="space-y-2 text-xs text-slate-500 border-t border-slate-100 pt-3">
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-purple-600" />
+                    <span>إغلاق الوردية وجرد النقدية وتوثيق عهدة الصندوق</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-purple-600" />
+                    <span>رصد المصروفات التشغيلية والنثريات وسندات الصرف</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-purple-600" />
+                    <span>حسابات الشركاء وتوزيع الأرباح والمسحوبات الشخصية</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Card 5 */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200/90 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100">
+                    <AlertOctagon size={24} />
+                  </div>
+                  <Badge variant="danger" size="sm">حصر الهالك</Badge>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mb-2">إدارة التوالف وحصر الهالك</h3>
+                <p className="text-xs text-slate-600 leading-relaxed mb-4">
+                  تتميز تجارة الخضار والفواكه بحساسية الهالك اليومي؛ يوفر النظام شاشة خاصة لتسجيل التوالف بالوزن والتكلفة واحتساب أثرها المالي المباشر على أرباح المحل.
+                </p>
+                <ul className="space-y-2 text-xs text-slate-500 border-t border-slate-100 pt-3">
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-rose-600" />
+                    <span>توثيق أسباب الهالك (فرز، تلف طبيعي، كسر)</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-rose-600" />
+                    <span>خصم الكميات التالفة من المخزون تلقائياً لمنع العجز</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-rose-600" />
+                    <span>تقارير شهرية بنسبة الهالك لتعديل سياسات الشراء</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Card 6 */}
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-50 to-white border border-slate-200/90 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center border border-cyan-100">
+                    <FileText size={24} />
+                  </div>
+                  <Badge variant="neutral" size="sm">تقارير رسمية</Badge>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mb-2">مركز تقارير A4 والمالية المعتمدة</h3>
+                <p className="text-xs text-slate-600 leading-relaxed mb-4">
+                  إصدار تقارير مالية ومحاسبية رسمية بصيغة A4 معتمدة للمحاسب القانوني أو الشركاء؛ تشمل قائمة الأرباح والخسائر، ميزان المراجعة، وحركة دوران السلع.
+                </p>
+                <ul className="space-y-2 text-xs text-slate-500 border-t border-slate-100 pt-3">
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-cyan-600" />
+                    <span>تقرير أرباح وخسائر فعلي وصافي الدخل المحقق</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-cyan-600" />
+                    <span>ميزان مراجعة وحركة المبيعات والمشتريات اليومية</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Check size={14} className="text-cyan-600" />
+                    <span>تصدير مباشر بصيغة PDF وطباعة احترافية</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+      {/* 4. 4-Step Process: "جرّب النظام لمدة شهر" */}
+      <section id="steps" className="py-16 sm:py-20 bg-slate-50/60 border-b border-slate-200/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           
           <div className="text-center max-w-2xl mx-auto mb-14">
@@ -172,13 +384,13 @@ export default function MarketingLandingPage({ onOpenLogin }) {
               كيف تبدأ تجربة النظام مجاناً لمدة شهر؟
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-2">
-              لا نطلب أي بطاقة ائتمانية أو التزام مالي. نجهز نظامك بالكامل ونبدأ معك خطوة بخطوة.
+              لا نطلب أي التزام مالي مسبق. نجهز نسختك المخصصة ونبدأ معك خطوة بخطوة.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             
-            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 relative">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs relative">
               <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white font-black text-sm flex items-center justify-center mb-4">
                 1
               </div>
@@ -188,17 +400,17 @@ export default function MarketingLandingPage({ onOpenLogin }) {
               </p>
             </div>
 
-            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 relative">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs relative">
               <div className="w-8 h-8 rounded-lg bg-slate-900 text-white font-black text-sm flex items-center justify-center mb-4">
                 2
               </div>
               <h3 className="text-sm font-bold text-slate-900 mb-2">التواصل والتهيئة</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                يتواصل معك مهندس الدعم الفني خلال ساعتين لتهيئة قاعدة البيانات وإدخال قائمة أصناف وأسعار متجرك.
+                يتواصل معك مسؤول الإدارة لتهيئة قاعدة البيانات وإدخال قائمة أصناف وأسعار متجرك وتحديد الصلاحيات.
               </p>
             </div>
 
-            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 relative">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs relative">
               <div className="w-8 h-8 rounded-lg bg-slate-900 text-white font-black text-sm flex items-center justify-center mb-4">
                 3
               </div>
@@ -208,13 +420,13 @@ export default function MarketingLandingPage({ onOpenLogin }) {
               </p>
             </div>
 
-            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 relative">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs relative">
               <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white font-black text-sm flex items-center justify-center mb-4">
                 4
               </div>
               <h3 className="text-sm font-bold text-slate-900 mb-2">الاستخدام والدعم المباشر</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                تبدأ العمل الفعلي طوال 30 يوماً مع دعم فني مستمر، ومتابعة التقارير المالية لتقييم أداء متجرك.
+                تبدأ العمل الفعلي طوال 30 يوماً مع دعم فني مستمر ومتابعة حركة المبيعات والأرباح لتقييم التجربة.
               </p>
             </div>
 
@@ -224,90 +436,90 @@ export default function MarketingLandingPage({ onOpenLogin }) {
             <button
               type="button"
               onClick={() => { setTrialSubmitted(false); setIsTrialModalOpen(true); }}
-              className="py-3 px-8 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+              className="py-3 px-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md shadow-emerald-700/20 cursor-pointer"
             >
-              ابدأ الآن بطلب نسختك التجريبية
+              ابدأ الآن بطلب نسختك التجريبية المجانية
             </button>
           </div>
 
         </div>
       </section>
 
-      {/* 4. Real System Capabilities Grid */}
-      <section id="features" className="py-16 sm:py-20 bg-slate-50/60 border-b border-slate-200/80">
+      {/* 5. Core Capabilities Grid */}
+      <section id="features" className="py-16 sm:py-20 bg-white border-b border-slate-200/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           
           <div className="text-center max-w-2xl mx-auto mb-14">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 mb-2 block">
-              وظائف النظام المحاسبي
+              القوة التشغيلية
             </span>
             <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-              كل ما تحتاجه لإدارة وتأمين أموالك وتجارتك
+              وظائف متقدمة للمتاجر الاحترافية
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-2">
-              مصمم خصيصاً ليناسب طبيعة حركة بيع وتوريد الخضروات والفواكه وسرعة الكاشير.
+              مصمم لتحمل كثافة فواتير البيع السريعة وسهولة إشراف صاحب العمل من أي مكان.
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             
-            <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-4">
+            <div className="p-6 rounded-2xl bg-slate-50/70 border border-slate-200/90">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4">
                 <ShoppingCart size={20} />
               </div>
-              <h3 className="text-sm font-bold text-slate-900 mb-2">كاشير سريع وموازين ذكية</h3>
+              <h3 className="text-sm font-bold text-slate-900 mb-2">سرعة قصوى في الكاشير</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                إتمام الفاتورة في ثوانٍ معدودة، قراءة تلقائية للأوزان من الميزان الإلكتروني، ودعم الدفع النقدي والآجل والبطاقات.
+                إتمام الفاتورة بأقل عدد من النقرات، اختصارات سريعة للوحة المفاتيح (F1-F12)، ودعم شاشات اللمس والموازين.
               </p>
             </div>
 
-            <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4">
+            <div className="p-6 rounded-2xl bg-slate-50/70 border border-slate-200/90">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center mb-4">
                 <Truck size={20} />
               </div>
-              <h3 className="text-sm font-bold text-slate-900 mb-2">التوريد وحسابات الموردين</h3>
+              <h3 className="text-sm font-bold text-slate-900 mb-2">المخزون والتوريد اللحظي</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                تسجيل فواتير المشتريات بالكيلو والقفص، رصد أمانات الموردين، وجدولة الدفعات النقدية مع كشف حساب تفصيلي لكل مورد.
+                تحديث الكميات المتبقية تلقائياً فور إصدار أي فاتورة بيع أو تسجيل توريد، مع تنبيهات بنواقص الأصناف.
               </p>
             </div>
 
-            <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4">
+            <div className="p-6 rounded-2xl bg-slate-50/70 border border-slate-200/90">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center mb-4">
                 <Users size={20} />
               </div>
-              <h3 className="text-sm font-bold text-slate-900 mb-2">العملاء الآجلين وسجل الديون</h3>
+              <h3 className="text-sm font-bold text-slate-900 mb-2">الديون وسندات القبض</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                تحديد سقف الائتمان للعملاء، تسجيل الدفعات المسددة، وتنبيهات فورية بالديون المتأخرة مع طباعة كشوفات المطالبة المالية.
+                تنظيم كامل لمديونيات العملاء والمطاعم مع إيصالات سداد مرقمة تمنع أي التباس بين الكاشير والمشتري.
               </p>
             </div>
 
-            <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center mb-4">
+            <div className="p-6 rounded-2xl bg-slate-50/70 border border-slate-200/90">
+              <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center mb-4">
                 <Scale size={20} />
               </div>
-              <h3 className="text-sm font-bold text-slate-900 mb-2">جرد الخزينة ومطابقة الدرج</h3>
+              <h3 className="text-sm font-bold text-slate-900 mb-2">جرد ومطابقة الدرج</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                مطابقة نقدية الدرج مع مبيعات النظام بنهاية كل وردية، رصد العجز والزيادة بدقة، والتحكم بمصروفات النثريات اليومية.
+                معرفة النقدية المتوقعة في الدرج بنهاية الوردية ومطابقتها مع النقدية الفعلية لتفادي أي فروقات أو عجز مالي.
               </p>
             </div>
 
-            <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mb-4">
+            <div className="p-6 rounded-2xl bg-slate-50/70 border border-slate-200/90">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center mb-4">
                 <FileText size={20} />
               </div>
-              <h3 className="text-sm font-bold text-slate-900 mb-2">تقارير A4 والحرارية الرسمية</h3>
+              <h3 className="text-sm font-bold text-slate-900 mb-2">تقارير رسمية A4 وحرارية</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                ميزان مراجعة معتمد، تقرير أرباح وخسائر فعلي، حركة دوران الأصناف، وتصدير كامل للـ PDF مع مراعاة المعايير المحاسبية.
+                ميزان مراجعة، تقرير الأرباح والخسائر الفعلي، وحسابات الشركاء والمسحوبات مع مراعاة كاملة للمعايير المحاسبية.
               </p>
             </div>
 
-            <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-              <div className="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center mb-4">
+            <div className="p-6 rounded-2xl bg-slate-50/70 border border-slate-200/90">
+              <div className="w-10 h-10 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center mb-4">
                 <ShieldCheck size={20} />
               </div>
-              <h3 className="text-sm font-bold text-slate-900 mb-2">صلاحيات محكمة وتعدد فروع</h3>
+              <h3 className="text-sm font-bold text-slate-900 mb-2">صلاحيات محكمة وتعدد الفروع</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                تحديد دقيق لصلاحيات الكاشير والمحاسب والمدير، منع التعديل بعد الإغلاق، ودعم الفروع المتعددة بمزامنة سحابية آمنة.
+                توزيع الصلاحيات بين الكاشير والمحاسب والمدير، منع إلغاء الفواتير إلا بإذن، ودعم ربط فروع متعددة مركزياً.
               </p>
             </div>
 
@@ -316,309 +528,130 @@ export default function MarketingLandingPage({ onOpenLogin }) {
         </div>
       </section>
 
-      {/* 5. Live Showcase Gallery */}
-      <section id="showcase" className="py-16 sm:py-20 bg-white border-b border-slate-200/80">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          
-          <div className="text-center max-w-2xl mx-auto mb-10">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 mb-2 block">
-              تجربة مستخدم حقيقية
-            </span>
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-              واجهات عمل متطورة وسلسة للمحترفين
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-500 mt-2">
-              شاشات مصممة بأعلى معايير الـ Fintech لضمان أسرع أداء وتفادي أي أخطاء بشرية.
-            </p>
-          </div>
-
-          {/* Interactive Showcase Tabs */}
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
-            {[
-              { id: 'sale', label: 'نقطة البيع والميزان' },
-              { id: 'invoices', label: 'سجل الفواتير' },
-              { id: 'purchases', label: 'المشتريات والموردين' },
-              { id: 'customers', label: 'ديون العملاء' },
-              { id: 'reports', label: 'تقارير A4 الرسمية' }
-            ].map(tab => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActivePreviewTab(tab.id)}
-                className={`py-2 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  activePreviewTab === tab.id
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Device Mockup Window */}
-          <div className="max-w-5xl mx-auto rounded-2xl border border-slate-300 bg-slate-900 p-2 shadow-2xl">
-            <div className="h-6 flex items-center justify-between px-3 text-slate-400 text-[10px]">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500/80 inline-block" />
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block" />
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block" />
-              </div>
-              <span className="font-mono text-slate-400">سوق الخضار | شاشة {activePreviewTab}</span>
-              <span className="text-emerald-400">مباشر &bull; متصل</span>
-            </div>
-
-            <div className="bg-slate-50 rounded-xl p-4 sm:p-6 overflow-hidden min-h-[360px] flex flex-col justify-center items-center text-center">
-              {activePreviewTab === 'sale' && (
-                <div className="w-full max-w-2xl bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-right">
-                  <div className="flex items-center justify-between border-b pb-3 mb-4">
-                    <span className="font-bold text-sm text-slate-800">شاشة الكاشير والميزان الإلكتروني</span>
-                    <span className="text-xs bg-emerald-50 text-emerald-700 font-bold px-2 py-1 rounded">الوزن: 2.450 كجم</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3 text-xs mb-4">
-                    <div className="p-3 bg-slate-50 rounded-lg border">طماطم بلدي: 36.75 ج.م</div>
-                    <div className="p-3 bg-slate-50 rounded-lg border">بطاطس تحمير: 45.00 ج.م</div>
-                    <div className="p-3 bg-slate-50 rounded-lg border">بصل أحمر: 28.00 ج.م</div>
-                  </div>
-                  <div className="flex items-center justify-between pt-3 border-t">
-                    <span className="font-bold text-base text-emerald-600">الإجمالي: 109.75 ج.م</span>
-                    <span className="text-xs bg-slate-900 text-white px-4 py-2 rounded-lg font-bold">طباعة وإغلاق (F9)</span>
-                  </div>
-                </div>
-              )}
-
-              {activePreviewTab === 'invoices' && (
-                <div className="w-full max-w-2xl bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-right">
-                  <div className="flex items-center justify-between border-b pb-3 mb-4">
-                    <span className="font-bold text-sm text-slate-800">سجل الفواتير والمردودات اللحظي</span>
-                    <span className="text-xs text-slate-500">24 فاتورة اليوم</span>
-                  </div>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between p-2.5 bg-slate-50 rounded border">
-                      <span>فاتورة #INV-2401 &bull; نقدي</span>
-                      <span className="font-bold text-emerald-600">145.50 ج.م</span>
-                    </div>
-                    <div className="flex justify-between p-2.5 bg-slate-50 rounded border">
-                      <span>فاتورة #INV-2400 &bull; عميل آجل (مطعم الشرق)</span>
-                      <span className="font-bold text-amber-600">820.00 ج.م</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activePreviewTab === 'purchases' && (
-                <div className="w-full max-w-2xl bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-right">
-                  <div className="flex items-center justify-between border-b pb-3 mb-4">
-                    <span className="font-bold text-sm text-slate-800">حركة التوريد وفواتير الموردين</span>
-                    <span className="text-xs bg-blue-50 text-blue-700 font-bold px-2 py-1 rounded">المخزون محدث</span>
-                  </div>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between p-2.5 bg-slate-50 rounded border">
-                      <span>توريد قفص خيار (40 كجم) &bull; الحاج محمود</span>
-                      <span className="font-bold text-slate-800">600.00 ج.م</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activePreviewTab === 'customers' && (
-                <div className="w-full max-w-2xl bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-right">
-                  <div className="flex items-center justify-between border-b pb-3 mb-4">
-                    <span className="font-bold text-sm text-slate-800">كشوفات حسابات العملاء والديون</span>
-                    <span className="text-xs text-rose-600 font-bold">إجمالي الديون القائمة: 4,120 ج.م</span>
-                  </div>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between p-2.5 bg-slate-50 rounded border">
-                      <span>سوبرماركت الخير &bull; سداد دفعة 1,000 ج.م</span>
-                      <span className="font-bold text-emerald-600">تم التسديد</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {activePreviewTab === 'reports' && (
-                <div className="w-full max-w-2xl bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-right">
-                  <div className="flex items-center justify-between border-b pb-3 mb-4">
-                    <span className="font-bold text-sm text-slate-800">ميزان المراجعة والأرباح والخسائر الرسمية</span>
-                    <span className="text-xs bg-slate-100 font-bold px-2 py-1 rounded">طباعة A4 رسمية</span>
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded border text-center text-xs text-slate-600">
-                    تقرير محاسبي شامل ومعتمد للإيرادات وتكلفة البضاعة المباعة وصافي أرباح الشركاء بعد المصروفات.
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-        </div>
-      </section>
-
-      {/* 6. Pricing Section */}
-      <section id="pricing" className="py-16 sm:py-20 bg-slate-50/60 border-b border-slate-200/80">
+      {/* 6. Supported Platforms & Active Downloads Section */}
+      <section id="platforms" className="py-16 sm:py-20 bg-slate-50/70 border-b border-slate-200/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           
           <div className="text-center max-w-2xl mx-auto mb-14">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 mb-2 block">
-              خطط واضحة ومرنة
+              التحميل والتشغيل المباشر
             </span>
             <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-              استثمار اقتصادي مع عائد حقيقي مباشر
+              احصل على نسختك الآن لكافة الأجهزة
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-2">
-              ابدأ بشهر تجربة مجاني، ثم اختر الباقة الأنسب لحجم أعمالك مع دعم فني مستمر.
+              روابط تحميل مباشرة ومعتمدة لمنصات سطح المكتب والهواتف الذكية مع استمرار التحديث التلقائي.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            
-            {/* Plan 1: Single Store */}
-            <div className="p-7 rounded-3xl bg-white border border-slate-200/90 shadow-sm relative flex flex-col justify-between">
-              <div>
-                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full inline-block mb-3">
-                  الأكثر طلباً لمحلات التجزئة
-                </span>
-                <h3 className="text-xl font-bold text-slate-900 mb-1">باقة المتجر الفردي</h3>
-                <p className="text-xs text-slate-500 mb-6">مناسبة للمحلات ونقاط البيع المنفردة</p>
-
-                <div className="flex items-baseline gap-1 mb-6">
-                  <span className="text-3xl font-black text-slate-900">اشتراك رمزي</span>
-                  <span className="text-xs text-slate-500">/ بعد انتهاء شهر التجربة</span>
-                </div>
-
-                <ul className="space-y-3 text-xs text-slate-700 mb-8">
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-600 shrink-0" />
-                    <span>ترخيص برنامج سطح المكتب للويندوز</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-600 shrink-0" />
-                    <span>تطبيق أندرويد للمالك لمتابعة المبيعات من الهاتف</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-600 shrink-0" />
-                    <span>مزامنة سحابية للبيانات ونسخ احتياطي يومي</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-600 shrink-0" />
-                    <span>مركز التقارير الرسمية A4 والفواتير الحرارية</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-600 shrink-0" />
-                    <span>دعم فني مباشر وتحديثات مستمرة</span>
-                  </li>
-                </ul>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => { setTrialSubmitted(false); setIsTrialModalOpen(true); }}
-                className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all cursor-pointer"
-              >
-                طلب تجربة الباقة لمدة شهر
-              </button>
-            </div>
-
-            {/* Plan 2: Multi-branch */}
-            <div className="p-7 rounded-3xl bg-slate-900 text-white border border-slate-800 shadow-xl relative flex flex-col justify-between">
-              <div>
-                <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full inline-block mb-3">
-                  للسلاسل والأنشطة المتعددة
-                </span>
-                <h3 className="text-xl font-bold text-white mb-1">باقة المؤسسات والفروع</h3>
-                <p className="text-xs text-slate-400 mb-6">إدارة مركزية لعدة منافذ بيع ومستودعات</p>
-
-                <div className="flex items-baseline gap-1 mb-6">
-                  <span className="text-3xl font-black text-white">تخصيص كامل</span>
-                  <span className="text-xs text-slate-400">/ حسب عدد الفروع</span>
-                </div>
-
-                <ul className="space-y-3 text-xs text-slate-300 mb-8">
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-400 shrink-0" />
-                    <span>فروع ومحطات كاشير غير محدودة</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-400 shrink-0" />
-                    <span>ربط مركزي بين المخازن ومنافذ البيع</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-400 shrink-0" />
-                    <span>حسابات الشركاء والمسحوبات وتوزيع الأرباح</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-400 shrink-0" />
-                    <span>خادم سحابي مخصص مع أعلى معايير الحماية</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check size={16} className="text-emerald-400 shrink-0" />
-                    <span>مسؤول دعم فني مخصص وتدريب ميداني</span>
-                  </li>
-                </ul>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => { setTrialSubmitted(false); setIsTrialModalOpen(true); }}
-                className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-md shadow-emerald-900/50 cursor-pointer"
-              >
-                طلب تجربة المؤسسات
-              </button>
-            </div>
-
-          </div>
-
-        </div>
-      </section>
-
-      {/* 7. Supported Platforms */}
-      <section id="platforms" className="py-16 bg-white border-b border-slate-200/80">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          
-          <div className="text-center max-w-2xl mx-auto mb-12">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 mb-2 block">
-              المرونة الكاملة
-            </span>
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-              يعمل على كافة أجهزتك بكل موثوقية
-            </h2>
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200/80 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center mx-auto mb-4">
-                <Monitor size={24} />
+            
+            {/* Platform 1: Windows Desktop */}
+            <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm flex flex-col justify-between text-center relative">
+              <div>
+                <div className="w-14 h-14 rounded-2xl bg-slate-900 text-white flex items-center justify-center mx-auto mb-4 shadow-sm">
+                  <Monitor size={28} />
+                </div>
+                <div className="flex items-center justify-center gap-2 mb-1">
+                  <h3 className="text-base font-bold text-slate-900">برنامج سطح المكتب (Windows)</h3>
+                </div>
+                <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md inline-block mb-3">
+                  الإصدار v{APP_VERSION} معتمد
+                </span>
+                <p className="text-xs text-slate-600 leading-relaxed mb-6">
+                  برنامج متكامل وسريع ومستقر مخصص لمحطات الكاشير؛ يدعم الموازين الإلكترونية وطابعات الفواتير والعمل بدون انترنت.
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-slate-900 mb-2">أجهزة سطح المكتب (Windows)</h3>
-              <p className="text-xs text-slate-600">
-                برنامج خفيف وسريع متوافق مع كافة طابعات الفواتير والموازين وأجهزة الكاشير العاملة بنظام ويندوز.
-              </p>
+
+              <div>
+                <a
+                  href="https://github.com/amerfathi/khodar-pos/releases/download/v2.4.0/KhodarPOS-Setup.exe"
+                  target="_blank"
+                  rel="noreferrer"
+                  download
+                  className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ArrowDownToLine size={16} />
+                  <span>تحميل مثبت الويندوز (Setup.exe)</span>
+                </a>
+                <span className="text-[10px] text-slate-400 block mt-2">
+                  حجم الملف: 120 ميجابايت &bull; لنظام ويندوز 10/11
+                </span>
+              </div>
             </div>
 
-            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200/80 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center mx-auto mb-4">
-                <Smartphone size={24} />
+            {/* Platform 2: Android Mobile */}
+            <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm flex flex-col justify-between text-center relative">
+              <div>
+                <div className="w-14 h-14 rounded-2xl bg-emerald-600 text-white flex items-center justify-center mx-auto mb-4 shadow-sm">
+                  <Smartphone size={28} />
+                </div>
+                <div className="flex items-center justify-center gap-2 mb-1">
+                  <h3 className="text-base font-bold text-slate-900">تطبيق الهاتف (Android)</h3>
+                </div>
+                <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md inline-block mb-3">
+                  تطبيق المالك v{APP_VERSION}
+                </span>
+                <p className="text-xs text-slate-600 leading-relaxed mb-6">
+                  تطبيق هاتف خفيف وسلس لمتابعة المبيعات الحية، الاطلاع على صافي الأرباح اليومية، ومراقبة نشاط الكاشير لحظة بلحظة.
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-slate-900 mb-2">هواتف وأجهزة أندرويد (Android)</h3>
-              <p className="text-xs text-slate-600">
-                تطبيق هاتف مخصص يمكنك من متابعة نشاط المحل، الاطلاع على الأرباح، وفحص مبيعات الكاشير لحظة بلحظة.
-              </p>
+
+              <div>
+                <a
+                  href="https://khodar-pos.pages.dev/downloads/KhodarPOS.apk"
+                  target="_blank"
+                  rel="noreferrer"
+                  download
+                  className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ArrowDownToLine size={16} />
+                  <span>تحميل ملف التطبيق (Android APK)</span>
+                </a>
+                <span className="text-[10px] text-slate-400 block mt-2">
+                  حجم الملف: 3.4 ميجابايت &bull; تثبيت مباشر لهواتف أندرويد
+                </span>
+              </div>
             </div>
 
-            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200/80 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center mx-auto mb-4">
-                <Globe size={24} />
+            {/* Platform 3: Web Cloud */}
+            <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-sm flex flex-col justify-between text-center relative">
+              <div>
+                <div className="w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center mx-auto mb-4 shadow-sm">
+                  <Globe size={28} />
+                </div>
+                <div className="flex items-center justify-center gap-2 mb-1">
+                  <h3 className="text-base font-bold text-slate-900">بوابة الويب السحابية (Web)</h3>
+                </div>
+                <span className="text-[11px] font-bold text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md inline-block mb-3">
+                  تحديث تلقائي مستمر
+                </span>
+                <p className="text-xs text-slate-600 leading-relaxed mb-6">
+                  إمكانية الدخول وإدارة كافة الحسابات والفواتير والتقارير المالية مباشرة عبر المتصفح دون الحاجة إلى تثبيت برامج.
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-slate-900 mb-2">بوابة الويب السحابية (Web Cloud)</h3>
-              <p className="text-xs text-slate-600">
-                إمكانية تسجيل الدخول وإدارة الحسابات مباشرة من أي متصفح مع تحديث تلقائي مستمر دون الحاجة لأي تثبيت.
-              </p>
+
+              <div>
+                <button
+                  type="button"
+                  onClick={onOpenLogin}
+                  className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ExternalLink size={16} />
+                  <span>فتح بوابة الويب السحابية</span>
+                </button>
+                <span className="text-[10px] text-slate-400 block mt-2">
+                  محدثة دائماً &bull; اتصال فوري وآمن
+                </span>
+              </div>
             </div>
+
           </div>
 
         </div>
       </section>
 
-      {/* 8. Footer */}
+      {/* 7. Footer */}
       <footer className="bg-slate-900 text-white py-12 border-t border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-6 pb-8 border-b border-slate-800">
@@ -647,7 +680,7 @@ export default function MarketingLandingPage({ onOpenLogin }) {
                 onClick={onOpenLogin}
                 className="py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all border border-slate-700"
               >
-                دخول المشتركين
+                تسجيل الدخول للنظام
               </button>
             </div>
           </div>
@@ -658,7 +691,7 @@ export default function MarketingLandingPage({ onOpenLogin }) {
         </div>
       </footer>
 
-      {/* 9. Trial Request Modal */}
+      {/* 8. Trial Request Modal */}
       {isTrialModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div 
@@ -670,7 +703,7 @@ export default function MarketingLandingPage({ onOpenLogin }) {
             <div className="flex items-center justify-between border-b pb-3 mb-4">
               <div>
                 <h3 className="font-bold text-base text-slate-900">طلب تجربة مجانية لمدة شهر</h3>
-                <p className="text-xs text-slate-500 mt-0.5">نسخة كاملة الصلاحيات مع تدريب فني مخصص لنشاطك</p>
+                <p className="text-xs text-slate-500 mt-0.5">يتم تحويل طلبك مباشرة إلى إدارة المنظومة للتفعيل وتجهيز حسابك</p>
               </div>
               <button
                 type="button"
@@ -688,7 +721,7 @@ export default function MarketingLandingPage({ onOpenLogin }) {
                 </div>
                 <h4 className="font-bold text-base text-slate-900">تم استلام طلب التجربة بنجاح!</h4>
                 <p className="text-xs text-slate-600 max-w-sm mx-auto leading-relaxed">
-                  شكراً لاهتمامك. يتم الآن توجيه طلبك إلى فريق الدعم الفني، وسنتواصل معك على رقم هاتفك لتهيئة نسختك وبدء التدريب فوراً.
+                  تم تسجيل بيانات نشاطك في بلاتفورم الإدارة. سنتواصل معك فوراً لتسليم اسم المستخدم وكلمة المرور الخاصة بك وبدء التدريب.
                 </p>
                 <button
                   type="button"
@@ -774,13 +807,13 @@ export default function MarketingLandingPage({ onOpenLogin }) {
                   <button
                     type="button"
                     onClick={() => setIsTrialModalOpen(false)}
-                    className="py-2 px-4 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50"
+                    className="py-2 px-4 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
-                    className="py-2 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm"
+                    className="py-2 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm cursor-pointer"
                   >
                     تأكيد وإرسال طلب التجربة
                   </button>

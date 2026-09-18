@@ -192,7 +192,13 @@ export default function App() {
   const [initialReportType, setInitialReportType] = useState('sales');
 
   // Multi-Platform Release & Update Center State
-  const [isWebLoginModalOpen, setIsWebLoginModalOpen] = useState(false);
+  const [isWebLoginModalOpen, setIsWebLoginModalOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('login') === 'true' || window.location.hash === '#login' || window.location.pathname.includes('/login');
+    }
+    return false;
+  });
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
 
@@ -353,13 +359,30 @@ export default function App() {
     }
 
     // 3. Web Platform: Enterprise SaaS Marketing Landing Page with Login Trigger
+    if (isWebLoginModalOpen) {
+      return (
+        <LoginView 
+          store={store} 
+          onClose={() => {
+            setIsWebLoginModalOpen(false);
+            if (window.history.pushState) {
+              window.history.pushState({}, '', window.location.pathname);
+            }
+          }} 
+        />
+      );
+    }
+
     return (
-      <>
-        <MarketingLandingPage onOpenLogin={() => setIsWebLoginModalOpen(true)} />
-        {isWebLoginModalOpen && (
-          <LoginView store={store} onClose={() => setIsWebLoginModalOpen(false)} />
-        )}
-      </>
+      <MarketingLandingPage 
+        store={store} 
+        onOpenLogin={() => {
+          setIsWebLoginModalOpen(true);
+          if (window.history.pushState) {
+            window.history.pushState({}, '', '?login=true');
+          }
+        }} 
+      />
     );
   }
 
