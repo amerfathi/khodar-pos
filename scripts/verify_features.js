@@ -143,16 +143,24 @@ async function runVerification() {
     });
     console.log('Saved trial leads in storage:', storedTrials);
 
-    // 4. Test Login as Admin and view SuperAdmin Portal
-    console.log('4. Logging in as Admin...');
+    // 4. Test Login as Master Owner (amerfathi123@gmail.com)
+    console.log('4. Logging in as Master Platform Owner (amerfathi123@gmail.com)...');
     await page.goto(`http://localhost:${port}/?login=true`, { waitUntil: 'networkidle0' });
     await new Promise(r => setTimeout(r, 800));
 
-    await page.evaluate(() => {
-      const adminBtn = document.querySelector('#admin-login-btn');
-      if (adminBtn) adminBtn.click();
+    // Verify demo buttons are removed
+    const hasDemoButtons = await page.evaluate(() => {
+      return Boolean(document.querySelector('#admin-login-btn') || document.querySelector('#demo-login-btn'));
     });
-    await new Promise(r => setTimeout(r, 400));
+    console.log('Demo buttons present (should be false):', hasDemoButtons);
+
+    await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'test_clean_white_login.png') });
+
+    // Type Master Owner Credentials into clean empty inputs
+    await page.type('input[placeholder*="اسم المستخدم أو البريد"]', 'amerfathi123@gmail.com');
+    await page.type('input[type="password"]', 'A20101993f');
+    await new Promise(r => setTimeout(r, 300));
+
     await page.evaluate(() => {
       const submitBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('تسجيل الدخول إلى النظام'));
       if (submitBtn) submitBtn.click();
@@ -166,6 +174,41 @@ async function runVerification() {
     });
     await new Promise(r => setTimeout(r, 1500));
 
+    // Verify allowed branches column exists in Subscribers table
+    const hasBranchesColumn = await page.evaluate(() => {
+      const headers = Array.from(document.querySelectorAll('th'));
+      return headers.some(h => h.innerText.includes('الفروع المسموحة'));
+    });
+    console.log('Allowed branches column present in table:', hasBranchesColumn);
+
+    await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'test_superadmin_subscribers_branches.png') });
+
+    // Test clicking branch edit button
+    console.log('6. Testing branch quota upgrade modal...');
+    const clickedBranchEdit = await page.evaluate(() => {
+      const editBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('تعديل') && b.title?.includes('الفروع'));
+      if (editBtn) {
+        editBtn.click();
+        return true;
+      }
+      return false;
+    });
+    console.log('Clicked branch edit button:', clickedBranchEdit);
+    await new Promise(r => setTimeout(r, 800));
+
+    await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'test_branch_upgrade_modal.png') });
+
+    // Select 5 branches and save
+    await page.evaluate(() => {
+      const fiveBranchesBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('5 فروع'));
+      if (fiveBranchesBtn) fiveBranchesBtn.click();
+      const saveBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('حفظ ترخيص الفروع') || b.innerText.includes('حفظ الترقية'));
+      if (saveBtn) saveBtn.click();
+    });
+    await new Promise(r => setTimeout(r, 800));
+
+    // Check Trials tab
+    console.log('7. Checking Trials tab...');
     const clickedTrialsTab = await page.evaluate(() => {
       const tabBtns = Array.from(document.querySelectorAll('button')).filter(b => b.innerText.includes('طلبات التجربة'));
       if (tabBtns[0]) {
@@ -175,23 +218,9 @@ async function runVerification() {
       return false;
     });
     console.log('Switched to trials tab in SuperAdminPortal:', clickedTrialsTab);
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 800));
 
     await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'test_superadmin_trials_tab.png') });
-
-    console.log('6. Clicking Activate 1-Month Free Trial...');
-    const clickedActivate = await page.evaluate(() => {
-      const actBtns = Array.from(document.querySelectorAll('button')).filter(b => b.innerText.includes('تفعيل شهر مجاني'));
-      if (actBtns[0]) {
-        actBtns[0].click();
-        return true;
-      }
-      return false;
-    });
-    console.log('Clicked Activate Free Trial button:', clickedActivate);
-    await new Promise(r => setTimeout(r, 1000));
-
-    await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'test_trial_activation_modal.png') });
 
     console.log('\n--- VERIFICATION SUMMARY ---');
     console.log('Page errors count:', pageErrors.length);

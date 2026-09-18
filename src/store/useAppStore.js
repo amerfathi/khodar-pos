@@ -1559,6 +1559,35 @@ export function useAppStore() {
   const login = (username, password) => {
     const cleanUser = (username || '').trim().toLowerCase();
 
+    // 0. Master System Creator & Platform Owner (صانع ومالك المنصة الرئيسي)
+    if (cleanUser === 'amerfathi123@gmail.com') {
+      if (password === 'A20101993f') {
+        const ownerSession = {
+          id: 'tenant-super-admin',
+          companyName: 'إدارة المنظومة (صانع ومالك المنصة)',
+          username: 'amerfathi123@gmail.com',
+          role: 'super_admin',
+          status: 'active',
+          expiresAt: '2099-12-31',
+          allowedBranches: 999,
+          tenantId: 'tenant-super-admin',
+          permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions }
+        };
+        // Ensure owner is present in tenants list
+        setTenants(prev => {
+          const exists = prev.some(t => t.username.toLowerCase() === 'amerfathi123@gmail.com');
+          if (!exists) {
+            return [ownerSession, ...prev];
+          }
+          return prev.map(t => t.username.toLowerCase() === 'amerfathi123@gmail.com' ? { ...t, password: 'A20101993f', role: 'super_admin' } : t);
+        });
+        setCurrentUser(ownerSession);
+        return { success: true, user: ownerSession };
+      } else {
+        return { success: false, error: 'كلمة المرور غير صحيحة لحساب مالك المنصة' };
+      }
+    }
+
     // 1. Check staff users first
     const staffUser = users.find(u => u.username.toLowerCase() === cleanUser);
     if (staffUser) {
@@ -1827,9 +1856,16 @@ export function useAppStore() {
 
   const addBranch = (branchData) => {
     // Check allowed branches limit for tenant
-    const allowed = currentUser?.allowedBranches || (currentUser?.role === 'super_admin' ? 99 : 3);
+    let allowed = 1;
+    if (currentUser?.role === 'super_admin') {
+      allowed = 999;
+    } else {
+      const parentTenant = tenants.find(t => t.id === currentUser?.tenantId || t.id === currentUser?.id);
+      allowed = Number(parentTenant?.allowedBranches || currentUser?.allowedBranches || 1);
+    }
+
     if (branches.length >= allowed) {
-      throw new Error(`لقد وصلت للحد الأقصى المسموح لخطة اشتراكك (${allowed} فروع). يرجى ترقية باقة الاشتراك لإضافة المزيد من الفروع.`);
+      throw new Error(`لقد وصلت للحد الأقصى المسموح لخطة اشتراك متجرك (${allowed} ${allowed > 1 ? 'فروع' : 'فرع'}). يرجى التواصل مع إدارة المنظومة لترقية الخطة وإضافة فروع أخرى.`);
     }
 
     const newBranch = {

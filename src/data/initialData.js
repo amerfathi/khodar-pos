@@ -91,15 +91,28 @@ export const INITIAL_PURCHASE_RETURNS = [];
 export const INITIAL_TENANTS = [
   {
     id: 'tenant-super-admin',
+    companyName: 'إدارة المنظومة (صانع ومالك المنصة)',
+    username: 'amerfathi123@gmail.com',
+    password: 'A20101993f',
+    role: 'super_admin',
+    status: 'active',
+    expiresAt: '2099-12-31',
+    allowedBranches: 999,
+    phone: '',
+    notes: 'حساب صانع ومالك المنصة الرئيسي المتحكم في المشتركين والفروع والاشتراكات',
+    createdAt: '2026-01-01'
+  },
+  {
+    id: 'tenant-super-admin-legacy',
     companyName: 'إدارة المنصة الرئيسية (المالك)',
     username: 'admin',
     password: 'admin',
     role: 'super_admin',
     status: 'active',
     expiresAt: '2099-12-31',
-    allowedBranches: 99,
+    allowedBranches: 999,
     phone: '',
-    notes: 'حساب مالك ومبرمج المنصة الرئيسي',
+    notes: 'حساب مالك إضافي',
     createdAt: '2026-01-01'
   },
   {

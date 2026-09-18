@@ -51,7 +51,8 @@ export default function BranchesManagementModal({ isOpen, onClose }) {
 
   if (!isOpen) return null;
 
-  const allowedLimit = currentUser?.allowedBranches || (currentUser?.role === 'super_admin' ? 99 : 3);
+  const parentTenant = (store.tenants || []).find(t => t.id === currentUser?.tenantId || t.id === currentUser?.id);
+  const allowedLimit = currentUser?.role === 'super_admin' ? 999 : Number(parentTenant?.allowedBranches || currentUser?.allowedBranches || 1);
   const isLimitReached = branches.length >= allowedLimit && currentUser?.role !== 'super_admin';
 
   // Handle Add Branch

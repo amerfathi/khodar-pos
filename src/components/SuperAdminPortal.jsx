@@ -23,6 +23,8 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedTenantId, setCopiedTenantId] = useState(null);
   const [activatingTrialId, setActivatingTrialId] = useState(null);
+  const [editingBranchTenant, setEditingBranchTenant] = useState(null);
+  const [editBranchesCount, setEditBranchesCount] = useState('1');
 
   // New Tenant Form State
   const [companyName, setCompanyName] = useState('');
@@ -385,6 +387,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                     <th className="p-3.5">اسم المستخدم (الثابت)</th>
                     <th className="p-3.5">كلمة المرور</th>
                     <th className="p-3.5">حالة الاشتراك</th>
+                    <th className="p-3.5 text-center">الفروع المسموحة</th>
                     <th className="p-3.5">تاريخ الانتهاء</th>
                     <th className="p-3.5">الهاتف</th>
                     <th className="p-3.5 text-center">إجراءات المالك السريعة</th>
@@ -432,6 +435,29 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                             <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">
                               ساري ونشط
                             </span>
+                          )}
+                        </td>
+
+                        <td className="p-3.5 text-center">
+                          {isSuper ? (
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-full font-bold text-[10px]">
+                              غير محدود
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingBranchTenant(tenant);
+                                setEditBranchesCount(String(tenant.allowedBranches || 1));
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs group"
+                              title="اضغط لتعديل وترقية عدد الفروع المسموحة لهذا المتجر"
+                            >
+                              <Building2 size={12} className="text-blue-600" />
+                              <span className="font-mono">{tenant.allowedBranches || 1}</span>
+                              <span className="text-[10px]">{Number(tenant.allowedBranches || 1) > 1 ? 'فروع' : 'فرع'}</span>
+                              <span className="text-[9px] bg-white px-1 rounded text-blue-600 border border-blue-200 group-hover:bg-blue-600 group-hover:text-white transition-colors">تعديل</span>
+                            </button>
                           )}
                         </td>
 
@@ -946,31 +972,50 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-3 gap-2.5">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">مدة الاشتراك المدفوع</label>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    الفروع المسموحة *
+                  </label>
                   <select
-                    value={durationMonths}
-                    onChange={(e) => setDurationMonths(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500"
+                    value={allowedBranches}
+                    onChange={(e) => setAllowedBranches(e.target.value)}
+                    className="w-full px-2.5 py-2.5 bg-blue-50/60 border border-blue-200 rounded-xl text-xs font-bold text-blue-900 focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="1">شهر واحد (تجريبي)</option>
-                    <option value="3">3 أشهر (ربع سنوي)</option>
-                    <option value="6">6 أشهر (نصف سنوي)</option>
-                    <option value="12">سنة كاملة (سنوي)</option>
-                    <option value="24">سنتان</option>
-                    <option value="0">اشتراك دائم (مفتوح)</option>
+                    <option value="1">1 فرع (فردي)</option>
+                    <option value="2">2 فرعان</option>
+                    <option value="3">3 فروع</option>
+                    <option value="5">5 فروع</option>
+                    <option value="10">10 فروع</option>
+                    <option value="20">20 فرعاً</option>
+                    <option value="999">غير محدود</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">رقم هاتف العميل (واتساب)</label>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">مدة الاشتراك</label>
+                  <select
+                    value={durationMonths}
+                    onChange={(e) => setDurationMonths(e.target.value)}
+                    className="w-full px-2.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="1">شهر (تجريبي)</option>
+                    <option value="3">3 أشهر</option>
+                    <option value="6">6 أشهر</option>
+                    <option value="12">سنة كاملة</option>
+                    <option value="24">سنتان</option>
+                    <option value="0">دائم</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">هاتف العميل</label>
                   <input
                     type="text"
-                    placeholder="مثال: 0501234567"
+                    placeholder="0501234567"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-2.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500"
                     dir="ltr"
                   />
                 </div>
@@ -1007,6 +1052,96 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
             </form>
 
+          </div>
+        </div>
+      )}
+
+      {/* Edit Branches Limit Modal (تعديل كوتة الفروع للمشترك) */}
+      {editingBranchTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 text-right">
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Building2 size={20} className="text-blue-600" />
+                <h3 className="font-black text-sm text-slate-900">ترقية وتعديل كوتة الفروع المسموحة</h3>
+              </div>
+              <button 
+                onClick={() => setEditingBranchTenant(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-blue-50/70 border border-blue-200/80 rounded-2xl text-xs space-y-1">
+              <div className="font-bold text-blue-950">المتجر: {editingBranchTenant.companyName}</div>
+              <div className="text-slate-500 font-mono text-[11px]" dir="ltr">@{editingBranchTenant.username}</div>
+              <div className="text-blue-700 text-[11px] pt-1 leading-relaxed">
+                هذه الميزة تمكنك كمالك للمنصة من زيادة عدد الفروع المسموحة للعميل عند ترقية اشتراكه أو دفع رسوم إضافية عن كل فرع جديد.
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-2">
+                اختر الباقة المطلوبة للفروع:
+              </label>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {[
+                  { count: '1', label: '1 فرع (أساسي)' },
+                  { count: '2', label: '2 فرعان' },
+                  { count: '3', label: '3 فروع' },
+                  { count: '5', label: '5 فروع' },
+                  { count: '10', label: '10 فروع' },
+                  { count: '999', label: 'غير محدود' }
+                ].map(item => (
+                  <button
+                    key={item.count}
+                    type="button"
+                    onClick={() => setEditBranchesCount(item.count)}
+                    className={`py-2 px-2 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
+                      editBranchesCount === item.count
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                أو اكتب عدداً مخصصاً للفروع يدوياً:
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="999"
+                value={editBranchesCount}
+                onChange={e => setEditBranchesCount(e.target.value)}
+                className="w-full h-10 px-3 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-blue-600 font-mono"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setEditingBranchTenant(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const count = Math.max(1, parseInt(editBranchesCount, 10) || 1);
+                  updateTenantAccount(editingBranchTenant.id, { allowedBranches: count });
+                  setEditingBranchTenant(null);
+                }}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
+              >
+                حفظ الترقية وتحديث الفروع
+              </button>
+            </div>
           </div>
         </div>
       )}
