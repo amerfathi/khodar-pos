@@ -73,6 +73,7 @@ export default function SettingsView({
       const info = await checkLatestRelease();
       setReleaseInfo(info);
       setUpdateCheckStatus('checked');
+      setIsUpdateModalOpen(true);
     } catch (e) {
       setUpdateCheckStatus('error');
     } finally {
@@ -1574,17 +1575,40 @@ export default function SettingsView({
                   </div>
 
                   {/* Status Indicator Banner */}
-                  <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex items-start gap-3">
-                    <CheckCircle2 size={20} className="text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-bold text-xs text-emerald-900 block">
-                        النظام يعمل بأحدث إصدار رسمي مستقر ومطابق للمعايير المحاسبية
-                      </span>
-                      <p className="text-[11px] text-emerald-700 mt-0.5 leading-relaxed">
-                        تتضمن هذه النسخة حل مشكلات استجابة لوحة المفاتيح وحقول الإدخال، وشاشة تسجيل الدخول المخصصة لسطح المكتب، ونظام التحديث التلقائي السلس.
-                      </p>
+                  {releaseInfo?.isUpdateAvailable ? (
+                    <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <Sparkles size={20} className="text-amber-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-xs text-amber-900 block">
+                            يوجد إصدار جديد متاح للترقية الآن: v{releaseInfo.latestVersion}
+                          </span>
+                          <p className="text-[11px] text-amber-700 mt-0.5 leading-relaxed">
+                            يتضمن التحديث ميزة سلايدر ضبط حجم الخطوط لجميع الشاشات ونظام استرداد كلمة المرور المباشر.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsUpdateModalOpen(true)}
+                        className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shrink-0 transition-colors shadow-xs cursor-pointer"
+                      >
+                        تثبيت v{releaseInfo.latestVersion}
+                      </button>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex items-start gap-3">
+                      <CheckCircle2 size={20} className="text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-xs text-emerald-900 block">
+                          النظام يعمل بأحدث إصدار رسمي مستقر ومطابق للمعايير المحاسبية (v{APP_VERSION})
+                        </span>
+                        <p className="text-[11px] text-emerald-700 mt-0.5 leading-relaxed">
+                          تتضمن هذه النسخة سلايدر التحكم بحجم الخطوط، وحل مشكلات استجابة لوحة المفاتيح، وشاشة تسجيل الدخول المخصصة لسطح المكتب، ونظام التحديث التلقائي السلس.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Key Features of current release */}
                   <div className="pt-2">

@@ -159,21 +159,34 @@ export default function DesktopUpdateModal({
 
           {/* Release Notes */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80">
-            <span className="text-xs font-bold text-slate-700 block mb-2">أبرز التحسينات في هذا التحديث:</span>
+            <span className="text-xs font-bold text-slate-700 block mb-2">
+              {releaseInfo.isUpdateAvailable 
+                ? `أبرز التحسينات في الإصدار الجديد v${releaseInfo.latestVersion}:`
+                : `مميزات الإصدار الحالي v${releaseInfo.currentVersion || APP_VERSION}:`
+              }
+            </span>
             <ul className="text-xs text-slate-600 space-y-1.5 list-disc list-inside">
-              <li>حل جذري لمشكلات استجابة لوحة المفاتيح وحقول الإدخال.</li>
-              <li>شاشة تسجيل دخول مستقلة وسريعة لبرنامج سطح المكتب بدون تشتيت.</li>
-              <li>محرك تحديث تلقائي داخلي سلس بدون مساس ببياناتك أو إعداداتك.</li>
-              <li>تحسينات في أداء وسرعة قراءة الموازين الإلكترونية وطباعة الفواتير.</li>
+              {(releaseInfo.releaseNotes && releaseInfo.releaseNotes.length > 0) ? (
+                releaseInfo.releaseNotes.map((note, idx) => (
+                  <li key={idx}>{note}</li>
+                ))
+              ) : (
+                <>
+                  <li>إضافة سلايدر التحكم بحجم الخطوط وشاشات البرنامج في الإعدادات.</li>
+                  <li>نظام استرداد كلمة المرور المباشر لحسابات المتاجر والمشتركين.</li>
+                  <li>شاشة تسجيل دخول مستقلة وسريعة لبرنامج سطح المكتب بدون تشتيت.</li>
+                  <li>تحديث تلقائي فوري وسلس دون المساس ببيانات وفواتير العميل.</li>
+                </>
+              )}
             </ul>
           </div>
 
-          {/* State: Idle */}
-          {status === 'idle' && (
+          {/* State: Idle & Update Available */}
+          {status === 'idle' && releaseInfo.isUpdateAvailable && (
             <div className="pt-2">
               <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-xs text-emerald-900 flex items-center gap-2.5">
                 <ShieldCheck size={18} className="text-emerald-600 shrink-0" />
-                <span>التحديث آمن تماماً، ولا يمس قاعدة البيانات المحلية أو إعدادات فروعك.</span>
+                <span>التحديث آمن تماماً، ولا يمس قاعدة البيانات المحلية أو إعدادات فروعك وفواتيرك.</span>
               </div>
 
               <div className="mt-5 flex items-center justify-end gap-2.5">
@@ -191,6 +204,29 @@ export default function DesktopUpdateModal({
                 >
                   <Download size={15} />
                   <span>تحميل التحديث وتثبيته الآن</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* State: Idle & Already Up-To-Date */}
+          {status === 'idle' && !releaseInfo.isUpdateAvailable && (
+            <div className="pt-2">
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 flex items-center gap-3">
+                <CheckCircle2 size={22} className="text-emerald-600 shrink-0" />
+                <div>
+                  <strong className="block text-emerald-900 font-bold mb-0.5">النظام يعمل بأحدث إصدار رسمي مستقر!</strong>
+                  <span>أنت تستخدم أحدث نسخة معتمدة v{releaseInfo.currentVersion || APP_VERSION}. لا توجد تحديثات جديدة مطلوبة حالياً.</span>
+                </div>
+              </div>
+
+              <div className="mt-5 flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="py-2.5 px-6 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-all shadow-sm cursor-pointer"
+                >
+                  إغلاق
                 </button>
               </div>
             </div>

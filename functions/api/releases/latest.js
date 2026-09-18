@@ -5,30 +5,29 @@
 
 const FALLBACK_RELEASES = {
   web: {
-    version: '2.5.0',
+    version: '2.5.1',
     minimumVersion: '2.2.0',
     updateType: 'recommended',
     releaseNotes: [
-      'نظام استرداد كلمة المرور السحابي عبر البريد ورقم الهاتف وواتساب',
-      'تحديث شامل لمنظومة واجهة وتجربة المستخدم المؤسسية (Quiet Luxury)',
-      'إدارة حصص الفروع والمتاجر المتعددة من لوحة المالك',
-      'فحص تلقائي ومباشر للتحديثات مع السحابة'
+      'سلايدر متطور للتحكم بحجم خطوط وشاشات النظام من الإعدادات',
+      'نظام استرداد كلمة المرور السحابي المباشر عبر البريد ورقم الهاتف',
+      'فحص تلقائي ومباشر للتحديثات مع إشعار فوري'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev',
     fileSizeBytes: 980000,
     publishedAt: '2026-09-19T00:00:00Z'
   },
   windows: {
-    version: '2.5.0',
+    version: '2.5.1',
     minimumVersion: '2.2.0',
     updateType: 'required',
     releaseNotes: [
+      'إضافة سلايدر التحكم بحجم الخطوط وشاشات البرنامج في الإعدادات',
+      'تكبير وتصغير فوري لنصوص شاشات الكاشير والفواتير لراحة النظر',
       'نظام استرداد كلمة المرور المباشر لحسابات المتاجر والمشتركين',
-      'تحديث تلقائي فوري وسلس دون المساس ببيانات وفواتير العميل',
-      'شاشة تسجيل دخول بيضاء نقية مع إزالة بيانات الاختبار لسرية الحسابات',
-      'تحكم فوري بحصة الفروع وربط كامل مع السحابة'
+      'تحديث تلقائي فوري وسلس دون المساس ببيانات وفواتير العميل'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.0/KhodarPOS-Setup.exe',
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.1/KhodarPOS-Setup.exe',
     fileSizeBytes: 128524688,
     publishedAt: '2026-09-19T00:00:00Z'
   },
