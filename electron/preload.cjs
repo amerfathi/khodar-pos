@@ -1,4 +1,4 @@
-﻿const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
@@ -6,5 +6,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
-  isMaximized: () => ipcRenderer.invoke('window-is-maximized')
+  isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+  
+  // In-App Desktop Auto-Update
+  downloadUpdate: (url) => ipcRenderer.invoke('download-update', url),
+  cancelDownloadUpdate: () => ipcRenderer.send('cancel-download-update'),
+  installUpdate: (filePath) => ipcRenderer.invoke('install-update', filePath),
+  onDownloadProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('download-progress', handler);
+    return () => ipcRenderer.removeListener('download-progress', handler);
+  }
 });

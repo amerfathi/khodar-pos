@@ -35,7 +35,7 @@ const Input = forwardRef(function Input({
           id={inputId}
           type={type}
           disabled={disabled}
-          className={`w-full h-9 text-xs bg-white border rounded-xl text-slate-800 placeholder:text-slate-400 transition-all duration-150 focus:outline-none focus:ring-2 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed ${
+          className={`w-full h-9 text-xs bg-white border rounded-xl text-slate-800 placeholder:text-slate-400 select-text transition-all duration-150 focus:outline-none focus:ring-2 disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed ${
             PrefixIcon ? 'pr-8 pl-3' : 'px-3'
           } ${
             SuffixIcon ? 'pl-8' : ''

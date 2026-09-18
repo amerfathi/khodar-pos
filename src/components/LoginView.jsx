@@ -7,7 +7,7 @@ import {
 import { Button, Input, Badge } from './ui';
 import { APP_VERSION } from '../config/appVersion';
 
-export default function LoginView({ store }) {
+export default function LoginView({ store, onClose }) {
   const { login } = store;
 
   const [username, setUsername] = useState('');
@@ -50,13 +50,23 @@ export default function LoginView({ store }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/90 py-8 px-4 flex flex-col justify-center items-center text-right font-sans" dir="rtl">
+    <div className={`${onClose ? 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs' : 'min-h-screen bg-slate-50/90 py-8 px-4 flex flex-col justify-center items-center'} text-right font-sans`} dir="rtl">
       
       {/* Central Product Gateway Card */}
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200/90 z-10">
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200/90 z-10 relative">
         
         {/* Gateway Brand Header */}
         <div className="bg-slate-900 text-white p-6 text-center relative border-b border-slate-800">
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute left-4 top-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              title="إغلاق"
+            >
+              <X size={18} />
+            </button>
+          )}
           <div className="w-12 h-12 mx-auto mb-3 bg-white/10 border border-white/15 rounded-xl flex items-center justify-center text-primary-400 shadow-xs">
             <Store size={24} />
           </div>

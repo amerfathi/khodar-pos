@@ -70,6 +70,139 @@ function createWindow() {
   });
 }
 
+// -------------------------------------------------------------
+// In-App Desktop Auto-Update Engine (Direct Download & Install)
+// -------------------------------------------------------------
+const fs = require('fs');
+const https = require('https');
+const http = require('http');
+const { spawn } = require('child_process');
+
+let activeDownloadRequest = null;
+let downloadedInstallerPath = null;
+
+function downloadFileWithRedirects(url, destPath, onProgress, onDone, onError) {
+  const protocol = url.startsWith('https') ? https : http;
+  
+  const req = protocol.get(url, { headers: { 'User-Agent': 'KhodarPOS-Desktop-Updater' } }, (res) => {
+    // Handle HTTP Redirects (e.g. 301, 302, 307 from GitHub Releases to S3)
+    if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+      return downloadFileWithRedirects(res.headers.location, destPath, onProgress, onDone, onError);
+    }
+
+    if (res.statusCode !== 200) {
+      return onError(new Error(`Download failed with HTTP status: ${res.statusCode}`));
+    }
+
+    const totalBytes = parseInt(res.headers['content-length'] || '0', 10);
+    let receivedBytes = 0;
+    let startTime = Date.now();
+    let lastEmitTime = 0;
+
+    const fileStream = fs.createWriteStream(destPath);
+
+    res.on('data', (chunk) => {
+      receivedBytes += chunk.length;
+      const now = Date.now();
+      // Throttle IPC emissions to every 100ms
+      if (now - lastEmitTime > 100 || receivedBytes === totalBytes) {
+        lastEmitTime = now;
+        const elapsedSec = Math.max((now - startTime) / 1000, 0.1);
+        const speedBytesPerSec = Math.round(receivedBytes / elapsedSec);
+        const percent = totalBytes > 0 ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100)) : 0;
+        onProgress({
+          receivedBytes,
+          totalBytes,
+          percent,
+          speedBytesPerSec
+        });
+      }
+    });
+
+    res.pipe(fileStream);
+
+    fileStream.on('finish', () => {
+      fileStream.close(() => onDone(destPath));
+    });
+
+    fileStream.on('error', (err) => {
+      fs.unlink(destPath, () => {});
+      onError(err);
+    });
+  });
+
+  req.on('error', (err) => {
+    fs.unlink(destPath, () => {});
+    onError(err);
+  });
+
+  activeDownloadRequest = req;
+}
+
+ipcMain.handle('download-update', async (event, downloadUrl) => {
+  if (!downloadUrl) return { success: false, error: 'رابط التحميل غير متوفر' };
+
+  try {
+    const tempDir = app.getPath('temp');
+    const destFile = path.join(tempDir, `KhodarPOS-Update-${Date.now()}.exe`);
+
+    return new Promise((resolve) => {
+      downloadFileWithRedirects(
+        downloadUrl,
+        destFile,
+        (progress) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('download-progress', progress);
+          }
+        },
+        (savedPath) => {
+          activeDownloadRequest = null;
+          downloadedInstallerPath = savedPath;
+          resolve({ success: true, filePath: savedPath });
+        },
+        (err) => {
+          activeDownloadRequest = null;
+          resolve({ success: false, error: err.message });
+        }
+      );
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.on('cancel-download-update', () => {
+  if (activeDownloadRequest) {
+    activeDownloadRequest.abort();
+    activeDownloadRequest = null;
+  }
+});
+
+ipcMain.handle('install-update', async (event, installerPath) => {
+  const targetPath = installerPath || downloadedInstallerPath;
+  if (!targetPath || !fs.existsSync(targetPath)) {
+    return { success: false, error: 'ملف التحديث غير موجود' };
+  }
+
+  try {
+    // Launch NSIS installer with /S for silent upgrade without erasing user settings or SQLite
+    const child = spawn(targetPath, ['/S'], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    child.unref();
+
+    // Close Electron immediately so the installer can replace application files
+    setTimeout(() => {
+      app.quit();
+    }, 500);
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 app.whenReady().then(() => {
   createWindow();
 

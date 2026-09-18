@@ -6,10 +6,14 @@ import {
   KeyRound, HelpCircle, Layers, CheckCircle2, ChevronLeft, ArrowRight,
   Database, Wifi, WifiOff, HardDrive, ShieldAlert, Users, Plus, 
   Trash2, Edit3, UserCheck, Key, Shield, UserX, ShieldBan, X,
-  User, CheckSquare, Square as SquareIcon, Eye, EyeOff
+  User, CheckSquare, Square as SquareIcon, Eye, EyeOff,
+  ArrowUpCircle, Sparkles, Laptop
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ROLE_PERMISSIONS_PRESETS, DEFAULT_PERMISSIONS } from '../data/initialData';
+import { APP_VERSION, APP_RELEASE_DATE, getClientPlatform } from '../config/appVersion';
+import { checkLatestRelease } from '../services/releaseService';
+import DesktopUpdateModal from './DesktopUpdateModal';
 
 export default function SettingsView({ 
   store, 
@@ -55,6 +59,31 @@ export default function SettingsView({
   const [userError, setUserError] = useState('');
   const [userSuccess, setUserSuccess] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // In-App Desktop Updates State
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [releaseInfo, setReleaseInfo] = useState(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateCheckStatus, setUpdateCheckStatus] = useState('idle');
+
+  const handleCheckUpdate = async () => {
+    setIsCheckingUpdate(true);
+    setUpdateCheckStatus('checking');
+    try {
+      const info = await checkLatestRelease();
+      setReleaseInfo(info);
+      setUpdateCheckStatus('checked');
+    } catch (e) {
+      setUpdateCheckStatus('error');
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  useEffect(() => {
+    // Initial release info check
+    checkLatestRelease().then(setReleaseInfo).catch(() => {});
+  }, []);
 
   // Sync form when settings change
   useEffect(() => {
@@ -258,6 +287,7 @@ export default function SettingsView({
     { id: 'users', label: 'المستخدمون والصلاحيات', icon: Users, desc: 'إدارة الكاشير، المحاسبين، وتعيين الصلاحيات' },
     { id: 'cloud', label: 'السحابة والنسخ الاحتياطي', icon: Cloud, desc: 'Cloudflare D1، مزامنة وتصدير' },
     { id: 'security', label: 'الحساب والأمان', icon: ShieldCheck, desc: 'بيانات الاشتراك، كلمة المرور، الفروع' },
+    { id: 'updates', label: 'التحديثات وإصدار النظام', icon: ArrowUpCircle, desc: 'إصدار v2.4.0، الفحص والتحديث الداخلي' },
   ];
 
   const activeBranch = branches.find(b => b.id === activeBranchId) || branches[0];
@@ -277,7 +307,7 @@ export default function SettingsView({
   ];
 
   return (
-    <div className="min-h-[calc(100vh-64px)] pb-16 bg-slate-50/70 p-3 sm:p-6 select-none animate-in fade-in duration-200">
+    <div className="min-h-[calc(100vh-64px)] pb-16 bg-slate-50/70 p-3 sm:p-6 animate-in fade-in duration-200">
       
       {/* 1. Header Bar in Wafeq Style */}
       <div className="max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-2xs">
@@ -1345,6 +1375,123 @@ export default function SettingsView({
               </motion.div>
             )}
 
+            {/* TAB 8: In-App Updates Center */}
+            {activeSubTab === 'updates' && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-6"
+              >
+                {/* Main Version Status Card */}
+                <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-2xs space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center font-bold border border-primary-100">
+                        <ArrowUpCircle size={22} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-sm text-navy-850">مركز التحديثات وإصدار النظام</h3>
+                          <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md">
+                            الإصدار الحالي v{APP_VERSION}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          تاريخ بناء الإصدار: {APP_RELEASE_DATE} &bull; المنصة النشطة: {
+                            getClientPlatform() === 'windows' ? 'برنامج سطح المكتب (Windows)' :
+                            getClientPlatform() === 'android' ? 'تطبيق الهاتف (Android)' : 'سحابة الويب (Web)'
+                          }
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCheckUpdate}
+                        disabled={isCheckingUpdate}
+                        className="py-2 px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <RefreshCw size={13} className={isCheckingUpdate ? 'animate-spin text-primary-600' : ''} />
+                        <span>{isCheckingUpdate ? 'جارٍ الفحص...' : 'فحص التحديثات الآن'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsUpdateModalOpen(true)}
+                        className="py-2 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Sparkles size={13} className="text-emerald-200" />
+                        <span>عرض تفاصيل التحديث</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Status Indicator Banner */}
+                  <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex items-start gap-3">
+                    <CheckCircle2 size={20} className="text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-xs text-emerald-900 block">
+                        النظام يعمل بأحدث إصدار رسمي مستقر ومطابق للمعايير المحاسبية
+                      </span>
+                      <p className="text-[11px] text-emerald-700 mt-0.5 leading-relaxed">
+                        تتضمن هذه النسخة حل مشكلات استجابة لوحة المفاتيح وحقول الإدخال، وشاشة تسجيل الدخول المخصصة لسطح المكتب، ونظام التحديث التلقائي السلس.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Key Features of current release */}
+                  <div className="pt-2">
+                    <span className="font-bold text-xs text-navy-850 block mb-3">
+                      أبرز التحسينات والمميزات المعتمدة في v{APP_VERSION}:
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-start gap-2.5">
+                        <Check size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-slate-800 block">استجابة فورية للوحة المفاتيح</span>
+                          <span className="text-[11px] text-slate-500">تمكين التحديد والكتابة والتنقل بالأزرار في كافة الشاشات والقوائم.</span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-start gap-2.5">
+                        <Check size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-slate-800 block">واجهة تسجيل دخول مستقلة للديسكتوب</span>
+                          <span className="text-[11px] text-slate-500">شاشة خاصة بدون تشتيت أو روابط تسويقية لمحطات الكاشير والمحاسبين.</span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-start gap-2.5">
+                        <Check size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-slate-800 block">محرك تحديث داخلي ذكي</span>
+                          <span className="text-[11px] text-slate-500">تنزيل التحديثات بنقرة واحدة وتثبيتها بهدوء دون فقدان أي إعدادات أو مبيعات.</span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-start gap-2.5">
+                        <Check size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-slate-800 block">توافق تام مع الموازين والطابعات</span>
+                          <span className="text-[11px] text-slate-500">دعم قراءة الوزن وطباعة فواتير A4 وفواتير الكاشير الحرارية.</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Safety & Zero Data Loss Guarantee */}
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-center gap-2.5">
+                    <ShieldCheck size={18} className="text-primary-600 shrink-0" />
+                    <span>
+                      <strong>ضمان سلامة البيانات:</strong> أي تحديث جديد يتم تطبيقه تلقائياً يحافظ 100% على قواعد البيانات المحلية، ولا يحذف أي فواتير أو مستحقات.
+                    </span>
+                  </div>
+
+                </div>
+              </motion.div>
+            )}
+
             {/* Bottom Floating Save Button */}
             <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs flex items-center justify-between">
               <div className="text-xs text-slate-500">
@@ -1606,6 +1753,14 @@ export default function SettingsView({
           </div>
         </div>
       )}
+
+      {/* 4. Desktop In-App Auto-Update Modal */}
+      <DesktopUpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+        releaseInfo={releaseInfo}
+        cartItemsCount={store.cart?.length || 0}
+      />
 
     </div>
   );

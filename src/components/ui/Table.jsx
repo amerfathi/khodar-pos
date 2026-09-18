@@ -3,7 +3,7 @@ import React from 'react';
 export default function Table({ children, className = '', containerClassName = '' }) {
   return (
     <div className={`w-full overflow-x-auto border border-slate-200/90 rounded-2xl bg-white shadow-2xs scrollbar-thin ${containerClassName}`}>
-      <table className={`w-full text-right text-xs text-slate-800 border-collapse select-none ${className}`}>
+      <table className={`w-full text-right text-xs text-slate-800 border-collapse ${className}`}>
         {children}
       </table>
     </div>

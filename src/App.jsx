@@ -17,6 +17,8 @@ import InvoiceReceiptModal from './components/InvoiceReceiptModal';
 import A4InvoiceModal from './components/A4InvoiceModal';
 import SettingsModal from './components/SettingsModal';
 import LoginView from './components/LoginView';
+import DesktopLoginView from './components/DesktopLoginView';
+import MarketingLandingPage from './components/MarketingLandingPage';
 import ChangePasswordModal from './components/ChangePasswordModal';
 import SuperAdminPortal from './components/SuperAdminPortal';
 import BranchesManagementModal from './components/BranchesManagementModal';
@@ -190,6 +192,7 @@ export default function App() {
   const [initialReportType, setInitialReportType] = useState('sales');
 
   // Multi-Platform Release & Update Center State
+  const [isWebLoginModalOpen, setIsWebLoginModalOpen] = useState(false);
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
 
@@ -335,12 +338,32 @@ export default function App() {
     handleNavigate('reports');
   };
 
-  const isSubPageOnMobile = currentTab !== 'home';
-
-  // If not authenticated, render the SaaS Login Screen
+  // If not authenticated, route based on product platform surface
   if (!currentUser) {
-    return <LoginView store={store} />;
+    const platform = getClientPlatform();
+    
+    // 1. Desktop App (Electron / Windows): Dedicated Native Desktop Login
+    if (platform === 'windows') {
+      return <DesktopLoginView store={store} />;
+    }
+
+    // 2. Mobile App (Capacitor / Android): Fast Native Mobile Login
+    if (platform === 'android') {
+      return <LoginView store={store} />;
+    }
+
+    // 3. Web Platform: Enterprise SaaS Marketing Landing Page with Login Trigger
+    return (
+      <>
+        <MarketingLandingPage onOpenLogin={() => setIsWebLoginModalOpen(true)} />
+        {isWebLoginModalOpen && (
+          <LoginView store={store} onClose={() => setIsWebLoginModalOpen(false)} />
+        )}
+      </>
+    );
   }
+
+  const isSubPageOnMobile = currentTab !== 'home';
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 flex flex-row selection:bg-primary-500 selection:text-white relative overflow-x-hidden font-sans">
