@@ -3,9 +3,9 @@
  * Semantic Versioning: MAJOR.MINOR.PATCH
  */
 
-export const APP_VERSION = '2.4.0';
-export const APP_BUILD_NUMBER = 2400;
-export const APP_RELEASE_DATE = '2026-09-18';
+export const APP_VERSION = '2.4.1';
+export const APP_BUILD_NUMBER = 2410;
+export const APP_RELEASE_DATE = '2026-09-19';
 export const MINIMUM_SUPPORTED_VERSION = '2.2.0';
 
 export function getClientPlatform() {
