@@ -33,7 +33,8 @@ export default function SettingsView({
     users = [],
     addUser,
     updateUser,
-    deleteUser
+    deleteUser,
+    syncCloudUsers
   } = store;
 
   const [activeSubTab, setActiveSubTab] = useState('profile');
@@ -59,6 +60,18 @@ export default function SettingsView({
   const [userError, setUserError] = useState('');
   const [userSuccess, setUserSuccess] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [isRefreshingUsers, setIsRefreshingUsers] = useState(false);
+
+  const handleRefreshCloudUsers = async () => {
+    if (typeof syncCloudUsers === 'function') {
+      setIsRefreshingUsers(true);
+      try {
+        await syncCloudUsers(currentUser?.tenantId);
+      } finally {
+        setTimeout(() => setIsRefreshingUsers(false), 600);
+      }
+    }
+  };
 
   // In-App Desktop Updates State
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
@@ -211,6 +224,13 @@ export default function SettingsView({
   };
 
   const handleRolePresetChange = (newRole) => {
+    if (newRole === 'custom') {
+      setUserForm(prev => ({
+        ...prev,
+        role: 'custom'
+      }));
+      return;
+    }
     const preset = ROLE_PERMISSIONS_PRESETS[newRole]?.permissions || DEFAULT_PERMISSIONS;
     setUserForm(prev => ({
       ...prev,
@@ -1118,14 +1138,27 @@ export default function SettingsView({
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleOpenNewUser}
-                      className="px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer shadow-sm shrink-0"
-                    >
-                      <Plus size={16} />
-                      <span>إضافة مستخدم جديد</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleRefreshCloudUsers}
+                        disabled={isRefreshingUsers}
+                        className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 shrink-0 disabled:opacity-50"
+                        title="تحديث قائمة المستخدمين والصلاحيات من السحابة المركزية"
+                      >
+                        <RefreshCw size={14} className={isRefreshingUsers ? 'animate-spin text-primary-600' : ''} />
+                        <span>{isRefreshingUsers ? 'جاري التحديث...' : 'تحديث من السحابة'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleOpenNewUser}
+                        className="px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer shadow-sm shrink-0"
+                      >
+                        <Plus size={16} />
+                        <span>إضافة مستخدم جديد</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Store Code Connection Callout Card for Staff Pairing */}
@@ -1856,12 +1889,13 @@ export default function SettingsView({
               {/* Role Presets */}
               <div className="pt-3 border-t border-slate-100">
                 <label className="block font-bold text-slate-800 mb-2">الدور الوظيفي (قوالب الصلاحيات الجاهزة):</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   {[
                     { id: 'cashier', label: 'كاشير وميزان', icon: '🛒' },
                     { id: 'accountant', label: 'محاسب مالي', icon: '📊' },
                     { id: 'inventory_manager', label: 'مشتريات ومخزون', icon: '📦' },
                     { id: 'admin', label: 'مدير عام / مالك', icon: '👑' },
+                    { id: 'custom', label: 'صلاحيات مخصصة', icon: '⚙️' },
                   ].map(r => {
                     const isSelected = userForm.role === r.id;
                     return (
@@ -1871,7 +1905,7 @@ export default function SettingsView({
                         onClick={() => handleRolePresetChange(r.id)}
                         className={`p-2.5 rounded-xl border text-center font-bold text-xs flex flex-col items-center gap-1 transition-all cursor-pointer ${
                           isSelected 
-                            ? 'bg-primary-50 border-primary-600 text-primary-700 shadow-2xs' 
+                            ? 'bg-primary-50 border-primary-600 text-primary-700 shadow-2xs ring-2 ring-primary-500/20' 
                             : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                         }`}
                       >

@@ -156,6 +156,75 @@ export function useAppStore() {
     syncCloudTenants();
   }, [syncCloudTenants]);
 
+  // Central Cloud Users Synchronization (Cloud-First & Offline-First)
+  const syncCloudUsers = useCallback(async (targetTenantId) => {
+    if (typeof window === 'undefined') return;
+    const tid = targetTenantId || currentUser?.tenantId;
+    if (!tid) return;
+
+    try {
+      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : 'https://khodar-pos.pages.dev';
+      const res = await fetch(`${baseUrl}/api/users?tenantId=${encodeURIComponent(tid)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.users)) {
+          setUsers(prev => {
+            const map = new Map();
+            prev.forEach(u => map.set(u.id, u));
+            data.users.forEach(u => {
+              const local = map.get(u.id);
+              map.set(u.id, { ...local, ...u });
+            });
+            return Array.from(map.values());
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Sync cloud users warning:', e);
+    }
+  }, [currentUser?.tenantId]);
+
+  useEffect(() => {
+    if (currentUser?.tenantId) {
+      syncCloudUsers(currentUser.tenantId);
+    }
+  }, [currentUser?.tenantId, syncCloudUsers]);
+
+  // Dynamic Active Session Revalidation (تحديث صلاحيات جلسة المستخدم النشطة فوراً عند تعديلها)
+  useEffect(() => {
+    if (!currentUser || !currentUser.isStaff) return;
+    const freshUser = users.find(u => 
+      u.id === currentUser.id || 
+      (u.username?.toLowerCase() === currentUser.username?.toLowerCase() && u.tenantId === currentUser.tenantId)
+    );
+
+    if (freshUser) {
+      const hasRoleChanged = freshUser.role !== currentUser.role;
+      const hasStatusChanged = freshUser.status !== currentUser.status;
+      const hasBranchChanged = freshUser.branchId !== currentUser.branchId;
+      const hasPermsChanged = JSON.stringify(freshUser.permissions || {}) !== JSON.stringify(currentUser.permissions || {});
+
+      if (hasRoleChanged || hasStatusChanged || hasBranchChanged || hasPermsChanged) {
+        const rolePreset = ROLE_PERMISSIONS_PRESETS[freshUser.role] || ROLE_PERMISSIONS_PRESETS.cashier;
+        const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
+        const freshPerms = freshUser.role === 'custom'
+          ? (freshUser.permissions ? { ...DEFAULT_PERMISSIONS, ...freshUser.permissions } : { ...DEFAULT_PERMISSIONS })
+          : { ...defaultPerms, ...(freshUser.permissions || {}) };
+
+        setCurrentUser(prev => ({
+          ...prev,
+          name: freshUser.name,
+          role: freshUser.role,
+          status: freshUser.status,
+          branchId: freshUser.branchId,
+          permissions: freshPerms
+        }));
+      }
+    }
+  }, [users, currentUser?.id, currentUser?.role, currentUser?.status, currentUser?.isStaff]);
+
   // Background Auto-sync to Cloudflare Edge
   useEffect(() => {
     const tenantId = currentUser?.tenantId || 'tenant-demo';
@@ -1649,30 +1718,34 @@ export function useAppStore() {
         t.id === cleanStoreCode.toLowerCase()
       );
 
-      // Real-time Cloud Lookup Fallback (Cloud-First & Offline-First)
-      // If store code is not yet in local storage, query Cloudflare D1 and cache locally
-      if (!targetTenant && typeof window !== 'undefined') {
+      // Real-time Cloud Lookup & Sync (Cloud-First & Offline-First)
+      // Query Cloudflare D1 to get the freshest tenant state, users, and permissions
+      if (typeof window !== 'undefined') {
         try {
           const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
             ? window.location.origin
             : 'https://khodar-pos.pages.dev';
-          const res = await fetch(`${baseUrl}/api/tenants/lookup?code=${encodeURIComponent(cleanStoreCode)}`);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2500);
+          const res = await fetch(`${baseUrl}/api/tenants/lookup?code=${encodeURIComponent(cleanStoreCode)}`, { signal: controller.signal });
+          clearTimeout(timeoutId);
           if (res.ok) {
             const data = await res.json();
             if (data.success && data.tenant) {
               targetTenant = data.tenant;
               // Cache locally so it is permanently available even if internet cuts out later
               setTenants(prev => [targetTenant, ...prev.filter(t => t.id !== targetTenant.id && (t.storeCode || '').toUpperCase() !== cleanStoreCode)]);
-              if (Array.isArray(data.users) && data.users.length > 0) {
+              if (Array.isArray(data.users)) {
                 setUsers(prev => {
-                  const existingIds = new Set(data.users.map(u => u.id));
-                  return [...data.users, ...prev.filter(u => !existingIds.has(u.id))];
+                  const cloudUserIds = new Set(data.users.map(u => u.id));
+                  const others = prev.filter(u => u.tenantId !== targetTenant.id && !cloudUserIds.has(u.id));
+                  return [...data.users, ...others];
                 });
               }
             }
           }
         } catch (netErr) {
-          console.warn('Cloud store code lookup failed or offline:', netErr);
+          console.warn('Cloud store code lookup failed or offline (using local cache):', netErr.message);
         }
       }
 
@@ -1711,13 +1784,22 @@ export function useAppStore() {
           setActiveBranchId(staffUser.branchId);
         }
 
-        const defaultPerms = ROLE_PERMISSIONS_PRESETS[staffUser.role]?.permissions || DEFAULT_PERMISSIONS;
+        const rolePreset = ROLE_PERMISSIONS_PRESETS[staffUser.role] || ROLE_PERMISSIONS_PRESETS.cashier;
+        const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
+        
+        let resolvedPerms;
+        if (staffUser.role === 'custom') {
+          resolvedPerms = staffUser.permissions ? { ...DEFAULT_PERMISSIONS, ...staffUser.permissions } : { ...DEFAULT_PERMISSIONS };
+        } else {
+          resolvedPerms = { ...defaultPerms, ...(staffUser.permissions || {}) };
+        }
+
         const userSession = {
           ...staffUser,
           companyName: targetTenant.companyName || 'سوق ومحل الخضار والفواكه',
           tenantId: targetTenant.id,
           storeCode: targetTenant.storeCode || cleanStoreCode,
-          permissions: staffUser.permissions ? { ...defaultPerms, ...staffUser.permissions } : { ...defaultPerms },
+          permissions: resolvedPerms,
           isStaff: true
         };
 
@@ -1790,13 +1872,22 @@ export function useAppStore() {
         setActiveBranchId(staffUser.branchId);
       }
 
-      const defaultPerms = ROLE_PERMISSIONS_PRESETS[staffUser.role]?.permissions || DEFAULT_PERMISSIONS;
+      const rolePreset = ROLE_PERMISSIONS_PRESETS[staffUser.role] || ROLE_PERMISSIONS_PRESETS.cashier;
+      const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
+      
+      let resolvedPerms;
+      if (staffUser.role === 'custom') {
+        resolvedPerms = staffUser.permissions ? { ...DEFAULT_PERMISSIONS, ...staffUser.permissions } : { ...DEFAULT_PERMISSIONS };
+      } else {
+        resolvedPerms = { ...defaultPerms, ...(staffUser.permissions || {}) };
+      }
+
       const userSession = {
         ...staffUser,
         companyName: parentTenant?.companyName || 'سوق ومحل الخضار والفواكه',
         tenantId: staffUser.tenantId || parentTenant?.id || 'tenant-demo',
         storeCode: parentTenant?.storeCode || 'BRK-101',
-        permissions: staffUser.permissions ? { ...defaultPerms, ...staffUser.permissions } : { ...defaultPerms },
+        permissions: resolvedPerms,
         isStaff: true
       };
 
@@ -2093,7 +2184,11 @@ export function useAppStore() {
     const duplicate = users.some(u => u.tenantId === activeTenantId && u.username.toLowerCase() === cleanUser);
     if (duplicate) throw new Error(`اسم المستخدم (${username}) مسجل مسبقاً لموظف آخر في متجركم`);
 
-    const defaultPerms = ROLE_PERMISSIONS_PRESETS[role]?.permissions || DEFAULT_PERMISSIONS;
+    const rolePreset = ROLE_PERMISSIONS_PRESETS[role] || ROLE_PERMISSIONS_PRESETS.cashier;
+    const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
+    const finalPerms = role === 'custom' 
+      ? (permissions ? { ...DEFAULT_PERMISSIONS, ...permissions } : { ...DEFAULT_PERMISSIONS })
+      : (permissions ? { ...defaultPerms, ...permissions } : { ...defaultPerms });
 
     const newUser = {
       id: `user-${Date.now()}`,
@@ -2105,13 +2200,27 @@ export function useAppStore() {
       branchId: branchId || 'all',
       phone: phone.trim(),
       status: 'active',
-      permissions: permissions ? { ...defaultPerms, ...permissions } : { ...defaultPerms },
+      permissions: finalPerms,
       createdAt: getCurrentDateFormatted()
     };
 
     setUsers(prev => [newUser, ...prev]);
 
-    // Record sync mutation for Cloudflare Edge
+    // 1. Central Cloudflare D1 Persistence (Cloud-First)
+    if (typeof window !== 'undefined') {
+      try {
+        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+          ? window.location.origin
+          : 'https://khodar-pos.pages.dev';
+        fetch(`${baseUrl}/api/users`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newUser)
+        }).catch(e => console.warn('Central cloud user create error:', e));
+      } catch (e) {}
+    }
+
+    // 2. Record sync mutation for Cloudflare Edge offline queue (Offline-First)
     try {
       cloudflareSync.recordMutation(activeTenantId, branchId, 'user', newUser.id, 'create', newUser);
     } catch (e) {
@@ -2122,18 +2231,51 @@ export function useAppStore() {
   };
 
   const updateUser = (userId, updates) => {
+    let updatedObj = null;
+
     setUsers(prev => prev.map(u => {
       if (u.id === userId) {
-        const updated = { ...u, ...updates };
-        if (currentUser && currentUser.id === userId) {
-          setCurrentUser(prevUser => ({ ...prevUser, ...updated }));
+        let newPerms = updates.permissions !== undefined ? updates.permissions : u.permissions;
+        if (updates.role && updates.role !== u.role && !updates.permissions && ROLE_PERMISSIONS_PRESETS[updates.role]) {
+          newPerms = { ...ROLE_PERMISSIONS_PRESETS[updates.role].permissions };
+        }
+
+        const updated = { 
+          ...u, 
+          ...updates,
+          permissions: newPerms
+        };
+        updatedObj = updated;
+
+        if (currentUser && (currentUser.id === userId || (currentUser.username?.toLowerCase() === u.username?.toLowerCase() && currentUser.tenantId === u.tenantId))) {
+          setCurrentUser(prevUser => ({ ...prevUser, ...updated, permissions: newPerms }));
         }
         return updated;
       }
       return u;
     }));
 
-    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const activeTenantId = currentUser?.tenantId || updatedObj?.tenantId || 'tenant-demo';
+
+    // 1. Central Cloudflare D1 Update (Cloud-First)
+    if (typeof window !== 'undefined' && updatedObj) {
+      try {
+        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+          ? window.location.origin
+          : 'https://khodar-pos.pages.dev';
+        fetch(`${baseUrl}/api/users`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: userId,
+            tenantId: activeTenantId,
+            ...updatedObj
+          })
+        }).catch(e => console.warn('Central cloud user update error:', e));
+      } catch (e) {}
+    }
+
+    // 2. Offline Queue Mutation
     try {
       cloudflareSync.recordMutation(activeTenantId, updates.branchId || null, 'user', userId, 'update', updates);
     } catch (e) {
@@ -2150,7 +2292,21 @@ export function useAppStore() {
 
     setUsers(prev => prev.filter(u => u.id !== userId));
 
-    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const activeTenantId = currentUser?.tenantId || target.tenantId || 'tenant-demo';
+
+    // 1. Central Cloudflare D1 Delete (Cloud-First)
+    if (typeof window !== 'undefined') {
+      try {
+        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+          ? window.location.origin
+          : 'https://khodar-pos.pages.dev';
+        fetch(`${baseUrl}/api/users?id=${encodeURIComponent(userId)}&tenantId=${encodeURIComponent(activeTenantId)}`, {
+          method: 'DELETE'
+        }).catch(e => console.warn('Central cloud user delete error:', e));
+      } catch (e) {}
+    }
+
+    // 2. Offline Queue Mutation
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'user', userId, 'delete', { id: userId });
     } catch (e) {
@@ -2321,6 +2477,7 @@ export function useAppStore() {
     tenants,
     setTenants,
     syncCloudTenants,
+    syncCloudUsers,
     currentUser,
     branches,
     activeBranchId,
