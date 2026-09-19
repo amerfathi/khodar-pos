@@ -4,7 +4,7 @@ import {
   Receipt, Printer, Check, ShoppingBag, 
   RotateCcw, Sparkles, ChevronDown, Phone, ArrowRight, ShieldCheck, CreditCard,
   Landmark, ArrowUpDown, AlertTriangle, Settings as SettingsIcon, Package,
-  Banknote, Building2, FileText, Layers, CheckCircle2
+  Banknote, Building2, FileText, Layers, CheckCircle2, Search, X
 } from 'lucide-react';
 import { formatCurrency, formatWeight, getCurrentDateFormatted, getCurrentTimeFormatted, padInvoiceNumber } from '../utils/formatters';
 import WeightTallyModal from './WeightTallyModal';
@@ -34,6 +34,7 @@ export default function SaleScreen({
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [productSearch, setProductSearch] = useState('');
   
   // Current items in cart
   const [cartItems, setCartItems] = useState([]);
@@ -339,6 +340,13 @@ export default function SaleScreen({
     setNotes('');
   };
 
+  const filteredProducts = products.filter(p => {
+    if (!productSearch || !productSearch.trim()) return true;
+    const q = productSearch.trim().toLowerCase();
+    return (p.name && p.name.toLowerCase().includes(q)) || 
+           (p.category && p.category.toLowerCase().includes(q));
+  });
+
   return (
     <div className="w-full pb-28 lg:pb-12 pt-3 px-3 sm:px-6 lg:px-8">
       {/* 2-Column Responsive Layout */}
@@ -367,8 +375,27 @@ export default function SaleScreen({
                 </div>
               </div>
 
-              {/* Action Buttons: Custom Item Button */}
-              <div className="flex items-center gap-2">
+              {/* Action Buttons: Live Search & Custom Item Button */}
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <div className="relative w-40 sm:w-48">
+                  <Search size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    placeholder="بحث في الأصناف..."
+                    className="w-full pr-8 pl-6 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:bg-white transition-all shadow-2xs"
+                  />
+                  {productSearch && (
+                    <button 
+                      type="button"
+                      onClick={() => setProductSearch('')}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -385,7 +412,7 @@ export default function SaleScreen({
                     setEditingItemIndex(null);
                     setIsItemEditorOpen(true);
                   }}
-                  className="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 active:scale-98 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  className="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 active:scale-98 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
                 >
                   <Plus size={15} />
                   <span>+ وزن صنف مخصص</span>
@@ -394,16 +421,20 @@ export default function SaleScreen({
             </div>
 
             {/* Fast Vegetable Grid */}
-            {products.length === 0 ? (
+            {filteredProducts.length === 0 ? (
               <div className="p-6 text-center border border-slate-200 rounded-xl bg-slate-50/50">
-                <p className="text-xs font-bold text-slate-700">لا توجد أصناف سريعة مسجلة حالياً في النظام</p>
+                <p className="text-xs font-bold text-slate-700">
+                  {productSearch ? 'لا توجد أصناف مطابقة لبحثك' : 'لا توجد أصناف سريعة مسجلة حالياً في النظام'}
+                </p>
                 <p className="text-[11px] text-slate-400 mt-1 max-w-md mx-auto">
-                  يمكنك استخدام زر "وزن صنف مخصص" أعلاه لإدخال الصنف وسعره ووزنه مباشرة، أو تسجيل أصنافك من تبويب "الأصناف".
+                  {productSearch 
+                    ? 'جرب البحث باسم صنف آخر أو اضغط زر مسح البحث.' 
+                    : 'يمكنك استخدام زر "وزن صنف مخصص" أعلاه لإدخال الصنف وسعره ووزنه مباشرة، أو تسجيل أصنافك من تبويب "الأصناف".'}
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-2.5">
-                {products.map(prod => (
+                {filteredProducts.map(prod => (
                   <button
                     key={prod.id}
                     onClick={() => handleSelectProduct(prod)}
