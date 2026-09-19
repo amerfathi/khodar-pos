@@ -165,7 +165,7 @@ export default function DesktopSidebar({
           <img 
             src="/brraka-icon.png" 
             alt="براكه" 
-            className="w-8 h-8 rounded-lg object-cover shadow-2xs shrink-0 border border-slate-200" 
+            className="w-10 h-10 rounded-xl object-contain shadow-xs shrink-0" 
           />
           {!isCollapsed && (
             <div className="truncate text-right">

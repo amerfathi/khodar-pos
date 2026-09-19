@@ -448,7 +448,7 @@ export default function App() {
                 <img 
                   src="/brraka-icon.png" 
                   alt="براكه" 
-                  className="w-7 h-7 rounded-lg object-cover shadow-2xs border border-slate-200" 
+                  className="w-9 h-9 rounded-xl object-contain shadow-xs shrink-0" 
                 />
               )}
 

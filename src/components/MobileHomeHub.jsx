@@ -215,7 +215,7 @@ export default function MobileHomeHub({
             <img 
               src="/brraka-icon.png" 
               alt="براكه" 
-              className="w-10 h-10 rounded-xl object-cover shrink-0 shadow-2xs border border-slate-200" 
+              className="w-12 h-12 rounded-2xl object-contain shrink-0 shadow-xs" 
             />
             <div className="truncate text-right">
               <div className="flex items-center gap-1.5 flex-wrap">

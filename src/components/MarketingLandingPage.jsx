@@ -71,7 +71,7 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
             <img 
               src="/brraka-icon.png" 
               alt="براكه" 
-              className="w-10 h-10 rounded-xl object-cover shadow-xs border border-slate-200" 
+              className="w-12 h-12 rounded-2xl object-contain shadow-xs" 
             />
             <div>
               <span className="font-bold text-base text-slate-900 block tracking-tight">براكه | Brraka</span>
@@ -661,7 +661,7 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
               <img 
                 src="/brraka-icon.png" 
                 alt="براكه" 
-                className="w-9 h-9 rounded-xl object-cover border border-slate-700 shadow-xs" 
+                className="w-12 h-12 rounded-2xl object-contain shadow-xs" 
               />
               <div>
                 <span className="font-bold text-sm text-white block">منظومة براكه المحاسبية | Brraka</span>

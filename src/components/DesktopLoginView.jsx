@@ -72,7 +72,7 @@ export default function DesktopLoginView({ store }) {
           <img 
             src="/brraka-icon.png" 
             alt="براكه" 
-            className="w-6 h-6 rounded-md object-cover border border-slate-200" 
+            className="w-7 h-7 rounded-lg object-contain shadow-2xs" 
           />
           <span className="text-xs font-bold text-slate-800">
             {settings?.shopName || 'براكه'} | محطة سطح المكتب
@@ -124,7 +124,7 @@ export default function DesktopLoginView({ store }) {
               <img 
                 src="/brraka-icon.png" 
                 alt="براكه" 
-                className="w-16 h-16 mx-auto mb-3 rounded-2xl shadow-sm border border-slate-200/80 object-cover" 
+                className="w-20 h-20 mx-auto mb-3 rounded-2xl shadow-md object-contain" 
               />
               <h1 className="text-xl font-black text-slate-900 tracking-tight">
                 {settings?.shopName || 'براكه | Brraka'}

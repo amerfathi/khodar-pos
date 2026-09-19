@@ -5,30 +5,30 @@
 
 const FALLBACK_RELEASES = {
   web: {
-    version: '2.5.1',
+    version: '2.5.2',
     minimumVersion: '2.2.0',
     updateType: 'recommended',
     releaseNotes: [
+      'اعتماد وتطبيق هوية وشعار براكه (Brraka) الجديد رسمياً',
       'سلايدر متطور للتحكم بحجم خطوط وشاشات النظام من الإعدادات',
-      'نظام استرداد كلمة المرور السحابي المباشر عبر البريد ورقم الهاتف',
-      'فحص تلقائي ومباشر للتحديثات مع إشعار فوري'
+      'نظام استرداد كلمة المرور السحابي المباشر عبر البريد ورقم الهاتف'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev',
     fileSizeBytes: 980000,
     publishedAt: '2026-09-19T00:00:00Z'
   },
   windows: {
-    version: '2.5.1',
+    version: '2.5.2',
     minimumVersion: '2.2.0',
     updateType: 'required',
     releaseNotes: [
-      'إضافة سلايدر التحكم بحجم الخطوط وشاشات البرنامج في الإعدادات',
-      'تكبير وتصغير فوري لنصوص شاشات الكاشير والفواتير لراحة النظر',
-      'نظام استرداد كلمة المرور المباشر لحسابات المتاجر والمشتركين',
-      'تحديث تلقائي فوري وسلس دون المساس ببيانات وفواتير العميل'
+      'اعتماد وتطبيق هوية وأيقونة منظومة براكه (Brraka) على سطح المكتب وشريط المهام',
+      'إضافة سلايدر التحكم بحجم الخطوط وشاشات البرنامج في الإعدادات (80% - 130%)',
+      'محرك تحديث تلقائي فوري وسلس دون المساس ببيانات وفواتير العميل',
+      'نظام استرداد كلمة المرور المباشر لحسابات المتاجر والمشتركين'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.1/KhodarPOS-Setup.exe',
-    fileSizeBytes: 128524688,
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.2/KhodarPOS-Setup.exe',
+    fileSizeBytes: 131108786,
     publishedAt: '2026-09-19T00:00:00Z'
   },
   android: {

@@ -67,7 +67,7 @@ export default function LoginView({ store, onClose }) {
           <img 
             src="/brraka-icon.png" 
             alt="براكه" 
-            className="w-16 h-16 mx-auto mb-3 rounded-2xl shadow-sm border border-slate-200/80 object-cover" 
+            className="w-20 h-20 mx-auto mb-3 rounded-2xl shadow-md object-contain" 
           />
 
           <div className="flex items-center justify-center gap-2">
