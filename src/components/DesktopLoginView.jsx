@@ -124,7 +124,7 @@ export default function DesktopLoginView({ store }) {
               <img 
                 src="/brraka-icon.png" 
                 alt="براكه" 
-                className="w-20 h-20 mx-auto mb-3 rounded-2xl shadow-md object-contain" 
+                className="w-24 h-24 mx-auto mb-3 object-contain drop-shadow-sm" 
               />
               <h1 className="text-xl font-black text-slate-900 tracking-tight">
                 {settings?.shopName || 'براكه | Brraka'}
