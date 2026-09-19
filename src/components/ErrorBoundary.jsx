@@ -1,5 +1,6 @@
-﻿import React from 'react';
+import React from 'react';
 import { AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
+import { BRRAKA_LOGO } from '../assets/branding';
 
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -44,7 +45,7 @@ export default class ErrorBoundary extends React.Component {
             </div>
 
             <img 
-              src="/brraka-icon.png" 
+              src={BRRAKA_LOGO} 
               alt="براكه" 
               className="w-16 h-16 mx-auto mb-3 object-contain drop-shadow-xs" 
             />

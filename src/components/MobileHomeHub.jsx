@@ -7,6 +7,7 @@ import {
 import { motion } from 'framer-motion';
 import { formatCurrency } from '../utils/formatters';
 import { TAB_PERMISSION_MAP } from './DesktopSidebar';
+import { BRRAKA_LOGO } from '../assets/branding';
 
 export default function MobileHomeHub({ 
   store, 
@@ -213,7 +214,7 @@ export default function MobileHomeHub({
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2.5 truncate">
             <img 
-              src="/brraka-icon.png" 
+              src={BRRAKA_LOGO} 
               alt="براكه" 
               className="w-12 h-12 rounded-2xl object-contain shrink-0 shadow-xs" 
             />

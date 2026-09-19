@@ -23,6 +23,7 @@ import ChangePasswordModal from './components/ChangePasswordModal';
 import SuperAdminPortal from './components/SuperAdminPortal';
 import BranchesManagementModal from './components/BranchesManagementModal';
 import UpdateNotificationModal from './components/UpdateNotificationModal';
+import { BRRAKA_LOGO } from './assets/branding';
 import DesktopUpdateModal from './components/DesktopUpdateModal';
 import { checkLatestRelease } from './services/releaseService';
 import { getClientPlatform } from './config/appVersion';
@@ -446,7 +447,7 @@ export default function App() {
                 </motion.button>
               ) : (
                 <img 
-                  src="/brraka-icon.png" 
+                  src={BRRAKA_LOGO} 
                   alt="براكه" 
                   className="w-9 h-9 rounded-xl object-contain shadow-xs shrink-0" 
                 />

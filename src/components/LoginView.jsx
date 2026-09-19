@@ -1,17 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Lock, User, KeyRound, ShieldCheck, AlertTriangle, Eye, EyeOff, 
   Store, Monitor, Smartphone, Globe, Download, ArrowLeft, Laptop
 } from 'lucide-react';
 import { Button, Badge } from './ui';
 import { APP_VERSION } from '../config/appVersion';
+import { BRRAKA_LOGO } from '../assets/branding';
 import ForgotPasswordModal from './ForgotPasswordModal';
 
 export default function LoginView({ store, onClose }) {
   const { login } = store;
 
-  // Clean empty inputs - no pre-filled credentials for enterprise security
-  const [username, setUsername] = useState('');
+  // Remember username across sessions and logouts for fast password-only entry
+  const [username, setUsername] = useState(() => {
+    try {
+      return localStorage.getItem('khodar_remembered_username') || '';
+    } catch {
+      return '';
+    }
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -21,21 +28,47 @@ export default function LoginView({ store, onClose }) {
   const [loading, setLoading] = useState(false);
   const [activeViewTab, setActiveViewTab] = useState('login'); // 'login' | 'platforms'
 
+  const usernameInputRef = useRef(null);
+  const passwordInputRef = useRef(null);
+
+  // Smart focus: if username is remembered, focus password input directly
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (username.trim()) {
+        passwordInputRef.current?.focus();
+      } else {
+        usernameInputRef.current?.focus();
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [activeViewTab]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     setErrorMessage('');
     setIsExpiredAlert(false);
 
-    if (!username.trim() || !password) {
+    const cleanUser = username.trim();
+    if (!cleanUser || !password) {
       setErrorMessage('يرجى إدخال اسم المستخدم وكلمة المرور');
       return;
     }
 
     setLoading(true);
     setTimeout(() => {
-      const res = login(username, password);
+      const res = login(cleanUser, password);
       setLoading(false);
-      if (!res.success) {
+      if (res.success) {
+        try {
+          if (rememberMe) {
+            localStorage.setItem('khodar_remembered_username', cleanUser);
+          } else {
+            localStorage.removeItem('khodar_remembered_username');
+          }
+        } catch (e) {
+          console.warn('Failed to save remembered username', e);
+        }
+      } else {
         setErrorMessage(res.error || 'بيانات الدخول غير صحيحة');
         if (res.isExpired) {
           setIsExpiredAlert(true);
@@ -65,7 +98,7 @@ export default function LoginView({ store, onClose }) {
           )}
 
           <img 
-            src="/brraka-icon.png" 
+            src={BRRAKA_LOGO} 
             alt="براكه" 
             className="w-24 h-24 mx-auto mb-3 object-contain drop-shadow-sm" 
           />
@@ -138,12 +171,12 @@ export default function LoginView({ store, onClose }) {
                     <User size={15} />
                   </div>
                   <input
+                    ref={usernameInputRef}
                     type="text"
                     required
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="أدخل اسم المستخدم أو البريد المسجل"
-                    autoFocus
                     className="w-full h-11 pr-10 pl-3 bg-white border border-slate-300 rounded-xl text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/15 transition-all select-text font-medium"
                   />
                 </div>
@@ -159,6 +192,7 @@ export default function LoginView({ store, onClose }) {
                     <KeyRound size={15} />
                   </div>
                   <input
+                    ref={passwordInputRef}
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={password}

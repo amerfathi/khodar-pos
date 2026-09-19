@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Button, Badge } from './ui';
 import { APP_VERSION } from '../config/appVersion';
+import { BRRAKA_LOGO } from '../assets/branding';
 
 export default function MarketingLandingPage({ onOpenLogin, store }) {
   const [isTrialModalOpen, setIsTrialModalOpen] = useState(false);
@@ -69,7 +70,7 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
           {/* Logo & Brand */}
           <div className="flex items-center gap-3">
             <img 
-              src="/brraka-icon.png" 
+              src={BRRAKA_LOGO} 
               alt="براكه" 
               className="w-12 h-12 rounded-2xl object-contain shadow-xs" 
             />
@@ -659,7 +660,7 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
           <div className="flex flex-col sm:flex-row items-center justify-between gap-6 pb-8 border-b border-slate-800">
             <div className="flex items-center gap-3">
               <img 
-                src="/brraka-icon.png" 
+                src={BRRAKA_LOGO} 
                 alt="براكه" 
                 className="w-12 h-12 rounded-2xl object-contain shadow-xs" 
               />

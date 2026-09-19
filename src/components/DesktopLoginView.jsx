@@ -1,16 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Lock, User, KeyRound, ShieldCheck, Eye, EyeOff, 
   Store, Minus, Square, Copy, X, Database, CheckCircle2, AlertCircle
 } from 'lucide-react';
 import { APP_VERSION } from '../config/appVersion';
+import { BRRAKA_LOGO } from '../assets/branding';
 import ForgotPasswordModal from './ForgotPasswordModal';
 
 export default function DesktopLoginView({ store }) {
   const { login, settings } = store;
 
-  // No default pre-filled credentials for clean security
-  const [username, setUsername] = useState('');
+  // Remember username across sessions and logouts for fast password-only entry
+  const [username, setUsername] = useState(() => {
+    try {
+      return localStorage.getItem('khodar_remembered_username') || '';
+    } catch {
+      return '';
+    }
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -19,10 +26,25 @@ export default function DesktopLoginView({ store }) {
   const [loading, setLoading] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
 
+  const usernameInputRef = useRef(null);
+  const passwordInputRef = useRef(null);
+
   useEffect(() => {
     if (typeof window !== 'undefined' && window.electronAPI?.isMaximized) {
       window.electronAPI.isMaximized().then(setIsMaximized).catch(() => {});
     }
+  }, []);
+
+  // Smart focus: if username is remembered, focus password input directly for quick entry
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (username.trim()) {
+        passwordInputRef.current?.focus();
+      } else {
+        usernameInputRef.current?.focus();
+      }
+    }, 150);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleMinimize = () => {
@@ -45,16 +67,27 @@ export default function DesktopLoginView({ store }) {
     e.preventDefault();
     setErrorMessage('');
 
-    if (!username.trim() || !password) {
+    const cleanUser = username.trim();
+    if (!cleanUser || !password) {
       setErrorMessage('يرجى إدخال اسم المستخدم وكلمة المرور');
       return;
     }
 
     setLoading(true);
     setTimeout(() => {
-      const res = login(username, password);
+      const res = login(cleanUser, password);
       setLoading(false);
-      if (!res.success) {
+      if (res.success) {
+        try {
+          if (rememberMe) {
+            localStorage.setItem('khodar_remembered_username', cleanUser);
+          } else {
+            localStorage.removeItem('khodar_remembered_username');
+          }
+        } catch (e) {
+          console.warn('Failed to save remembered username', e);
+        }
+      } else {
         setErrorMessage(res.error || 'بيانات الدخول غير صحيحة');
       }
     }, 200);
@@ -70,7 +103,7 @@ export default function DesktopLoginView({ store }) {
       >
         <div className="flex items-center gap-2.5" style={{ WebkitAppRegion: 'no-drag' }}>
           <img 
-            src="/brraka-icon.png" 
+            src={BRRAKA_LOGO} 
             alt="براكه" 
             className="w-7 h-7 rounded-lg object-contain shadow-2xs" 
           />
@@ -122,7 +155,7 @@ export default function DesktopLoginView({ store }) {
             {/* Header / Brand */}
             <div className="text-center mb-6">
               <img 
-                src="/brraka-icon.png" 
+                src={BRRAKA_LOGO} 
                 alt="براكه" 
                 className="w-24 h-24 mx-auto mb-3 object-contain drop-shadow-sm" 
               />
@@ -153,11 +186,11 @@ export default function DesktopLoginView({ store }) {
                     <User size={15} />
                   </div>
                   <input
+                    ref={usernameInputRef}
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="أدخل اسم المستخدم أو البريد"
-                    autoFocus
                     required
                     className="w-full h-11 pr-10 pl-3 bg-white border border-slate-300 rounded-xl text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/15 transition-all select-text font-medium"
                   />
@@ -173,6 +206,7 @@ export default function DesktopLoginView({ store }) {
                     <KeyRound size={15} />
                   </div>
                   <input
+                    ref={passwordInputRef}
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}

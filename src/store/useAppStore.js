@@ -1623,6 +1623,9 @@ export function useAppStore() {
         permissions: staffUser.permissions ? { ...defaultPerms, ...staffUser.permissions } : { ...defaultPerms },
         isStaff: true
       };
+      try {
+        localStorage.setItem('khodar_remembered_username', cleanUser);
+      } catch (e) {}
 
       setCurrentUser(userSession);
       return { success: true, user: userSession };
@@ -1673,6 +1676,9 @@ export function useAppStore() {
       tenantId: target.id,
       permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions }
     };
+    try {
+      localStorage.setItem('khodar_remembered_username', cleanUser);
+    } catch (e) {}
 
     setCurrentUser(adminSession);
     return { success: true, user: adminSession };

@@ -6,6 +6,7 @@ import {
   ChevronDown, Store, Building2, Check, ShieldCheck, KeyRound, 
   LogOut, Settings, PanelRightClose, PanelRightOpen, Crown, User
 } from 'lucide-react';
+import { BRRAKA_LOGO } from '../assets/branding';
 
 export const NAV_GROUPS = [
   {
@@ -163,7 +164,7 @@ export default function DesktopSidebar({
       <div className="h-16 border-b border-slate-200/80 px-3 flex items-center justify-between shrink-0">
         <div className={`flex items-center gap-2.5 overflow-hidden ${isCollapsed ? 'justify-center w-full' : ''}`}>
           <img 
-            src="/brraka-icon.png" 
+            src={BRRAKA_LOGO} 
             alt="براكه" 
             className="w-10 h-10 rounded-xl object-contain shadow-xs shrink-0" 
           />
