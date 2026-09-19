@@ -5,7 +5,7 @@ import { BRRAKA_LOGO } from '../assets/branding';
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false, error: null, errorInfo: null, isReloading: false };
   }
 
   static getDerivedStateFromError(error) {
@@ -18,10 +18,20 @@ export default class ErrorBoundary extends React.Component {
   }
 
   handleReload = () => {
-    window.location.reload();
+    this.setState({ isReloading: true });
+    setTimeout(() => {
+      try {
+        if (window.electronAPI?.reload) {
+          window.electronAPI.reload();
+          return;
+        }
+      } catch (e) {}
+      window.location.reload();
+    }, 200);
   };
 
   handleClearCacheAndReload = () => {
+    this.setState({ isReloading: true });
     try {
       sessionStorage.clear();
       localStorage.removeItem('khodar_active_tab');
@@ -29,7 +39,15 @@ export default class ErrorBoundary extends React.Component {
     } catch (e) {
       console.warn('Cache clear error:', e);
     }
-    window.location.reload();
+    setTimeout(() => {
+      try {
+        if (window.electronAPI?.reload) {
+          window.electronAPI.reload();
+          return;
+        }
+      } catch (e) {}
+      window.location.reload();
+    }, 300);
   };
 
   render() {
@@ -67,19 +85,21 @@ export default class ErrorBoundary extends React.Component {
               <button
                 type="button"
                 onClick={this.handleReload}
-                className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.99]"
+                disabled={this.state.isReloading}
+                className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.99]"
               >
-                <RefreshCw size={15} />
-                <span>إعادة تشغيل التطبيق فوراً</span>
+                <RefreshCw size={15} className={this.state.isReloading ? 'animate-spin' : ''} />
+                <span>{this.state.isReloading ? 'جاري إعادة التشغيل...' : 'إعادة تشغيل التطبيق فوراً'}</span>
               </button>
 
               <button
                 type="button"
                 onClick={this.handleClearCacheAndReload}
-                className="w-full h-10 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
+                disabled={this.state.isReloading}
+                className="w-full h-10 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
               >
                 <Trash2 size={14} />
-                <span>تفريغ الذاكرة المؤقتة وإعادة التحميل</span>
+                <span>{this.state.isReloading ? 'جاري تفريغ الذاكرة...' : 'تفريغ الذاكرة المؤقتة وإعادة التحميل'}</span>
               </button>
             </div>
 

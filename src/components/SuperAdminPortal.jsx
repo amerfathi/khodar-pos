@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { OFFICIAL_RELEASES } from '../services/releaseService';
 import { APP_VERSION } from '../config/appVersion';
 import { 
@@ -20,6 +20,8 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     deleteTrialRequest
   } = store;
 
+  // Navigation & Modal State
+  const [activeTab, setActiveTab] = useState('tenants'); // 'tenants' | 'releases' | 'trials'
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedTenantId, setCopiedTenantId] = useState(null);
@@ -50,7 +52,34 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   const [cloudTrialRequests, setCloudTrialRequests] = useState([]);
   const [isLoadingTrials, setIsLoadingTrials] = useState(false);
 
-  const fetchCloudTrials = async () => {
+  // New Tenant Form State
+  const [companyName, setCompanyName] = useState('');
+  const [storeCode, setStoreCode] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
+  const [durationMonths, setDurationMonths] = useState('12');
+  const [allowedBranches, setAllowedBranches] = useState('1');
+  const [notes, setNotes] = useState('');
+  const [formError, setFormError] = useState('');
+  const [createdWelcomeMsg, setCreatedWelcomeMsg] = useState(null);
+  const [releasesList, setReleasesList] = useState(OFFICIAL_RELEASES);
+  const [isReleaseModalOpen, setIsReleaseModalOpen] = useState(false);
+  const [releaseForm, setReleaseForm] = useState({
+    platform: 'windows',
+    version: '2.4.1',
+    minimum_version: '2.2.0',
+    update_type: 'recommended',
+    release_notes: '',
+    download_url: ''
+  });
+
+  const generateStoreCode = () => {
+    const num = Math.floor(100 + Math.random() * 900);
+    setStoreCode(`BRK-${num}`);
+  };
+
+  const fetchCloudTrials = useCallback(async () => {
     setIsLoadingTrials(true);
     try {
       const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
@@ -66,13 +95,13 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     } finally {
       setIsLoadingTrials(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
       fetchCloudTrials();
     }
-  }, [isOpen, activeTab]);
+  }, [isOpen, activeTab, fetchCloudTrials]);
 
   // Merge store local trial requests and cloud D1 requests seamlessly
   const combinedTrialRequests = useMemo(() => {
@@ -90,34 +119,6 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     });
     return Array.from(map.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   }, [cloudTrialRequests, trialRequests]);
-
-  // New Tenant Form State
-  const [companyName, setCompanyName] = useState('');
-  const [storeCode, setStoreCode] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [phone, setPhone] = useState('');
-  const [durationMonths, setDurationMonths] = useState('12');
-  const [allowedBranches, setAllowedBranches] = useState('1');
-  const [notes, setNotes] = useState('');
-  const [formError, setFormError] = useState('');
-  const [createdWelcomeMsg, setCreatedWelcomeMsg] = useState(null);
-  const [activeTab, setActiveTab] = useState('tenants'); // 'tenants' | 'releases' | 'trials'
-  const [releasesList, setReleasesList] = useState(OFFICIAL_RELEASES);
-  const [isReleaseModalOpen, setIsReleaseModalOpen] = useState(false);
-
-  const generateStoreCode = () => {
-    const num = Math.floor(100 + Math.random() * 900);
-    setStoreCode(`BRK-${num}`);
-  };
-  const [releaseForm, setReleaseForm] = useState({
-    platform: 'windows',
-    version: '2.4.1',
-    minimum_version: '2.2.0',
-    update_type: 'recommended',
-    release_notes: '',
-    download_url: ''
-  });
 
   
   const handlePublishRelease = async (e) => {
