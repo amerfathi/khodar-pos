@@ -74,8 +74,17 @@ class CloudflareSyncService {
   // Record an action to sync (e.g. new invoice, expense, stock change)
   recordMutation(tenantId, branchId, entityType, entityId, action, payload) {
     const queue = this.getQueue();
+    const eventId = payload?.idempotencyKey 
+      ? `evt_${tenantId}_${entityType}_${payload.idempotencyKey}_${action}`
+      : `evt_${tenantId}_${entityType}_${entityId}_${action}`;
+
+    // Prevent duplicate entries in local sync queue
+    if (queue.some(e => e.id === eventId)) {
+      return;
+    }
+
     const event = {
-      id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 7)}`,
+      id: eventId,
       tenantId,
       branchId,
       entityType,

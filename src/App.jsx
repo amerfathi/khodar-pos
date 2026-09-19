@@ -668,105 +668,136 @@ export default function App() {
               exit="exit"
               className="w-full"
             >
-              {/* Mobile Home Hub: 3-column Grid of All Major Sections */}
-              {currentTab === 'home' && (
-                <MobileHomeHub 
-                  store={store}
-                  onNavigate={handleNavigate}
-                  onOpenSettings={() => setIsSettingsOpen(true)}
-                />
-              )}
+              {/* Direct Route / Tab Authorization Guard */}
+              {(() => {
+                const requiredPerm = TAB_PERMISSION_MAP?.[currentTab];
+                const isAuthorized = currentTab === 'home' || !requiredPerm || (store.hasPermission ? store.hasPermission(requiredPerm) : true);
 
-              {/* Point of Sale Screen */}
-              {currentTab === 'sale' && (
-                <SaleScreen 
-                  store={store} 
-                  onViewReceipt={(inv) => setReceiptInvoice(inv)}
-                  onViewA4Invoice={(inv) => setA4Invoice(inv)}
-                  onOpenNewCustomerModal={() => handleNavigate('customers')}
-                  onOpenSettings={() => setIsSettingsOpen(true)}
-                  onNavigate={handleNavigate}
-                />
-              )}
+                if (!isAuthorized) {
+                  return (
+                    <div className="flex flex-col items-center justify-center min-h-[50vh] p-8 text-center bg-white rounded-3xl border border-rose-100 shadow-sm mx-auto max-w-lg mt-8">
+                      <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-4 shadow-sm border border-rose-200">
+                        <Lock className="w-8 h-8" />
+                      </div>
+                      <h2 className="text-xl font-black text-slate-800 mb-2">عذراً، هذا القسم غير مصرح لك بدخوله</h2>
+                      <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+                        حسابك الحالي لا يمتلك الصلاحيات الكافية للوصول إلى هذا القسم ({TAB_TITLES[currentTab] || currentTab}). يرجى مراجعة إدارة المحل.
+                      </p>
+                      <button
+                        onClick={() => handleNavigate(store.hasPermission?.('canSell') ? 'sale' : 'home')}
+                        className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center gap-2"
+                      >
+                        <ShoppingCart className="w-4 h-4" />
+                        العودة للقسم المتاح
+                      </button>
+                    </div>
+                  );
+                }
 
-              {currentTab === 'invoices' && (
-                <InvoicesHistory 
-                  store={store} 
-                  onViewReceipt={(inv) => setReceiptInvoice(inv)}
-                  onViewA4Invoice={(inv) => setA4Invoice(inv)}
-                />
-              )}
+                return (
+                  <>
+                    {/* Mobile Home Hub: 3-column Grid of All Major Sections */}
+                    {currentTab === 'home' && (
+                      <MobileHomeHub 
+                        store={store}
+                        onNavigate={handleNavigate}
+                        onOpenSettings={() => setIsSettingsOpen(true)}
+                      />
+                    )}
 
-              {currentTab === 'purchases' && (
-                <PurchasesView 
-                  store={store} 
-                  onOpenA4Report={handleOpenA4Report}
-                />
-              )}
+                    {/* Point of Sale Screen */}
+                    {currentTab === 'sale' && (
+                      <SaleScreen 
+                        store={store} 
+                        onViewReceipt={(inv) => setReceiptInvoice(inv)}
+                        onViewA4Invoice={(inv) => setA4Invoice(inv)}
+                        onOpenNewCustomerModal={() => handleNavigate('customers')}
+                        onOpenSettings={() => setIsSettingsOpen(true)}
+                        onNavigate={handleNavigate}
+                      />
+                    )}
 
-              {currentTab === 'customers' && (
-                <CustomersView 
-                  store={store} 
-                  onSelectCustomerForInvoice={() => {
-                    handleNavigate('sale');
-                  }}
-                  onOpenCustomerStatement={(customerId) => {
-                    setInitialReportType('customer');
-                    handleNavigate('reports');
-                  }}
-                />
-              )}
+                    {currentTab === 'invoices' && (
+                      <InvoicesHistory 
+                        store={store} 
+                        onViewReceipt={(inv) => setReceiptInvoice(inv)}
+                        onViewA4Invoice={(inv) => setA4Invoice(inv)}
+                      />
+                    )}
 
-              {currentTab === 'audit' && (
-                <StoreAuditView 
-                  store={store} 
-                  onOpenA4Report={handleOpenA4Report}
-                />
-              )}
+                    {currentTab === 'purchases' && (
+                      <PurchasesView 
+                        store={store} 
+                        onOpenA4Report={handleOpenA4Report}
+                      />
+                    )}
 
-              {currentTab === 'partners' && (
-                <PartnersEquityView 
-                  store={store} 
-                  onOpenA4Report={handleOpenA4Report}
-                />
-              )}
+                    {currentTab === 'customers' && (
+                      <CustomersView 
+                        store={store} 
+                        onSelectCustomerForInvoice={() => {
+                          handleNavigate('sale');
+                        }}
+                        onOpenCustomerStatement={(customerId) => {
+                          setInitialReportType('customer');
+                          handleNavigate('reports');
+                        }}
+                      />
+                    )}
 
-              {currentTab === 'expenses' && (
-                <ExpensesView store={store} />
-              )}
+                    {currentTab === 'audit' && (
+                      <StoreAuditView 
+                        store={store} 
+                        onOpenA4Report={handleOpenA4Report}
+                      />
+                    )}
 
-              {currentTab === 'damaged' && (
-                <DamagedItemsView 
-                  store={store} 
-                  onOpenA4Report={handleOpenA4Report}
-                />
-              )}
+                    {currentTab === 'partners' && (
+                      <PartnersEquityView 
+                        store={store} 
+                        onOpenA4Report={handleOpenA4Report}
+                      />
+                    )}
 
-              {currentTab === 'workers' && (
-                <WorkersPayrollView 
-                  store={store} 
-                  onOpenA4Report={handleOpenA4Report}
-                />
-              )}
+                    {currentTab === 'expenses' && (
+                      <ExpensesView store={store} />
+                    )}
 
-              {currentTab === 'products' && (
-                <ProductsManagement store={store} />
-              )}
+                    {currentTab === 'damaged' && (
+                      <DamagedItemsView 
+                        store={store} 
+                        onOpenA4Report={handleOpenA4Report}
+                      />
+                    )}
 
-              {currentTab === 'reports' && (
-                <ReportsCenterView 
-                  store={store} 
-                  initialReportType={initialReportType}
-                />
-              )}
+                    {currentTab === 'workers' && (
+                      <WorkersPayrollView 
+                        store={store} 
+                        onOpenA4Report={handleOpenA4Report}
+                      />
+                    )}
 
-              {currentTab === 'settings' && (
-                <SettingsView 
-                  store={store} 
-                  onOpenChangePassword={() => setIsChangePasswordOpen(true)}
-                  onOpenBranchesModal={() => setIsBranchesOpen(true)}
-                />
-              )}
+                    {currentTab === 'products' && (
+                      <ProductsManagement store={store} />
+                    )}
+
+                    {currentTab === 'reports' && (
+                      <ReportsCenterView 
+                        store={store} 
+                        initialReportType={initialReportType}
+                      />
+                    )}
+
+                    {currentTab === 'settings' && (
+                      <SettingsView 
+                        store={store} 
+                        onOpenChangePassword={() => setIsChangePasswordOpen(true)}
+                        onOpenBranchesModal={() => setIsBranchesOpen(true)}
+                      />
+                    )}
+                  </>
+                );
+              })()}
             </motion.div>
           </AnimatePresence>
         </ErrorBoundary>

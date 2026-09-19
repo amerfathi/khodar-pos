@@ -394,9 +394,21 @@ export function useAppStore() {
     setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
   };
 
-  const recordCustomerPayment = (customerId, amount, note = 'سداد دفعة نقدية', paymentMethod = 'cash') => {
+  const recordCustomerPayment = (customerId, amount, note = 'سداد دفعة نقدية', paymentMethod = 'cash', paymentId = null, clientTransactionId = null) => {
     const numAmount = Math.round(Number(amount) * 100) / 100;
     if (!numAmount || numAmount <= 0) return null;
+
+    const clientTxId = clientTransactionId || paymentId;
+    if (clientTxId) {
+      const existing = customerPayments.find(p => 
+        (p.clientTransactionId && p.clientTransactionId === clientTxId) ||
+        (p.id && p.id === clientTxId)
+      );
+      if (existing) {
+        console.warn('Idempotent duplicate customer payment prevented:', existing.id);
+        return existing;
+      }
+    }
 
     const targetCustomer = customers.find(c => c.id === customerId);
     const customerName = targetCustomer ? targetCustomer.name : 'عميل';
@@ -413,7 +425,8 @@ export function useAppStore() {
     }));
 
     const newPayment = {
-      id: `pay-${Date.now()}`,
+      id: paymentId || `pay-${Date.now()}`,
+      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       tenantId: activeTenantId,
       customerId,
       customerName,
@@ -446,8 +459,22 @@ export function useAppStore() {
 
   // Invoice Actions
   const saveInvoice = (invoiceData) => {
+    // 0. Idempotency Guard: prevent duplicate invoice creation and duplicate stock deductions
+    const clientTxId = invoiceData.clientTransactionId || invoiceData.idempotencyKey || invoiceData.id;
+    if (clientTxId) {
+      const existing = invoices.find(inv => 
+        (inv.clientTransactionId && inv.clientTransactionId === clientTxId) ||
+        (inv.idempotencyKey && inv.idempotencyKey === clientTxId) ||
+        (inv.id && inv.id === clientTxId)
+      );
+      if (existing) {
+        console.warn('Idempotent duplicate sale invoice prevented:', existing.id);
+        return existing;
+      }
+    }
+
     const newInvoiceNumber = settings.nextInvoiceNumber || (invoices.length + 126);
-    const invoiceId = String(newInvoiceNumber).padStart(6, '0');
+    const invoiceId = invoiceData.id || String(newInvoiceNumber).padStart(6, '0');
 
     // Credit / remaining debt calculation for credit or split payments
     let creditDebt = 0;
@@ -467,11 +494,13 @@ export function useAppStore() {
     const newInvoice = {
       ...invoiceData,
       id: invoiceId,
+      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      idempotencyKey: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       tenantId: activeTenantId,
       branchId: targetBranchId,
       branchName: targetBranchName,
       remainingDebt: Math.round(creditDebt * 100) / 100,
-      timestamp: Date.now(),
+      timestamp: invoiceData.timestamp || Date.now(),
       status: 'active'
     };
 
@@ -848,6 +877,19 @@ export function useAppStore() {
 
   // Expenses Actions
   const addExpense = (exp) => {
+    const clientTxId = exp.clientTransactionId || exp.idempotencyKey || exp.id;
+    if (clientTxId) {
+      const existing = expenses.find(e => 
+        (e.clientTransactionId && e.clientTransactionId === clientTxId) ||
+        (e.idempotencyKey && e.idempotencyKey === clientTxId) ||
+        (e.id && e.id === clientTxId)
+      );
+      if (existing) {
+        console.warn('Idempotent duplicate expense prevented:', existing.id);
+        return existing;
+      }
+    }
+
     const trimmedCat = (exp.category || 'نثريات وصيانة').trim();
     if (trimmedCat) {
       addExpenseCategory(trimmedCat);
@@ -856,7 +898,9 @@ export function useAppStore() {
     const activeTenantId = exp.tenantId || currentUser?.tenantId || 'tenant-demo';
     const newExp = {
       ...exp,
-      id: `exp-${Date.now()}`,
+      id: exp.id || `exp-${Date.now()}`,
+      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      idempotencyKey: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       tenantId: activeTenantId,
       branchId: activeB?.id || 'branch-main',
       branchName: activeB?.name || 'الفرع الرئيسي',
@@ -1046,9 +1090,22 @@ export function useAppStore() {
     setSuppliers(prev => prev.filter(s => s.id !== id));
   };
 
-  const recordSupplierPayment = ({ supplierId, amount, paymentMethod = 'cash', notes = '', date = null, time = null }) => {
+  const recordSupplierPayment = ({ supplierId, amount, paymentMethod = 'cash', notes = '', date = null, time = null, id = null, clientTransactionId = null, idempotencyKey = null }) => {
     const numAmount = Math.round(Number(amount) * 100) / 100;
     if (!numAmount || numAmount <= 0) return null;
+
+    const clientTxId = clientTransactionId || idempotencyKey || id;
+    if (clientTxId) {
+      const existing = supplierPayments.find(p => 
+        (p.clientTransactionId && p.clientTransactionId === clientTxId) ||
+        (p.idempotencyKey && p.idempotencyKey === clientTxId) ||
+        (p.id && p.id === clientTxId)
+      );
+      if (existing) {
+        console.warn('Idempotent duplicate supplier payment prevented:', existing.id);
+        return existing;
+      }
+    }
 
     const targetSupplier = suppliers.find(s => s.id === supplierId);
     const supplierName = targetSupplier ? targetSupplier.name : 'مورد';
@@ -1068,7 +1125,9 @@ export function useAppStore() {
     }));
 
     const newPayment = {
-      id: `supp-pay-${Date.now()}`,
+      id: id || `supp-pay-${Date.now()}`,
+      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      idempotencyKey: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       supplierId,
       supplierName,
       amount: numAmount,
@@ -1083,6 +1142,8 @@ export function useAppStore() {
     // If paid cash from drawer, log as expense for visibility, tagged to prevent double counting
     if (paymentMethod === 'cash') {
       addExpense({
+        id: `exp-${newPayment.id}`,
+        clientTransactionId: `tx-exp-${newPayment.id}`,
         title: `سداد دفعة لمورد: ${supplierName}`,
         category: 'مشتريات وتوريد',
         amount: numAmount,
@@ -1118,6 +1179,20 @@ export function useAppStore() {
 
   // Purchases Actions (المشتريات وتوريد البضاعة من المزارع وحلقات وسوق الجملة)
   const addPurchase = (purData) => {
+    // 0. Idempotency Guard: prevent duplicate purchase creation, double stock additions & double supplier balances
+    const clientTxId = purData.clientTransactionId || purData.idempotencyKey || purData.id;
+    if (clientTxId) {
+      const existing = purchases.find(p => 
+        (p.clientTransactionId && p.clientTransactionId === clientTxId) ||
+        (p.idempotencyKey && p.idempotencyKey === clientTxId) ||
+        (p.id && p.id === clientTxId)
+      );
+      if (existing) {
+        console.warn('Idempotent duplicate purchase prevented:', existing.id);
+        return existing;
+      }
+    }
+
     const total = Number(purData.totalCost) || (Number(purData.quantityKg || 0) * Number(purData.costPerKg || 0));
     const roundTotal = Math.round(total * 100) / 100;
 
@@ -1148,6 +1223,8 @@ export function useAppStore() {
     const newPurchase = {
       ...purData,
       id: purData.id || `pur-${Date.now()}`,
+      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      idempotencyKey: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       branchId: targetBranchId,
       branchName: targetBranchName,
       date: purData.date || getCurrentDateFormatted(),
@@ -1473,6 +1550,7 @@ export function useAppStore() {
   const exportBackupJSON = () => {
     const data = {
       version: 3,
+      tenantId: currentUser?.tenantId || 'tenant-demo',
       exportDate: new Date().toISOString(),
       products,
       customers,
@@ -1758,6 +1836,15 @@ export function useAppStore() {
   const importBackupJSON = (jsonString) => {
     try {
       const data = JSON.parse(jsonString);
+      
+      // Multi-Tenant Isolation Gate: Reject importing another tenant's backup into the current tenant
+      if (data.tenantId && currentUser?.tenantId && data.tenantId !== currentUser.tenantId && currentUser.role !== 'super_admin') {
+        return { 
+          success: false, 
+          error: `لا يمكن استيراد هذه النسخة الاحتياطية لأنها تنتمي لمتجر آخر (${data.tenantId}) ولا تطابق متجرك الحالي (${currentUser.tenantId}) لمنع تداخل واختراق بيانات المتاجر.` 
+        };
+      }
+
       if (data.products) setProducts(data.products);
       if (data.customers) setCustomers(data.customers);
       if (data.invoices) setInvoices(data.invoices);
