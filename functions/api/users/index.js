@@ -21,6 +21,13 @@ export async function onRequestGet(context) {
   const tenantId = (url.searchParams.get('tenantId') || '').trim();
   const userId = (url.searchParams.get('id') || '').trim();
 
+  if (!tenantId && !userId) {
+    return new Response(JSON.stringify({ 
+      success: false, 
+      error: 'tenantId مطلوب للاستعلام عن المستخدمين لضمان عزل البيانات بين المتاجر' 
+    }), { status: 400, headers: CORS_HEADERS });
+  }
+
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ 
       success: false, 
@@ -32,14 +39,15 @@ export async function onRequestGet(context) {
     let query = "SELECT * FROM users";
     const params = [];
 
-    if (userId) {
+    if (userId && tenantId) {
+      query += " WHERE id = ? AND tenant_id = ? LIMIT 1";
+      params.push(userId, tenantId);
+    } else if (userId) {
       query += " WHERE id = ? LIMIT 1";
       params.push(userId);
-    } else if (tenantId) {
+    } else {
       query += " WHERE tenant_id = ? ORDER BY created_at DESC";
       params.push(tenantId);
-    } else {
-      query += " ORDER BY created_at DESC LIMIT 100";
     }
 
     const { results } = await env.DB.prepare(query).bind(...params).all();
@@ -58,7 +66,6 @@ export async function onRequestGet(context) {
         branchId: u.branch_id || 'all',
         name: u.name,
         username: u.username,
-        password: u.password_hash,
         role: u.role || 'cashier',
         status: u.status || 'active',
         phone: u.phone || '',
@@ -188,17 +195,17 @@ export async function onRequestPatch(context) {
     const body = await request.json();
     const { id, tenantId, name, username, password, role, status, branchId, phone, permissions } = body;
 
-    if (!id) {
+    if (!id || !tenantId) {
       return new Response(JSON.stringify({
         success: false,
-        error: 'معرف المستخدم id مطلوب لتحديث البيانات'
+        error: 'معرف المستخدم id وكود المستأجر tenantId مطلوبان لتحديث البيانات لضمان عزل البيانات'
       }), { status: 400, headers: CORS_HEADERS });
     }
 
-    // Fetch existing user to merge
+    // Fetch existing user to verify tenant ownership
     const existing = await env.DB.prepare(
-      "SELECT * FROM users WHERE id = ? LIMIT 1"
-    ).bind(id).first();
+      "SELECT * FROM users WHERE id = ? AND tenant_id = ? LIMIT 1"
+    ).bind(id, tenantId).first();
 
     if (!existing) {
       // If user doesn't exist yet in D1 (e.g. was created offline or initially), upsert it!
@@ -304,11 +311,12 @@ export async function onRequestDelete(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const id = (url.searchParams.get('id') || '').trim();
+  const tenantId = (url.searchParams.get('tenantId') || '').trim();
 
-  if (!id) {
+  if (!id || !tenantId) {
     return new Response(JSON.stringify({
       success: false,
-      error: 'معرف المستخدم id مطلوب للحذف'
+      error: 'معرف المستخدم id وكود المستأجر tenantId مطلوبان للحذف لضمان عزل البيانات'
     }), { status: 400, headers: CORS_HEADERS });
   }
 
@@ -320,16 +328,22 @@ export async function onRequestDelete(context) {
   }
 
   try {
-    const res = await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id).run();
+    const res = await env.DB.prepare("DELETE FROM users WHERE id = ? AND tenant_id = ?").bind(id, tenantId).run();
+    if (!res.meta?.changes) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'لم يتم العثور على المستخدم للحذف أو أنه لا يتبع هذا المتجر'
+      }), { status: 404, headers: CORS_HEADERS });
+    }
     return new Response(JSON.stringify({
       success: true,
       message: 'تم حذف المستخدم من السحابة بنجاح',
       changes: res.meta?.changes || 0
     }), { headers: CORS_HEADERS });
   } catch (err) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: err.message
+    return new Response(JSON.stringify({ 
+      success: false, 
+      error: err.message 
     }), { status: 500, headers: CORS_HEADERS });
   }
 }

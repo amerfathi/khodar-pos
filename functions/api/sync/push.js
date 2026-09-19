@@ -41,7 +41,7 @@ export async function onRequestPost(context) {
       const clientTime = evt.timestamp || Date.now();
 
       return env.DB.prepare(`
-        INSERT INTO sync_events (id, tenant_id, branch_id, entity_type, entity_id, action, payload_json, client_timestamp)
+        INSERT OR IGNORE INTO sync_events (id, tenant_id, branch_id, entity_type, entity_id, action, payload_json, client_timestamp)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
         eventId,

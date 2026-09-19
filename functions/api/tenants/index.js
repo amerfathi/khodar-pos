@@ -30,7 +30,6 @@ export async function onRequestGet(context) {
       storeCode: r.store_code || 'BRK-101',
       companyName: r.company_name,
       username: r.username,
-      password: r.password_hash,
       role: r.role || 'company_owner',
       status: r.status || 'active',
       expiresAt: r.expires_at,

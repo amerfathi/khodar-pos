@@ -1848,8 +1848,8 @@ export function useAppStore() {
         t.id === cleanStoreCode.toLowerCase()
       );
 
-      // Real-time Cloud Lookup & Sync (Cloud-First & Offline-First)
-      // Query Cloudflare D1 to get the freshest tenant state, users, and permissions
+      // Real-time Cloud Authentication & Sync (Cloud-First & Offline-First)
+      // Authenticates with Cloudflare D1 securely without leaking passwords, with instant offline fallback
       if (typeof window !== 'undefined') {
         try {
           const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
@@ -1857,25 +1857,69 @@ export function useAppStore() {
             : 'https://khodar-pos.pages.dev';
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 2500);
-          const res = await fetch(`${baseUrl}/api/tenants/lookup?code=${encodeURIComponent(cleanStoreCode)}`, { signal: controller.signal });
+
+          const authRes = await fetch(`${baseUrl}/api/tenants/lookup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ storeCode: cleanStoreCode, username: cleanUser, password }),
+            signal: controller.signal
+          });
           clearTimeout(timeoutId);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success && data.tenant) {
-              targetTenant = data.tenant;
-              // Cache locally so it is permanently available even if internet cuts out later
-              setTenants(prev => [targetTenant, ...prev.filter(t => t.id !== targetTenant.id && (t.storeCode || '').toUpperCase() !== cleanStoreCode)]);
-              if (Array.isArray(data.users)) {
-                setUsers(prev => {
-                  const cloudUserIds = new Set(data.users.map(u => u.id));
-                  const others = prev.filter(u => u.tenantId !== targetTenant.id && !cloudUserIds.has(u.id));
-                  return [...data.users, ...others];
-                });
+
+          if (authRes.ok) {
+            const authData = await authRes.json();
+            if (authData.success && authData.authenticated) {
+              const activeTenant = authData.tenant;
+              targetTenant = activeTenant;
+              setTenants(prev => [activeTenant, ...prev.filter(t => t.id !== activeTenant.id && (t.storeCode || '').toUpperCase() !== cleanStoreCode)]);
+
+              if (authData.userType === 'owner') {
+                const adminSession = {
+                  ...authData.user,
+                  tenantId: activeTenant.id,
+                  storeCode: activeTenant.storeCode || cleanStoreCode,
+                  permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions }
+                };
+                if (activeTenant.companyName) {
+                  setSettings(prev => ({ ...prev, shopName: activeTenant.companyName }));
+                }
+                setCurrentUser(adminSession);
+                try {
+                  localStorage.setItem('khodar_remembered_username', cleanUser);
+                  localStorage.setItem('khodar_remembered_store_code', activeTenant.storeCode || cleanStoreCode);
+                } catch (e) {}
+                return { success: true, user: adminSession };
+              } else if (authData.userType === 'staff') {
+                const staffUser = authData.user;
+                if (staffUser.branchId && staffUser.branchId !== 'all') {
+                  setActiveBranchId(staffUser.branchId);
+                }
+                const rolePreset = ROLE_PERMISSIONS_PRESETS[staffUser.role] || ROLE_PERMISSIONS_PRESETS.cashier;
+                const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
+                const resolvedPerms = staffUser.role === 'custom'
+                  ? { ...DEFAULT_PERMISSIONS, ...(staffUser.permissions || {}) }
+                  : { ...defaultPerms, ...(staffUser.permissions || {}) };
+
+                const userSession = {
+                  ...staffUser,
+                  companyName: activeTenant.companyName || 'سوق ومحل الخضار والفواكه',
+                  tenantId: activeTenant.id,
+                  storeCode: activeTenant.storeCode || cleanStoreCode,
+                  permissions: resolvedPerms,
+                  isStaff: true
+                };
+                setUsers(prev => [staffUser, ...prev.filter(u => u.id !== staffUser.id)]);
+                setCurrentUser(userSession);
+                try {
+                  localStorage.setItem('khodar_remembered_username', cleanUser);
+                  localStorage.setItem('khodar_remembered_store_code', activeTenant.storeCode || cleanStoreCode);
+                } catch (e) {}
+                return { success: true, user: userSession };
               }
             }
           }
         } catch (netErr) {
-          console.warn('Cloud store code lookup failed or offline (using local cache):', netErr.message);
+          console.warn('Cloud server authentication offline or timed out (falling back to local cache):', netErr.message);
         }
       }
 
