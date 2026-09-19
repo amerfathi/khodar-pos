@@ -95,6 +95,7 @@ export default function WeightTallyModal({ isOpen, onClose, itemName, initialWei
               <input 
                 type="number"
                 step="0.1"
+                inputMode="decimal"
                 placeholder="مثلاً: 32.5"
                 value={currentInput}
                 onChange={(e) => setCurrentInput(e.target.value)}

@@ -369,43 +369,45 @@ export default function SettingsView({
       {/* 2. Main Layout: Subtabs Sidebar + Content Area */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
         
-        {/* Subtabs Menu */}
-        <div className="lg:col-span-1 space-y-1.5">
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-2 shadow-2xs sticky top-20">
-            <div className="px-3 py-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+        {/* Subtabs Menu: Horizontal scroll on mobile, vertical sidebar on desktop */}
+        <div className="lg:col-span-1">
+          <div className="bg-white rounded-2xl border border-slate-200/90 p-2 shadow-2xs lg:sticky lg:top-20">
+            <div className="hidden lg:block px-3 py-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               أقسام الضبط
             </div>
-            {subTabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeSubTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveSubTab(tab.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-right transition-all cursor-pointer ${
-                    isActive 
-                      ? 'bg-primary-50 text-primary-700 font-bold border border-primary-100 shadow-2xs' 
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
-                  }`}
-                >
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                    isActive ? 'bg-primary-600 text-white shadow-2xs' : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    <Icon size={16} />
-                  </div>
-                  <div className="truncate flex-1">
-                    <span className="block text-xs leading-tight">{tab.label}</span>
-                    <span className={`block text-[10px] truncate mt-0.5 ${isActive ? 'text-primary-600' : 'text-slate-400'}`}>
-                      {tab.desc}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+            <div className="flex lg:flex-col overflow-x-auto lg:overflow-visible gap-1.5 scrollbar-none pb-1 lg:pb-0 touch-action-manipulation">
+              {subTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeSubTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveSubTab(tab.id)}
+                    className={`flex items-center gap-2 lg:gap-3 px-3 py-2 lg:py-2.5 rounded-xl text-right transition-all cursor-pointer shrink-0 lg:shrink lg:w-full whitespace-nowrap lg:whitespace-normal ${
+                      isActive 
+                        ? 'bg-primary-50 text-primary-700 font-bold border border-primary-200 shadow-2xs' 
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
+                    }`}
+                  >
+                    <div className={`w-7 h-7 lg:w-8 lg:h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                      isActive ? 'bg-primary-600 text-white shadow-2xs' : 'bg-slate-100 text-slate-500'
+                    }`}>
+                      <Icon size={15} />
+                    </div>
+                    <div className="truncate text-right">
+                      <span className="block text-xs font-bold leading-tight">{tab.label}</span>
+                      <span className={`hidden lg:block text-[10px] truncate mt-0.5 ${isActive ? 'text-primary-600' : 'text-slate-400'}`}>
+                        {tab.desc}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
 
-            {/* Branch Quick Card */}
-            <div className="mt-4 pt-3 border-t border-slate-100 px-3 pb-2">
+            {/* Branch Quick Card (Desktop only - mobile uses top bar chip) */}
+            <div className="hidden lg:block mt-4 pt-3 border-t border-slate-100 px-3 pb-2">
               <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
                 <span>الفرع النشط حالياً:</span>
                 <span className="font-bold text-navy-850 font-mono">{activeBranch?.code || 'BR-01'}</span>
@@ -621,6 +623,44 @@ export default function SettingsView({
                         </div>
                       </>
                     )}
+                  </div>
+                </div>
+
+                {/* Quick Display & Font Scale Section */}
+                <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-2xs space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                        <Type size={18} />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-sm text-navy-850">حجم الخط وشاشات العرض</h3>
+                        <p className="text-[11px] text-slate-400">تخصيص مقاس النصوص وشاشات البيع للجوال والأجهزة اللوحية</p>
+                      </div>
+                    </div>
+                    <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-mono font-bold">
+                      {form.fontSizeScale || 100}%
+                    </span>
+                  </div>
+                  <div className="space-y-3 pt-1">
+                    <input
+                      type="range"
+                      min="80"
+                      max="130"
+                      step="5"
+                      value={form.fontSizeScale || 100}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setForm(prev => ({ ...prev, fontSizeScale: val }));
+                        document.documentElement.style.fontSize = `${(val / 100) * 16}px`;
+                      }}
+                      className="w-full h-2.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                    />
+                    <div className="flex justify-between text-[11px] text-slate-500 font-mono">
+                      <span>80% صغير</span>
+                      <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">100% قياسي</span>
+                      <span>130% كبير</span>
+                    </div>
                   </div>
                 </div>
               </motion.div>

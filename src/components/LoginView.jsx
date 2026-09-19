@@ -4,7 +4,7 @@ import {
   Store, Monitor, Smartphone, Globe, Download, ArrowLeft, Laptop
 } from 'lucide-react';
 import { Button, Badge } from './ui';
-import { APP_VERSION } from '../config/appVersion';
+import { APP_VERSION, getClientPlatform } from '../config/appVersion';
 import { BRRAKA_LOGO } from '../assets/branding';
 import ForgotPasswordModal from './ForgotPasswordModal';
 
@@ -37,6 +37,7 @@ export default function LoginView({ store, onClose }) {
   const [isExpiredAlert, setIsExpiredAlert] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeViewTab, setActiveViewTab] = useState('login'); // 'login' | 'platforms'
+  const isNativeMobile = getClientPlatform() === 'android' || getClientPlatform() === 'ios';
 
   const usernameInputRef = useRef(null);
   const passwordInputRef = useRef(null);
@@ -100,13 +101,13 @@ export default function LoginView({ store, onClose }) {
   };
 
   return (
-    <div className={`${onClose ? 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs' : 'min-h-screen bg-[#f8fafc] py-8 px-4 flex flex-col justify-center items-center'} text-right font-sans`} dir="rtl">
+    <div className={`${onClose ? 'fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/50 backdrop-blur-xs' : 'min-h-[100dvh] bg-white sm:bg-[#f8fafc] sm:py-8 sm:px-4 flex flex-col justify-start sm:justify-center items-center'} text-right font-sans pt-safe pb-safe`} dir="rtl">
       
-      {/* Central Product Gateway Card (Pure White Enterprise Theme) */}
-      <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-200/90 z-10 relative">
+      {/* Central Product Gateway Card (Responsive: Edge-to-Edge on Mobile, Elegant Card on Desktop) */}
+      <div className="w-full sm:max-w-md bg-white sm:rounded-3xl sm:shadow-xl sm:border sm:border-slate-200/90 z-10 relative flex flex-col justify-between flex-1 sm:flex-initial">
         
-        {/* Gateway Brand Header (Clean White / Light Theme) */}
-        <div className="bg-white text-slate-800 p-6 text-center relative border-b border-slate-100">
+        {/* Gateway Brand Header (Clean Apple White / Light Theme) */}
+        <div className="bg-white text-slate-800 p-5 sm:p-6 text-center relative border-b border-slate-100">
           {onClose && (
             <button
               type="button"
@@ -119,45 +120,49 @@ export default function LoginView({ store, onClose }) {
             </button>
           )}
 
-          <img 
-            src={BRRAKA_LOGO} 
-            alt="براكه" 
-            className="w-24 h-24 mx-auto mb-3 object-contain drop-shadow-sm" 
-          />
+          <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-2.5 p-2 rounded-2xl bg-emerald-50/70 border border-emerald-200/60 flex items-center justify-center shadow-xs">
+            <img 
+              src={BRRAKA_LOGO} 
+              alt="براكه" 
+              className="w-full h-full object-contain" 
+            />
+          </div>
 
           <div className="flex items-center justify-center gap-2">
-            <h1 className="text-xl font-black text-slate-900 tracking-tight">منظومة براكه | Brraka</h1>
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">براكه | Brraka</h1>
             <Badge variant="success" size="sm">v{APP_VERSION}</Badge>
           </div>
-          <p className="text-xs text-slate-500 mt-1 font-medium">منظومة موحدة لإدارة الكاشير والمبيعات والموازين السحابية</p>
+          <p className="text-xs text-slate-500 mt-1 font-medium">منظومة كاشير ومحاسبة سحابية متكاملة</p>
 
-          {/* Navigation Pill Switcher */}
-          <div className="mt-4 grid grid-cols-2 p-1 bg-slate-100 rounded-xl text-xs font-bold max-w-xs mx-auto border border-slate-200/80">
-            <button
-              type="button"
-              onClick={() => setActiveViewTab('login')}
-              className={`py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                activeViewTab === 'login'
-                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <ShieldCheck size={14} />
-              <span>تسجيل الدخول</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveViewTab('platforms')}
-              className={`py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                activeViewTab === 'platforms'
-                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Download size={14} />
-              <span>تحميل التطبيقات</span>
-            </button>
-          </div>
+          {/* Navigation Pill Switcher (Web only - not shown on native Android app) */}
+          {!isNativeMobile && (
+            <div className="mt-4 grid grid-cols-2 p-1 bg-slate-100 rounded-xl text-xs font-bold max-w-xs mx-auto border border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => setActiveViewTab('login')}
+                className={`py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeViewTab === 'login'
+                    ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ShieldCheck size={14} />
+                <span>تسجيل الدخول</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveViewTab('platforms')}
+                className={`py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  activeViewTab === 'platforms'
+                    ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Download size={14} />
+                <span>تحميل التطبيقات</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Tab 1: Login View */}
@@ -267,7 +272,7 @@ export default function LoginView({ store, onClose }) {
                 </label>
                 <div className="relative">
                   <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-                    <User size={15} />
+                    <User size={17} />
                   </div>
                   <input
                     ref={usernameInputRef}
@@ -276,7 +281,7 @@ export default function LoginView({ store, onClose }) {
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="أدخل اسم المستخدم أو البريد المسجل"
-                    className="w-full h-11 pr-10 pl-3 bg-white border border-slate-300 rounded-xl text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/15 transition-all select-text font-medium"
+                    className="w-full h-12 pr-11 pl-3 bg-slate-50/80 border border-slate-200 rounded-2xl text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-emerald-600 focus:ring-4 focus:ring-emerald-500/10 transition-all select-text font-medium"
                   />
                 </div>
               </div>
@@ -288,7 +293,7 @@ export default function LoginView({ store, onClose }) {
                 </label>
                 <div className="relative">
                   <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-                    <KeyRound size={15} />
+                    <KeyRound size={17} />
                   </div>
                   <input
                     ref={passwordInputRef}
@@ -297,14 +302,14 @@ export default function LoginView({ store, onClose }) {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full h-11 pr-10 pl-10 bg-white border border-slate-300 rounded-xl text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/15 transition-all select-text font-medium"
+                    className="w-full h-12 pr-11 pl-11 bg-slate-50/80 border border-slate-200 rounded-2xl text-slate-900 text-sm placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-emerald-600 focus:ring-4 focus:ring-emerald-500/10 transition-all select-text font-medium"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer rounded-lg"
                   >
-                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
               </div>
@@ -316,7 +321,7 @@ export default function LoginView({ store, onClose }) {
                     type="checkbox"
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
-                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/30 w-3.5 h-3.5 cursor-pointer"
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500/30 w-4 h-4 cursor-pointer"
                   />
                   <span>تذكر بيانات الدخول</span>
                 </label>
@@ -335,13 +340,13 @@ export default function LoginView({ store, onClose }) {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                  className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold text-sm shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-[0.99] disabled:opacity-50"
                 >
                   {loading ? (
                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
                     <>
-                      <ShieldCheck size={16} />
+                      <ShieldCheck size={18} />
                       <span>تسجيل الدخول إلى النظام</span>
                     </>
                   )}
@@ -349,17 +354,19 @@ export default function LoginView({ store, onClose }) {
               </div>
             </form>
 
-            {/* Quick banner to switch to downloads */}
-            <div className="pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setActiveViewTab('platforms')}
-                className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors border border-slate-200/80 cursor-pointer"
-              >
-                <Laptop size={14} className="text-emerald-600" />
-                <span>تحميل البرنامج للكمبيوتر أو تطبيق الهاتف (Windows / Android)</span>
-              </button>
-            </div>
+            {/* Quick banner to switch to downloads (Web/Desktop only - hidden on native mobile app) */}
+            {!isNativeMobile && !onClose && (
+              <div className="pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setActiveViewTab('platforms')}
+                  className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors border border-slate-200/80 cursor-pointer"
+                >
+                  <Laptop size={14} className="text-emerald-600" />
+                  <span>تحميل البرنامج للكمبيوتر أو تطبيق الهاتف (Windows / Android)</span>
+                </button>
+              </div>
+            )}
 
           </div>
         )}
@@ -448,8 +455,9 @@ export default function LoginView({ store, onClose }) {
                 </div>
 
                 <a
-                  href="/downloads/KhodarPOS.apk"
-                  download="KhodarPOS.apk"
+                  href="https://github.com/amerfathi/khodar-pos/releases/download/v2.6.0/KhodarPOS.apk"
+                  target="_blank"
+                  rel="noreferrer"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-medium transition-colors shadow-2xs shrink-0"
                 >
                   <Download size={13} />

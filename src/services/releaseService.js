@@ -42,20 +42,20 @@ export const OFFICIAL_RELEASES = [
     publishedAt: '2026-09-19T00:00:00Z'
   },
   {
-    id: 'rel-and-2-5-0',
+    id: 'rel-and-2-6-0',
     platform: 'android',
-    version: '2.5.0',
+    version: '2.6.0',
     minimumVersion: '2.2.0',
     status: 'published',
     updateType: 'recommended',
     releaseNotes: [
-      'نظام استرداد كلمة المرور وتأمين الحسابات',
-      'واجهة رئيسية للهواتف الذكية (Mobile Home Hub) سريعة ومريحة للمس',
-      'شريط تنقل سفلي ذكي ومزامنة سحابية مع Cloudflare D1'
+      'شاشة ترحيبية انسيابية (Splash Screen) لمدة 5 ثواني بهوية براكه',
+      'واجهة تسجيل دخول متجاوبة ومريحة بالكامل لشاشات الهواتف',
+      'حزمة خطوط آبل المتناسقة (Apple Typography SF Pro / SF Arabic)'
     ],
-    downloadUrl: 'https://khodar-pos.pages.dev/downloads/KhodarPOS.apk',
-    fileSizeBytes: 3386842,
-    publishedAt: '2026-09-19T00:00:00Z'
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.0/KhodarPOS.apk',
+    fileSizeBytes: 29684009,
+    publishedAt: '2026-09-20T00:00:00Z'
   }
 ];
 

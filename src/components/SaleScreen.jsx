@@ -653,7 +653,7 @@ export default function SaleScreen({
             LEFT COLUMN (Cashier & Checkout Sidebar - 35% to 38% width, sticky on desktop)
             Invoice Meta, Customer, Payment Selector, Financial Breakdown & Checkout
            ========================================================================= */}
-        <div className="w-full lg:w-[420px] xl:w-[460px] shrink-0 space-y-4 lg:sticky lg:top-16">
+        <div id="payment-section" className="w-full lg:w-[420px] xl:w-[460px] shrink-0 space-y-4 lg:sticky lg:top-16">
           
           {/* Card A: Invoice Meta, Customer & Payment Methods */}
           <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
@@ -856,6 +856,7 @@ export default function SaleScreen({
                       <label className="block text-[10px] font-bold text-slate-600 mb-1">1. نقدي (كاش)</label>
                       <input
                         type="number"
+                        inputMode="decimal"
                         placeholder="0.00"
                         value={splitCash}
                         onChange={(e) => setSplitCash(e.target.value)}
@@ -867,6 +868,7 @@ export default function SaleScreen({
                       <label className="block text-[10px] font-bold text-slate-600 mb-1">2. تحويل بنكي</label>
                       <input
                         type="number"
+                        inputMode="decimal"
                         placeholder="0.00"
                         value={splitBank}
                         onChange={(e) => setSplitBank(e.target.value)}
@@ -878,6 +880,7 @@ export default function SaleScreen({
                       <label className="block text-[10px] font-bold text-slate-600 mb-1">3. آجل (دين)</label>
                       <input
                         type="number"
+                        inputMode="decimal"
                         placeholder="0.00"
                         value={splitCredit}
                         onChange={(e) => setSplitCredit(e.target.value)}
@@ -932,6 +935,7 @@ export default function SaleScreen({
                 <input
                   type="number"
                   step="0.5"
+                  inputMode="decimal"
                   placeholder="0.00"
                   value={discountAmount || ''}
                   onChange={(e) => setDiscountAmount(Number(e.target.value))}
@@ -963,6 +967,7 @@ export default function SaleScreen({
                     <input
                       type="number"
                       step="1"
+                      inputMode="decimal"
                       placeholder={finalTotal.toFixed(2)}
                       value={paidAmount}
                       onChange={(e) => setPaidAmount(e.target.value)}
@@ -1147,6 +1152,7 @@ export default function SaleScreen({
                 <input
                   type="number"
                   min="1"
+                  inputMode="numeric"
                   value={activeItem.packageCount}
                   onChange={(e) => setActiveItem(prev => ({ ...prev, packageCount: Number(e.target.value) }))}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -1158,6 +1164,7 @@ export default function SaleScreen({
                 <input
                   type="number"
                   step="0.1"
+                  inputMode="decimal"
                   value={activeItem.tarePerUnit}
                   onChange={(e) => setActiveItem(prev => ({ ...prev, tarePerUnit: Number(e.target.value) }))}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -1185,6 +1192,7 @@ export default function SaleScreen({
               <input
                 type="number"
                 step="0.1"
+                inputMode="decimal"
                 placeholder="أدخل الوزن الإجمالي على الميزان"
                 value={activeItem.grossWeight || ''}
                 onChange={(e) => setActiveItem(prev => ({ ...prev, grossWeight: Number(e.target.value) }))}
@@ -1201,6 +1209,7 @@ export default function SaleScreen({
                 <input
                   type="number"
                   step="0.1"
+                  inputMode="decimal"
                   value={activeItem.pricePerKg || ''}
                   onChange={(e) => setActiveItem(prev => ({ ...prev, pricePerKg: Number(e.target.value) }))}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -1238,6 +1247,49 @@ export default function SaleScreen({
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Sticky Quick-Checkout Floating Bar (Docked above BottomNav) */}
+      {cartItems.length > 0 && (
+        <div className="lg:hidden fixed bottom-16 inset-x-0 z-30 px-3 pb-safe pointer-events-none">
+          <div className="max-w-lg mx-auto bg-slate-900/95 text-white backdrop-blur-md rounded-2xl p-3 shadow-2xl border border-slate-700/80 pointer-events-auto flex items-center justify-between gap-3 animate-in slide-in-from-bottom duration-200">
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] text-slate-300 font-medium truncate">
+                {cartItems.length} {cartItems.length === 1 ? 'صنف' : 'أصناف'} • {totalPackages} عبوة ({formatWeight(totalNetWeight)})
+              </span>
+              <div className="flex items-baseline gap-1">
+                <span className="text-emerald-400 font-black font-mono text-lg tracking-tight">
+                  {finalTotal.toFixed(2)}
+                </span>
+                <span className="text-[11px] text-slate-400 font-medium">{settings.currency}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById('payment-section');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1 border border-slate-700 transition-all cursor-pointer active:scale-95"
+              >
+                <span>الدفع</span>
+                <ChevronDown size={14} />
+              </button>
+
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => handleSaveInvoice(true)}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+              >
+                <Printer size={15} />
+                <span>حفظ وطباعة</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

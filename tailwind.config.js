@@ -48,7 +48,18 @@ export default {
         }
       },
       fontFamily: {
-        sans: ['Alexandria', 'IBM Plex Sans Arabic', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: [
+          '-apple-system',
+          'BlinkMacSystemFont',
+          '"SF Pro Text"',
+          '"SF Pro Display"',
+          '"SF Arabic"',
+          '"SF Pro"',
+          '"IBM Plex Sans Arabic"',
+          '"Readex Pro"',
+          'system-ui',
+          'sans-serif'
+        ],
       },
       boxShadow: {
         'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',

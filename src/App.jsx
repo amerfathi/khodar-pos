@@ -15,9 +15,10 @@ import MobileHomeHub from './components/MobileHomeHub';
 import BottomNav from './components/BottomNav';
 import InvoiceReceiptModal from './components/InvoiceReceiptModal';
 import A4InvoiceModal from './components/A4InvoiceModal';
-import SettingsModal from './components/SettingsModal';
+import { App as CapApp } from '@capacitor/app';
 import LoginView from './components/LoginView';
 import DesktopLoginView from './components/DesktopLoginView';
+import SplashScreen from './components/SplashScreen';
 import MarketingLandingPage from './components/MarketingLandingPage';
 import ChangePasswordModal from './components/ChangePasswordModal';
 import SuperAdminPortal from './components/SuperAdminPortal';
@@ -178,6 +179,9 @@ export default function App() {
     return 'sale';
   });
 
+  // 5-Second Brand Splash Screen on App Launch
+  const [showSplash, setShowSplash] = useState(true);
+
   // Navigation history stack for mobile back button + direction tracking
   const [navHistory, setNavHistory] = useState(['home']);
   const [direction, setDirection] = useState(1); // 1 = forward, -1 = back
@@ -185,7 +189,6 @@ export default function App() {
   // Modals for invoices, SaaS and Branches
   const [a4Invoice, setA4Invoice] = useState(null);
   const [receiptInvoice, setReceiptInvoice] = useState(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isSuperAdminOpen, setIsSuperAdminOpen] = useState(false);
   const [isBranchesOpen, setIsBranchesOpen] = useState(false);
@@ -204,6 +207,49 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [isDesktopDownloadModalOpen, setIsDesktopDownloadModalOpen] = useState(false);
+
+  // Cloudflare D1 real-time sync status subscription
+  const [syncStatus, setSyncStatus] = useState({ isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true, queueLength: 0 });
+  useEffect(() => {
+    if (store.syncService?.subscribe) {
+      const unsub = store.syncService.subscribe(setSyncStatus);
+      return unsub;
+    }
+  }, [store.syncService]);
+
+  // Native Android Hardware & Gesture Back Button Handler
+  useEffect(() => {
+    let backListener = null;
+    const bindAndroidBack = async () => {
+      try {
+        backListener = await CapApp.addListener('backButton', () => {
+          if (a4Invoice) { setA4Invoice(null); return; }
+          if (receiptInvoice) { setReceiptInvoice(null); return; }
+          if (isChangePasswordOpen) { setIsChangePasswordOpen(false); return; }
+          if (isBranchesOpen) { setIsBranchesOpen(false); return; }
+          if (isSuperAdminOpen) { setIsSuperAdminOpen(false); return; }
+          if (isUpdateModalOpen) { setIsUpdateModalOpen(false); return; }
+          if (isBranchDropdownOpen) { setIsBranchDropdownOpen(false); return; }
+
+          if (currentTab !== 'home') {
+            handleGoBack();
+            return;
+          }
+
+          CapApp.exitApp();
+        });
+      } catch (e) {
+        // Fallback or non-capacitor context
+      }
+    };
+    bindAndroidBack();
+    return () => {
+      if (backListener?.remove) backListener.remove();
+    };
+  }, [
+    a4Invoice, receiptInvoice, isChangePasswordOpen, isBranchesOpen, 
+    isSuperAdminOpen, isUpdateModalOpen, isBranchDropdownOpen, currentTab, navHistory
+  ]);
 
   useEffect(() => {
     // Only check and notify updates on native platforms (Desktop Electron and Mobile Capacitor)
@@ -354,6 +400,15 @@ export default function App() {
     handleNavigate('reports');
   };
 
+  // 1. Initial 5-Second Branded Fullscreen Splash Screen on App Launch
+  if (showSplash) {
+    return (
+      <AnimatePresence>
+        <SplashScreen onFinish={() => setShowSplash(false)} duration={5000} />
+      </AnimatePresence>
+    );
+  }
+
   // If not authenticated, route based on product platform surface
   if (!currentUser) {
     const platform = getClientPlatform();
@@ -363,8 +418,9 @@ export default function App() {
       return <DesktopLoginView store={store} />;
     }
 
-    // 2. Mobile App (Capacitor / Android): Fast Native Mobile Login
-    if (platform === 'android') {
+    // 2. Mobile App (Capacitor / Android / iOS) or Mobile Viewport: Fast Native Mobile Login
+    const isMobileDevice = platform === 'android' || platform === 'ios' || (typeof window !== 'undefined' && (window.innerWidth < 768 || /android|iphone|ipad|mobile/i.test(navigator.userAgent)));
+    if (isMobileDevice) {
       return <LoginView store={store} />;
     }
 
@@ -414,7 +470,7 @@ export default function App() {
         onOpenBranchesModal={() => setIsBranchesOpen(true)}
         onOpenChangePassword={() => setIsChangePasswordOpen(true)}
         onOpenSuperAdmin={() => setIsSuperAdminOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={() => handleNavigate('settings')}
         onLogout={logout}
         settings={settings}
         hasPermission={store.hasPermission}
@@ -429,37 +485,37 @@ export default function App() {
           className="sticky top-0 z-20 bg-white/95 backdrop-blur-md text-slate-800 shadow-xs border-b border-slate-200/80 print:hidden w-full select-none"
         >
           {/* A. Mobile Top Bar (< md) */}
-          <div className="md:hidden w-full px-3 py-2 flex items-center justify-between gap-2">
+          <div className="md:hidden w-full px-3 py-2 pt-safe flex items-center justify-between gap-1.5 touch-action-manipulation">
             <div 
               style={{ WebkitAppRegion: 'no-drag' }}
-              className="flex items-center gap-2 shrink-0"
+              className="flex items-center gap-1.5 shrink-0 min-w-0"
             >
               {isSubPageOnMobile ? (
                 <motion.button
                   whileTap={{ scale: 0.92 }}
                   type="button"
                   onClick={handleGoBack}
-                  className="flex items-center gap-1.5 py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors shadow-2xs cursor-pointer select-none"
+                  className="flex items-center gap-1 py-1.5 px-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-colors shadow-2xs cursor-pointer select-none"
                   title="الرجوع للرئيسية"
                 >
-                  <ArrowRight size={15} className="text-slate-600" />
-                  <span className="text-slate-800 text-xs font-semibold">رجوع</span>
+                  <ArrowRight size={15} className="text-slate-700" />
+                  <span>رجوع</span>
                 </motion.button>
               ) : (
                 <img 
                   src={BRRAKA_LOGO} 
                   alt="براكه" 
-                  className="w-9 h-9 rounded-xl object-contain shadow-xs shrink-0" 
+                  className="w-8 h-8 rounded-xl object-contain shadow-xs shrink-0" 
                 />
               )}
 
               {/* Shop Name & Subtitle */}
-              <div className="truncate max-w-[120px]">
+              <div className="truncate max-w-[110px] sm:max-w-[140px]">
                 <span className="font-bold text-xs text-navy-850 truncate block">
                   {settings.shopName || 'براكه'}
                 </span>
                 <span className="text-[10px] text-slate-400 truncate block">
-                  {settings.subTitle}
+                  {settings.subTitle || 'نقطة بيع سحابية'}
                 </span>
               </div>
 
@@ -472,7 +528,7 @@ export default function App() {
                   title="الفرع النشط"
                 >
                   <Store size={12} className="text-primary-500 shrink-0" />
-                  <span className="truncate max-w-[70px]">
+                  <span className="truncate max-w-[65px]">
                     {activeBranch?.name || 'الرئيسي'}
                   </span>
                   <ChevronDown size={11} className="text-slate-400 shrink-0" />
@@ -536,20 +592,23 @@ export default function App() {
               </div>
             </div>
 
-            {/* Current Page Title Badge on Mobile */}
-            {isSubPageOnMobile && (
-              <motion.div 
-                style={{ WebkitAppRegion: 'no-drag' }}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center gap-1 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg text-[11px] font-semibold text-slate-700 truncate max-w-[130px]"
-              >
-                <span className="text-primary-500 font-mono">•</span>
-                <span className="truncate">{TAB_TITLES[currentTab] || currentTab}</span>
-              </motion.div>
-            )}
+            {/* Middle: Cloud Sync Indicator Pill */}
+            <div 
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border shrink-0"
+              style={{
+                backgroundColor: !syncStatus.isOnline ? '#fef2f2' : (syncStatus.queueLength > 0 ? '#fefce8' : '#f0fdf4'),
+                borderColor: !syncStatus.isOnline ? '#fecaca' : (syncStatus.queueLength > 0 ? '#fef08a' : '#bbf7d0'),
+                color: !syncStatus.isOnline ? '#991b1b' : (syncStatus.queueLength > 0 ? '#854d0e' : '#166534')
+              }}
+              title={!syncStatus.isOnline ? 'وضع عدم الاتصال (أوفلاين)' : (syncStatus.queueLength > 0 ? `جاري مزامنة ${syncStatus.queueLength} حركة معلقة...` : 'متصل ومزامن سحابياً')}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${!syncStatus.isOnline ? 'bg-rose-500' : (syncStatus.queueLength > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500')}`} />
+              <span className="hidden sm:inline">
+                {!syncStatus.isOnline ? 'أوفلاين' : (syncStatus.queueLength > 0 ? `${syncStatus.queueLength} معلق` : 'سحابي')}
+              </span>
+            </div>
 
-            {/* Mobile Actions: Settings & Logout */}
+            {/* Left: Settings & Logout Actions */}
             <div 
               style={{ WebkitAppRegion: 'no-drag' }}
               className="flex items-center gap-1 shrink-0"
@@ -557,9 +616,13 @@ export default function App() {
               {(!store.hasPermission || store.hasPermission('canAccessSettings')) && (
                 <button
                   type="button"
-                  onClick={() => setIsSettingsOpen(true)}
-                  className="p-1.5 text-slate-500 hover:text-navy-850 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                  title="الإعدادات"
+                  onClick={() => handleNavigate('settings')}
+                  className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
+                    currentTab === 'settings'
+                      ? 'text-primary-700 bg-primary-50 border border-primary-200 shadow-2xs font-bold'
+                      : 'text-slate-500 hover:text-navy-850 hover:bg-slate-100'
+                  }`}
+                  title="إعدادات وضبط النظام"
                 >
                   <Settings size={18} />
                 </button>
@@ -572,7 +635,7 @@ export default function App() {
                       logout();
                     }
                   }}
-                  className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                  className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
                   title="تسجيل الخروج"
                 >
                   <LogOut size={18} />
@@ -715,7 +778,7 @@ export default function App() {
                       <MobileHomeHub 
                         store={store}
                         onNavigate={handleNavigate}
-                        onOpenSettings={() => setIsSettingsOpen(true)}
+                        onOpenSettings={() => handleNavigate('settings')}
                       />
                     )}
 
@@ -726,7 +789,7 @@ export default function App() {
                         onViewReceipt={(inv) => setReceiptInvoice(inv)}
                         onViewA4Invoice={(inv) => setA4Invoice(inv)}
                         onOpenNewCustomerModal={() => handleNavigate('customers')}
-                        onOpenSettings={() => setIsSettingsOpen(true)}
+                        onOpenSettings={() => handleNavigate('settings')}
                         onNavigate={handleNavigate}
                       />
                     )}
@@ -817,11 +880,15 @@ export default function App() {
         </ErrorBoundary>
       </main>
 
-      {/* Bottom Navigation Bar (4 Core Quick Actions) */}
+      {/* Bottom Navigation Bar (5 Core Quick Actions & Native Android Drawer) */}
       <BottomNav 
         currentTab={currentTab} 
         onChangeTab={handleNavigate} 
+        cartCount={store?.cart?.length || 0}
         hasPermission={store.hasPermission}
+        onLogout={logout}
+        currentUser={currentUser}
+        activeBranch={activeBranch}
       />
       </div>
 
@@ -846,14 +913,6 @@ export default function App() {
         invoice={receiptInvoice}
         settings={settings}
         onUpdateInvoiceNotes={store.updateInvoiceNotes}
-      />
-
-      {/* 3. Settings Modal */}
-      <SettingsModal 
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        store={store}
-        onOpenChangePassword={() => setIsChangePasswordOpen(true)}
       />
 
       {/* 4. Client Change Password Modal */}

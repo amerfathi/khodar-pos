@@ -629,10 +629,9 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
 
               <div>
                 <a
-                  href="https://khodar-pos.pages.dev/downloads/KhodarPOS.apk"
+                  href="https://github.com/amerfathi/khodar-pos/releases/download/v2.6.0/KhodarPOS.apk"
                   target="_blank"
                   rel="noreferrer"
-                  download
                   className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <ArrowDownToLine size={16} />
