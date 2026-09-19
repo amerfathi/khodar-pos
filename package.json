@@ -1,7 +1,7 @@
 {
   "name": "khodar-pos",
   "private": true,
-  "version": "2.5.5",
+  "version": "2.5.6",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -35,6 +35,13 @@
       "include": "build/installer.nsh",
       "installerIcon": "electron/icon.ico",
       "uninstallerIcon": "electron/icon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "installerLanguages": [
+        "ar_SA",
+        "en_US"
+      ],
       "shortcutName": "براكه - كاشير ومحاسبة",
       "artifactName": "KhodarPOS-Setup.exe"
     }

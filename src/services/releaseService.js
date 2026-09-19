@@ -8,9 +8,9 @@ import { UPDATE_TYPES } from '../types/contracts';
 // Embedded Fallback Releases (Offline-safe & Zero Mock Data)
 export const OFFICIAL_RELEASES = [
   {
-    id: 'rel-web-2-5-5',
+    id: 'rel-web-2-5-6',
     platform: 'web',
-    version: '2.5.5',
+    version: '2.5.6',
     minimumVersion: '2.2.0',
     status: 'published',
     updateType: 'recommended',
@@ -25,9 +25,9 @@ export const OFFICIAL_RELEASES = [
     publishedAt: '2026-09-19T00:00:00Z'
   },
   {
-    id: 'rel-win-2-5-5',
+    id: 'rel-win-2-5-6',
     platform: 'windows',
-    version: '2.5.5',
+    version: '2.5.6',
     minimumVersion: '2.2.0',
     status: 'published',
     updateType: 'required',
@@ -37,7 +37,7 @@ export const OFFICIAL_RELEASES = [
       'إضافة ميزات وترقيات تشغيلية جديدة',
       'تحسينات عامة على واجهة وتجربة المستخدم'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.5/KhodarPOS-Setup.exe',
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.6/KhodarPOS-Setup.exe',
     fileSizeBytes: 131108786,
     publishedAt: '2026-09-19T00:00:00Z'
   },

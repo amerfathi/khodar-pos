@@ -186,11 +186,16 @@ ipcMain.handle('install-update', async (event, installerPath) => {
   }
 
   try {
-    // Generate a detached launcher batch script that:
-    // 1. Waits 2 seconds for Electron to fully exit and release all file locks
-    // 2. Ensures any lingering KhodarPOS process handles are terminated
-    // 3. Executes the installer silently (/S)
     const tempDir = app.getPath('temp');
+
+    // Clean any previous updater bat files
+    try {
+      const existingBats = fs.readdirSync(tempDir).filter(f => f.startsWith('khodar-updater-') && f.endsWith('.bat'));
+      existingBats.forEach(f => {
+        try { fs.unlinkSync(path.join(tempDir, f)); } catch (e) {}
+      });
+    } catch (e) {}
+
     const updaterBat = path.join(tempDir, `khodar-updater-${Date.now()}.bat`);
     const batContent = `@echo off
 chcp 65001 >nul
@@ -208,7 +213,8 @@ if "%ERRORLEVEL%"=="0" (
     goto WAIT_PROCESS
 )
 
-start "" "${targetPath}" /S
+rem Launch interactive visual installer wizard with full Brraka branding
+start "" "${targetPath}"
 exit
 `;
     fs.writeFileSync(updaterBat, batContent, 'utf-8');
