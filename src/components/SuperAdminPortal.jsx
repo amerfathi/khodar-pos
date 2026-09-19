@@ -32,6 +32,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
   // New Tenant Form State
   const [companyName, setCompanyName] = useState('');
+  const [storeCode, setStoreCode] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
@@ -43,6 +44,11 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   const [activeTab, setActiveTab] = useState('tenants'); // 'tenants' | 'releases' | 'trials'
   const [releasesList, setReleasesList] = useState(OFFICIAL_RELEASES);
   const [isReleaseModalOpen, setIsReleaseModalOpen] = useState(false);
+
+  const generateStoreCode = () => {
+    const num = Math.floor(100 + Math.random() * 900);
+    setStoreCode(`BRK-${num}`);
+  };
   const [releaseForm, setReleaseForm] = useState({
     platform: 'windows',
     version: '2.4.1',
@@ -106,6 +112,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     setAllowedBranches('1');
     setNotes(`طلب تجربة مجانية شهر من الموقع: ${req.name} (${req.city || 'المدينة غير محددة'}) - ${req.notes || ''}`);
     
+    generateStoreCode();
     // Auto-generate clean unique username
     const baseUser = (req.shopName || 'shop').toLowerCase().replace(/[^a-z0-9]/g, '') || `user${Math.floor(1000 + Math.random() * 9000)}`;
     const randomSuffix = Math.floor(10 + Math.random() * 90);
@@ -123,6 +130,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     try {
       const newTenant = createTenantAccount({
         companyName,
+        storeCode: storeCode.trim().toUpperCase(),
         username,
         password,
         phone,
@@ -138,7 +146,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
       }
 
       // Prepare welcome WhatsApp message
-      const welcomeText = `مرحباً بكم في نظام نقاط البيع والمحاسبة المركزي! 🥬✨\n\nتم تفعيل اشتراككم التجريبي المجاني (لمدة شهر كامل) بنجاح:\n🏬 المتجر: ${newTenant.companyName}\n👤 اسم المستخدم: ${newTenant.username}\n🔑 كلمة المرور المبدئية: ${newTenant.password}\n📅 تاريخ انتهاء الشهر المجاني: ${newTenant.expiresAt}\n🌐 رابط الدخول المباشر: https://khodar-pos.pages.dev/?login=true\n\n💡 يمكنك تسجيل الدخول والبدء مباشرة وتهيئة أصنافك وطباعة فواتيرك.`;
+      const welcomeText = `مرحباً بكم في منظومة براكه لإدارة نقاط البيع والمحاسبة! 🥬✨\n\nتم تفعيل اشتراككم بنجاح:\n🏬 المنشأة: ${newTenant.companyName}\n🏷️ كود المتجر للربط السريع: ${newTenant.storeCode}\n👤 اسم المستخدم المالك: ${newTenant.username}\n🔑 كلمة المرور المبدئية: ${newTenant.password}\n📅 تاريخ انتهاء الصلاحية: ${newTenant.expiresAt}\n🌐 رابط الدخول المباشر: https://khodar-pos.pages.dev/?login=true\n\n💡 ملاحظة هامة:\nيمكن لجميع موظفي المحل تسجيل الدخول من أي جهاز (كمبيوتر / جوال / متصفح) بإدخال كود المتجر (${newTenant.storeCode}) ثم اسم المستخدم الخاص بهم.`;
       
       setCreatedWelcomeMsg({
         text: welcomeText,
@@ -148,6 +156,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
       // Reset form
       setCompanyName('');
+      setStoreCode('');
       setUsername('');
       setPassword('');
       setPhone('');
@@ -181,6 +190,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   const filteredTenants = tenants.filter(t => 
     t.companyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     t.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (t.storeCode && t.storeCode.toLowerCase().includes(searchQuery.toLowerCase())) ||
     (t.phone && t.phone.includes(searchQuery))
   );
 
@@ -373,7 +383,11 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
             <button
               type="button"
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={() => {
+                generateStoreCode();
+                generatePassword();
+                setIsAddModalOpen(true);
+              }}
               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
             >
               <Plus size={16} />
@@ -388,6 +402,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-600">
                     <th className="p-3.5">المتجر / الشركة</th>
+                    <th className="p-3.5">كود المتجر (Store Code)</th>
                     <th className="p-3.5">اسم المستخدم (الثابت)</th>
                     <th className="p-3.5">كلمة المرور</th>
                     <th className="p-3.5">حالة الاشتراك</th>
@@ -401,7 +416,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                   {filteredTenants.map(tenant => {
                     const isSuper = tenant.role === 'super_admin';
                     const isExpired = tenant.expiresAt && tenant.expiresAt < new Date().toISOString().split('T')[0];
-                    const welcomeMsg = `بيانات الدخول لحسابكم في نظام نقاط البيع:\n👤 اسم المستخدم: ${tenant.username}\n🔑 كلمة المرور: ${tenant.password}\n📅 تاريخ الصلاحية: ${tenant.expiresAt}`;
+                    const welcomeMsg = `بيانات الدخول لحسابكم في نظام نقاط البيع:\n🏬 المتجر: ${tenant.companyName}\n🏷️ كود المتجر: ${tenant.storeCode || '—'}\n👤 اسم المستخدم: ${tenant.username}\n🔑 كلمة المرور: ${tenant.password}\n📅 تاريخ الصلاحية: ${tenant.expiresAt}`;
 
                     return (
                       <tr key={tenant.id} className="hover:bg-slate-50/70 transition-colors">
@@ -410,6 +425,22 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                             <span>{tenant.companyName}</span>
                             {isSuper && (
                               <span className="px-1.5 py-0.5 bg-slate-900 text-white text-[9px] rounded font-mono">المالك</span>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className="p-3.5">
+                          <div className="inline-flex items-center gap-1.5 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200/80 font-mono font-black text-emerald-800 text-xs shadow-2xs" dir="ltr">
+                            <span>{tenant.storeCode || '—'}</span>
+                            {tenant.storeCode && (
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(tenant.storeCode, `code-${tenant.id}`)}
+                                className="text-emerald-600 hover:text-emerald-900 transition-colors p-0.5 cursor-pointer"
+                                title="نسخ كود المتجر"
+                              >
+                                {copiedTenantId === `code-${tenant.id}` ? <Check size={11} className="text-emerald-600" /> : <Copy size={11} />}
+                              </button>
                             )}
                           </div>
                         </td>
@@ -952,6 +983,29 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span>كود المتجر السحابي (Store Code) *</span>
+                    <button
+                      type="button"
+                      onClick={generateStoreCode}
+                      className="text-[10px] text-emerald-700 hover:underline font-bold cursor-pointer"
+                    >
+                      توليد كود
+                    </button>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="مثال: BRK-101"
+                    value={storeCode}
+                    onChange={(e) => setStoreCode(e.target.value.toUpperCase())}
+                    className="w-full px-3 py-2.5 bg-emerald-50/40 border border-emerald-300 rounded-xl text-xs font-mono font-black text-emerald-900 focus:ring-2 focus:ring-emerald-500 uppercase tracking-wider"
+                    dir="ltr"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">كود ربط المحطة الذي يدخله الكاشير والموظفون</span>
+                </div>
+
+                <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">
                     اسم المستخدم الثابت (Unique Username) *
                   </label>
@@ -964,30 +1018,30 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500"
                     dir="ltr"
                   />
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">حروف إنجليزية وأرقام فقط (لا يتغير لاحقاً)</span>
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">حساب المالك الرئيسي للمتجر (حروف وأرقام)</span>
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
-                    <span>كلمة المرور المبدئية *</span>
-                    <button
-                      type="button"
-                      onClick={generatePassword}
-                      className="text-[10px] text-emerald-700 hover:underline font-bold"
-                    >
-                      توليد كلمة سر
-                    </button>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="مثال: Pass@123"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500"
-                    dir="ltr"
-                  />
-                </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>كلمة المرور المبدئية *</span>
+                  <button
+                    type="button"
+                    onClick={generatePassword}
+                    className="text-[10px] text-emerald-700 hover:underline font-bold cursor-pointer"
+                  >
+                    توليد كلمة سر
+                  </button>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثال: Pass@123"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500"
+                  dir="ltr"
+                />
               </div>
 
               <div className="grid grid-cols-3 gap-2.5">

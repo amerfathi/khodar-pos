@@ -10,6 +10,16 @@ import ForgotPasswordModal from './ForgotPasswordModal';
 export default function DesktopLoginView({ store }) {
   const { login, settings } = store;
 
+  // Remember storeCode across sessions for store multi-tenancy
+  const [storeCode, setStoreCode] = useState(() => {
+    try {
+      return localStorage.getItem('khodar_remembered_store_code') || 'BRK-101';
+    } catch {
+      return 'BRK-101';
+    }
+  });
+  const [isEditingStoreCode, setIsEditingStoreCode] = useState(false);
+
   // Remember username across sessions and logouts for fast password-only entry
   const [username, setUsername] = useState(() => {
     try {
@@ -28,6 +38,7 @@ export default function DesktopLoginView({ store }) {
 
   const usernameInputRef = useRef(null);
   const passwordInputRef = useRef(null);
+  const storeCodeInputRef = useRef(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.electronAPI?.isMaximized) {
@@ -73,19 +84,25 @@ export default function DesktopLoginView({ store }) {
       return;
     }
 
+    if (!storeCode.trim()) {
+      setErrorMessage('يرجى إدخال كود المتجر (Store Code)');
+      return;
+    }
+
     setLoading(true);
     setTimeout(() => {
-      const res = login(cleanUser, password);
+      const res = login(cleanUser, password, storeCode.trim());
       setLoading(false);
       if (res.success) {
         try {
           if (rememberMe) {
             localStorage.setItem('khodar_remembered_username', cleanUser);
+            localStorage.setItem('khodar_remembered_store_code', storeCode.trim().toUpperCase());
           } else {
             localStorage.removeItem('khodar_remembered_username');
           }
         } catch (e) {
-          console.warn('Failed to save remembered username', e);
+          console.warn('Failed to save remembered credentials', e);
         }
       } else {
         setErrorMessage(res.error || 'بيانات الدخول غير صحيحة');
@@ -172,6 +189,83 @@ export default function DesktopLoginView({ store }) {
               <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center gap-2 animate-in fade-in">
                 <AlertCircle size={16} className="shrink-0 text-rose-600" />
                 <span className="font-semibold">{errorMessage}</span>
+              </div>
+            )}
+
+            {/* Store Code Active Badge / Selector */}
+            {!isEditingStoreCode && storeCode ? (
+              <div className="mb-4 p-2.5 bg-slate-50 border border-slate-200/90 rounded-2xl flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200/60 flex items-center justify-center font-bold">
+                    <Store size={15} />
+                  </div>
+                  <div className="text-right truncate">
+                    <span className="text-[10px] text-slate-400 block font-medium">المنشأة المتصلة</span>
+                    <span className="font-bold text-slate-800 text-xs truncate block">
+                      {settings?.shopName || 'سوق ومحل الخضار والفواكه'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="font-mono font-black text-xs px-2.5 py-1 bg-white text-emerald-700 rounded-lg border border-slate-200 shadow-2xs tracking-wider" dir="ltr">
+                    {storeCode}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingStoreCode(true);
+                      setTimeout(() => storeCodeInputRef.current?.focus(), 100);
+                    }}
+                    className="text-[11px] text-slate-500 hover:text-emerald-700 font-bold px-1.5 py-1 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+                    title="تغيير كود المتجر"
+                  >
+                    تغيير
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mb-4 p-3 bg-emerald-50/50 border border-emerald-200 rounded-2xl animate-in fade-in">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-emerald-950">
+                    كود المتجر السحابي (Store Code)
+                  </label>
+                  {storeCode && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingStoreCode(false)}
+                      className="text-[10px] text-emerald-700 hover:underline font-bold cursor-pointer"
+                    >
+                      إلغاء ✕
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600 pointer-events-none">
+                    <Store size={15} />
+                  </div>
+                  <input
+                    ref={storeCodeInputRef}
+                    type="text"
+                    value={storeCode}
+                    onChange={(e) => setStoreCode(e.target.value.toUpperCase())}
+                    placeholder="مثال: BRK-101"
+                    required
+                    className="w-full h-10 pr-9 pl-16 bg-white border border-emerald-300 rounded-xl text-slate-900 text-xs font-mono font-black tracking-wider placeholder:text-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 transition-all uppercase"
+                    dir="ltr"
+                  />
+                  {storeCode && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingStoreCode(false)}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-xs"
+                    >
+                      تثبيت
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  أدخل كود المتجر الممنوح لك لربط المحطة بالمنشأة وتنزيل حسابات الموظفين
+                </p>
               </div>
             )}
 

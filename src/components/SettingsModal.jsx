@@ -84,11 +84,19 @@ export default function SettingsModal({ isOpen, onClose, store, onOpenChangePass
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700/80">
-                  <Lock size={12} className="text-emerald-400" />
-                  <span className="font-mono font-bold text-slate-200 text-xs" dir="ltr">
-                    {currentUser.username}
-                  </span>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 px-2 py-1 rounded-lg">
+                    <Store size={12} />
+                    <span className="font-mono font-bold text-xs" dir="ltr">
+                      {currentUser.storeCode || (typeof localStorage !== 'undefined' && localStorage.getItem('khodar_remembered_store_code')) || 'BRK-101'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700/80">
+                    <Lock size={12} className="text-emerald-400" />
+                    <span className="font-mono font-bold text-slate-200 text-xs" dir="ltr">
+                      {currentUser.username}
+                    </span>
+                  </div>
                 </div>
               </div>
 

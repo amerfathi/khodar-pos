@@ -92,6 +92,7 @@ export const INITIAL_PURCHASE_RETURNS = [];
 export const INITIAL_TENANTS = [
   {
     id: 'tenant-super-admin',
+    storeCode: 'BRK-000',
     companyName: 'إدارة المنظومة (صانع ومالك المنصة)',
     username: 'amerfathi123@gmail.com',
     password: 'A20101993f',
@@ -105,6 +106,7 @@ export const INITIAL_TENANTS = [
   },
   {
     id: 'tenant-super-admin-legacy',
+    storeCode: 'ADMIN',
     companyName: 'إدارة المنصة الرئيسية (المالك)',
     username: 'admin',
     password: 'admin',
@@ -118,6 +120,7 @@ export const INITIAL_TENANTS = [
   },
   {
     id: 'tenant-demo',
+    storeCode: 'BRK-101',
     companyName: 'سوق ومحل الخضار والفواكه',
     username: 'demo',
     password: '123',

@@ -1555,15 +1555,37 @@ export function useAppStore() {
     }
   };
 
-  // Authentication & Multi-Tenant Actions
-  const login = (username, password) => {
-    const cleanUser = (username || '').trim().toLowerCase();
+  // Authentication & Multi-Tenant Actions (with Store Code support)
+  const login = (username, password, explicitStoreCode = '') => {
+    let cleanUser = (username || '').trim().toLowerCase();
+    let cleanStoreCode = (explicitStoreCode || '').trim().toUpperCase();
+
+    // Support smart inline format: username@storeCode or storeCode/username
+    if (cleanUser.includes('@') && !cleanUser.includes('@gmail.com') && !cleanUser.includes('@yahoo.com') && !cleanUser.includes('@hotmail.com') && !cleanUser.includes('@outlook.com')) {
+      const parts = cleanUser.split('@');
+      cleanUser = parts[0].trim();
+      if (!cleanStoreCode && parts[1]) {
+        cleanStoreCode = parts[1].trim().toUpperCase();
+      }
+    } else if (cleanUser.includes('/')) {
+      const parts = cleanUser.split('/');
+      cleanStoreCode = parts[0].trim().toUpperCase();
+      cleanUser = parts[1].trim().toLowerCase();
+    }
+
+    // If still no storeCode provided, fallback to remembered store code in localStorage
+    if (!cleanStoreCode && typeof window !== 'undefined') {
+      try {
+        cleanStoreCode = (localStorage.getItem('khodar_remembered_store_code') || '').trim().toUpperCase();
+      } catch (e) {}
+    }
 
     // 0. Master System Creator & Platform Owner (صانع ومالك المنصة الرئيسي)
     if (cleanUser === 'amerfathi123@gmail.com') {
       if (password === 'A20101993f') {
         const ownerSession = {
           id: 'tenant-super-admin',
+          storeCode: 'BRK-000',
           companyName: 'إدارة المنظومة (صانع ومالك المنصة)',
           username: 'amerfathi123@gmail.com',
           role: 'super_admin',
@@ -1579,18 +1601,124 @@ export function useAppStore() {
           if (!exists) {
             return [ownerSession, ...prev];
           }
-          return prev.map(t => t.username.toLowerCase() === 'amerfathi123@gmail.com' ? { ...t, password: 'A20101993f', role: 'super_admin' } : t);
+          return prev.map(t => t.username.toLowerCase() === 'amerfathi123@gmail.com' ? { ...t, password: 'A20101993f', role: 'super_admin', storeCode: 'BRK-000' } : t);
         });
         setCurrentUser(ownerSession);
+        try {
+          localStorage.setItem('khodar_remembered_username', cleanUser);
+          localStorage.setItem('khodar_remembered_store_code', 'BRK-000');
+        } catch (e) {}
         return { success: true, user: ownerSession };
       } else {
         return { success: false, error: 'كلمة المرور غير صحيحة لحساب مالك المنصة' };
       }
     }
 
-    // 1. Check staff users first
-    const staffUser = users.find(u => u.username.toLowerCase() === cleanUser);
-    if (staffUser) {
+    // 1. If Store Code is specified, target that specific tenant
+    if (cleanStoreCode) {
+      const targetTenant = tenants.find(t => 
+        (t.storeCode || '').toUpperCase() === cleanStoreCode || 
+        t.id === cleanStoreCode.toLowerCase()
+      );
+
+      if (!targetTenant) {
+        return { success: false, error: `كود المتجر (${cleanStoreCode}) غير موجود بالنظام، يرجى التحقق من الكود المعتمد` };
+      }
+
+      if (targetTenant.status === 'suspended') {
+        return { success: false, error: 'تم تعليق هذا المتجر مؤقتاً، يرجى مراجعة إدارة المنصة', isSuspended: true };
+      }
+
+      // Check expiry if not super admin
+      if (targetTenant.role !== 'super_admin' && targetTenant.expiresAt) {
+        const today = new Date().toISOString().split('T')[0];
+        if (today > targetTenant.expiresAt) {
+          return { 
+            success: false, 
+            error: `انتهت فترة اشتراك متجر (${targetTenant.companyName}) بتاريخ ${targetTenant.expiresAt}`,
+            isExpired: true,
+            phone: targetTenant.phone
+          };
+        }
+      }
+
+      // A) Check Staff within this Tenant
+      const staffUser = users.find(u => u.username.toLowerCase() === cleanUser && u.tenantId === targetTenant.id);
+      if (staffUser) {
+        if (staffUser.password !== password) {
+          return { success: false, error: 'كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى' };
+        }
+        if (staffUser.status === 'inactive') {
+          return { success: false, error: 'تم تعطيل هذا الحساب من قبل إدارة المتجر' };
+        }
+
+        if (staffUser.branchId && staffUser.branchId !== 'all') {
+          setActiveBranchId(staffUser.branchId);
+        }
+
+        const defaultPerms = ROLE_PERMISSIONS_PRESETS[staffUser.role]?.permissions || DEFAULT_PERMISSIONS;
+        const userSession = {
+          ...staffUser,
+          companyName: targetTenant.companyName || 'سوق ومحل الخضار والفواكه',
+          tenantId: targetTenant.id,
+          storeCode: targetTenant.storeCode || cleanStoreCode,
+          permissions: staffUser.permissions ? { ...defaultPerms, ...staffUser.permissions } : { ...defaultPerms },
+          isStaff: true
+        };
+
+        try {
+          localStorage.setItem('khodar_remembered_username', cleanUser);
+          localStorage.setItem('khodar_remembered_store_code', targetTenant.storeCode || cleanStoreCode);
+        } catch (e) {}
+
+        setCurrentUser(userSession);
+        return { success: true, user: userSession };
+      }
+
+      // B) Check Owner of this Tenant
+      if (targetTenant.username.toLowerCase() === cleanUser) {
+        if (targetTenant.password !== password) {
+          return { success: false, error: 'كلمة المرور غير صحيحة لحساب مالك المتجر' };
+        }
+
+        if (targetTenant.companyName && targetTenant.role !== 'super_admin') {
+          setSettings(prev => ({ ...prev, shopName: targetTenant.companyName }));
+        }
+
+        const adminSession = {
+          ...targetTenant,
+          tenantId: targetTenant.id,
+          storeCode: targetTenant.storeCode || cleanStoreCode,
+          permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions }
+        };
+
+        try {
+          localStorage.setItem('khodar_remembered_username', cleanUser);
+          localStorage.setItem('khodar_remembered_store_code', targetTenant.storeCode || cleanStoreCode);
+        } catch (e) {}
+
+        setCurrentUser(adminSession);
+        return { success: true, user: adminSession };
+      }
+
+      return { 
+        success: false, 
+        error: `المستخدم (${cleanUser}) غير مسجل في متجر (${targetTenant.companyName}) [كود: ${cleanStoreCode}]` 
+      };
+    }
+
+    // 2. Global fallback if no Store Code provided:
+    // First, check staff
+    const matchingStaff = users.filter(u => u.username.toLowerCase() === cleanUser);
+    if (matchingStaff.length > 1) {
+      return { 
+        success: false, 
+        error: 'يوجد أكثر من متجر مسجل بهذا الاسم، يرجى كتابة كود المتجر (Store Code) لتحديد المنشأة التابع لها' 
+      };
+    }
+
+    if (matchingStaff.length === 1) {
+      const staffUser = matchingStaff[0];
       if (staffUser.password !== password) {
         return { success: false, error: 'كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى' };
       }
@@ -1598,19 +1726,11 @@ export function useAppStore() {
         return { success: false, error: 'تم تعطيل هذا الحساب من قبل إدارة المتجر' };
       }
 
-      // Check parent tenant validity
       const parentTenant = tenants.find(t => t.id === staffUser.tenantId) || tenants[1];
       if (parentTenant && parentTenant.status === 'suspended') {
         return { success: false, error: 'تم تعليق اشتراك المتجر، يرجى مراجعة إدارة المنصة' };
       }
-      if (parentTenant && parentTenant.role !== 'super_admin' && parentTenant.expiresAt) {
-        const today = new Date().toISOString().split('T')[0];
-        if (today > parentTenant.expiresAt) {
-          return { success: false, error: `انتهت فترة اشتراك المتجر بتاريخ ${parentTenant.expiresAt}` };
-        }
-      }
 
-      // Auto-assign branch if specified
       if (staffUser.branchId && staffUser.branchId !== 'all') {
         setActiveBranchId(staffUser.branchId);
       }
@@ -1620,22 +1740,26 @@ export function useAppStore() {
         ...staffUser,
         companyName: parentTenant?.companyName || 'سوق ومحل الخضار والفواكه',
         tenantId: staffUser.tenantId || parentTenant?.id || 'tenant-demo',
+        storeCode: parentTenant?.storeCode || 'BRK-101',
         permissions: staffUser.permissions ? { ...defaultPerms, ...staffUser.permissions } : { ...defaultPerms },
         isStaff: true
       };
+
       try {
         localStorage.setItem('khodar_remembered_username', cleanUser);
+        if (parentTenant?.storeCode) {
+          localStorage.setItem('khodar_remembered_store_code', parentTenant.storeCode);
+        }
       } catch (e) {}
 
       setCurrentUser(userSession);
       return { success: true, user: userSession };
     }
 
-    // 2. Fallback to Tenant / Owner accounts
+    // Fallback to Tenant / Owner accounts
     const target = tenants.find(t => t.username.toLowerCase() === cleanUser);
-    
     if (!target) {
-      return { success: false, error: 'اسم المستخدم غير مسجل بالنظام' };
+      return { success: false, error: 'اسم المستخدم أو كود المتجر غير صحيح، يرجى التأكد من البيانات' };
     }
 
     if (target.password !== password) {
@@ -1643,14 +1767,9 @@ export function useAppStore() {
     }
 
     if (target.status === 'suspended') {
-      return { 
-        success: false, 
-        error: 'تم تعليق هذا الحساب مؤقتاً، يرجى التواصل مع إدارة المنصة',
-        isSuspended: true 
-      };
+      return { success: false, error: 'تم تعليق هذا الحساب مؤقتاً، يرجى التواصل مع إدارة المنصة', isSuspended: true };
     }
 
-    // Check expiry if not super admin
     if (target.role !== 'super_admin' && target.expiresAt) {
       const today = new Date().toISOString().split('T')[0];
       if (today > target.expiresAt) {
@@ -1663,21 +1782,22 @@ export function useAppStore() {
       }
     }
 
-    // Sync store title with company name
     if (target.companyName && target.role !== 'super_admin') {
-      setSettings(prev => ({
-        ...prev,
-        shopName: target.companyName
-      }));
+      setSettings(prev => ({ ...prev, shopName: target.companyName }));
     }
 
     const adminSession = {
       ...target,
       tenantId: target.id,
+      storeCode: target.storeCode || 'BRK-101',
       permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions }
     };
+
     try {
       localStorage.setItem('khodar_remembered_username', cleanUser);
+      if (target.storeCode) {
+        localStorage.setItem('khodar_remembered_store_code', target.storeCode);
+      }
     } catch (e) {}
 
     setCurrentUser(adminSession);
@@ -1685,6 +1805,7 @@ export function useAppStore() {
   };
 
   const logout = () => {
+    // Keep khodar_remembered_store_code and khodar_remembered_username in localStorage for fast password-only cashier login
     setCurrentUser(null);
   };
 
@@ -1702,6 +1823,7 @@ export function useAppStore() {
     companyName,
     username,
     password,
+    storeCode = '',
     phone = '',
     durationMonths = 12,
     allowedBranches = 1,
@@ -1713,6 +1835,19 @@ export function useAppStore() {
     const existing = tenants.find(t => t.username.toLowerCase() === cleanUser);
     if (existing) throw new Error(`اسم المستخدم (${username}) مسجل مسبقاً، يرجى اختيار اسم مستخدم آخر`);
 
+    // Determine unique Store Code
+    let cleanStoreCode = (storeCode || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!cleanStoreCode) {
+      let codeNum = 100 + tenants.length;
+      while (tenants.some(t => (t.storeCode || '').toUpperCase() === `BRK-${codeNum}`)) {
+        codeNum++;
+      }
+      cleanStoreCode = `BRK-${codeNum}`;
+    } else {
+      const codeExists = tenants.find(t => (t.storeCode || '').toUpperCase() === cleanStoreCode);
+      if (codeExists) throw new Error(`كود المتجر (${cleanStoreCode}) مستخدم بالفعل لمتجر آخر، يرجى اختيار كود آخر`);
+    }
+
     let expiresAt = '2099-12-31';
     if (Number(durationMonths) > 0) {
       const d = new Date();
@@ -1722,6 +1857,7 @@ export function useAppStore() {
 
     const newTenant = {
       id: `tenant-${Date.now()}`,
+      storeCode: cleanStoreCode,
       companyName: companyName.trim() || 'متجر مشترك جديد',
       username: cleanUser,
       password: password || '123456',

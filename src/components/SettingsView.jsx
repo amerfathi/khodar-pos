@@ -7,7 +7,7 @@ import {
   Database, Wifi, WifiOff, HardDrive, ShieldAlert, Users, Plus, 
   Trash2, Edit3, UserCheck, Key, Shield, UserX, ShieldBan, X,
   User, CheckSquare, Square as SquareIcon, Eye, EyeOff,
-  ArrowUpCircle, Sparkles, Laptop, Type, Sliders, ZoomIn, ZoomOut
+  ArrowUpCircle, Sparkles, Laptop, Type, Sliders, ZoomIn, ZoomOut, Copy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ROLE_PERMISSIONS_PRESETS, DEFAULT_PERMISSIONS } from '../data/initialData';
@@ -1126,6 +1126,41 @@ export default function SettingsView({
                       <Plus size={16} />
                       <span>إضافة مستخدم جديد</span>
                     </button>
+                  </div>
+
+                  {/* Store Code Connection Callout Card for Staff Pairing */}
+                  <div className="p-4 bg-emerald-50/80 border border-emerald-200/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
+                        <Store size={20} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-black text-xs text-emerald-950">كود متجركم للربط السحابي (Store Code)</h4>
+                          <span className="text-[10px] bg-emerald-200/70 text-emerald-900 font-bold px-2 py-0.5 rounded-full">معتمد لجميع أجهزتكم</span>
+                        </div>
+                        <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
+                          أعطِ هذا الكود لموظفي الكاشير والمحاسبين ليدخلوه مرة واحدة في شاشة الدخول لربط أجهزتهم (الكمبيوتر والجوال) بمتجرك مباشرة.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                      <span className="font-mono font-black text-sm px-3.5 py-1.5 bg-white text-emerald-700 rounded-xl border border-emerald-300 shadow-2xs tracking-wider" dir="ltr">
+                        {currentUser?.storeCode || (typeof localStorage !== 'undefined' && localStorage.getItem('khodar_remembered_store_code')) || 'BRK-101'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const code = currentUser?.storeCode || (typeof localStorage !== 'undefined' && localStorage.getItem('khodar_remembered_store_code')) || 'BRK-101';
+                          navigator.clipboard.writeText(code);
+                          alert(`تم نسخ كود المتجر: ${code}`);
+                        }}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                      >
+                        <Copy size={13} />
+                        <span>نسخ الكود</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Stats Counter Bar */}
