@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Lock, User, KeyRound, ShieldCheck, Eye, EyeOff, 
-  Store, Minus, Square, X, Database, CheckCircle2, AlertCircle
+  Store, Minus, Square, Copy, X, Database, CheckCircle2, AlertCircle
 } from 'lucide-react';
 import { APP_VERSION } from '../config/appVersion';
 import ForgotPasswordModal from './ForgotPasswordModal';

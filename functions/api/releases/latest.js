@@ -5,7 +5,7 @@
 
 const FALLBACK_RELEASES = {
   web: {
-    version: '2.5.6',
+    version: '2.5.7',
     minimumVersion: '2.2.0',
     updateType: 'recommended',
     releaseNotes: [
@@ -19,7 +19,7 @@ const FALLBACK_RELEASES = {
     publishedAt: '2026-09-19T00:00:00Z'
   },
   windows: {
-    version: '2.5.6',
+    version: '2.5.7',
     minimumVersion: '2.2.0',
     updateType: 'required',
     releaseNotes: [
@@ -28,7 +28,7 @@ const FALLBACK_RELEASES = {
       'إضافة ميزات وترقيات تشغيلية جديدة',
       'تحسينات عامة على واجهة وتجربة المستخدم'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.6/KhodarPOS-Setup.exe',
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.7/KhodarPOS-Setup.exe',
     fileSizeBytes: 131108786,
     publishedAt: '2026-09-19T00:00:00Z'
   },
