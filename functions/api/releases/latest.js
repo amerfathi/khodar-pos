@@ -5,11 +5,11 @@
 
 const FALLBACK_RELEASES = {
   web: {
-    version: '2.5.2',
+    version: '2.5.3',
     minimumVersion: '2.2.0',
     updateType: 'recommended',
     releaseNotes: [
-      'اعتماد وتطبيق هوية وشعار براكه (Brraka) الجديد رسمياً',
+      'اعتماد وتطبيق هوية وشعار براكه (Brraka) الجديد رسمياً بالأيقونة الدائرية الكاملة',
       'سلايدر متطور للتحكم بحجم خطوط وشاشات النظام من الإعدادات',
       'نظام استرداد كلمة المرور السحابي المباشر عبر البريد ورقم الهاتف'
     ],
@@ -18,16 +18,17 @@ const FALLBACK_RELEASES = {
     publishedAt: '2026-09-19T00:00:00Z'
   },
   windows: {
-    version: '2.5.2',
+    version: '2.5.3',
     minimumVersion: '2.2.0',
     updateType: 'required',
     releaseNotes: [
-      'اعتماد وتطبيق هوية وأيقونة منظومة براكه (Brraka) على سطح المكتب وشريط المهام',
+      'اعتماد وتطبيق هوية وأيقونة منظومة براكه (Brraka) الكاملة بحواف دائرية وبدون أي قص على سطح المكتب وشريط المهام',
+      'تكبير وتحسين وضوح الشعار والأيقونة لراحة العين في كافة واجهات وشاشات المنظومة',
       'إضافة سلايدر التحكم بحجم الخطوط وشاشات البرنامج في الإعدادات (80% - 130%)',
       'محرك تحديث تلقائي فوري وسلس دون المساس ببيانات وفواتير العميل',
       'نظام استرداد كلمة المرور المباشر لحسابات المتاجر والمشتركين'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.2/KhodarPOS-Setup.exe',
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.5.3/KhodarPOS-Setup.exe',
     fileSizeBytes: 131108786,
     publishedAt: '2026-09-19T00:00:00Z'
   },
