@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   ShoppingCart, FileText, Truck, Users, 
   AlertOctagon, UserCheck, Package, PieChart, 
-  Settings, ArrowLeft, TrendingDown, Scale, Coins, Store
+  Settings, ArrowLeft, TrendingDown, Scale, Coins, Store, LogOut
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { formatCurrency } from '../utils/formatters';
@@ -233,14 +233,30 @@ export default function MobileHomeHub({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="w-9 h-9 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-center transition-colors cursor-pointer shrink-0"
-            title="إعدادات وضبط النظام"
-          >
-            <Settings size={17} />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="w-9 h-9 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-center transition-colors cursor-pointer"
+              title="إعدادات وضبط النظام"
+            >
+              <Settings size={17} />
+            </button>
+            {store.currentUser && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('هل أنت متأكد من تسجيل الخروج؟')) {
+                    store.logout();
+                  }
+                }}
+                className="w-9 h-9 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200/70 flex items-center justify-center transition-colors cursor-pointer"
+                title="تسجيل الخروج من النظام"
+              >
+                <LogOut size={17} />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* 4 Core Financial Stat Cards */}
@@ -389,6 +405,43 @@ export default function MobileHomeHub({
           <ArrowLeft size={20} className="text-slate-300 shrink-0" />
         </motion.button>
       </motion.div>
+
+      {/* Mobile User Profile & Logout Tile */}
+      {store.currentUser && (
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, duration: 0.3 }}
+          className="bg-white border border-slate-200/90 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-2xs"
+        >
+          <div className="flex items-center gap-2.5 truncate">
+            <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0 border border-slate-200">
+              {store.currentUser.name?.[0] || store.currentUser.username?.[0] || 'U'}
+            </div>
+            <div className="truncate text-right">
+              <span className="block text-xs font-bold text-slate-800 truncate">
+                {store.currentUser.name || store.currentUser.username}
+              </span>
+              <span className="block text-[10px] text-slate-400">
+                {store.currentUser.role === 'admin' ? 'مالك / مدير المنظومة' : 'كاشير / نقطة بيع'}
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm('هل أنت متأكد من تسجيل الخروج؟')) {
+                store.logout();
+              }
+            }}
+            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200/80 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+          >
+            <LogOut size={13} />
+            <span>تسجيل الخروج</span>
+          </button>
+        </motion.div>
+      )}
 
     </div>
   );

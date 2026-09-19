@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Settings, Save, Download, Upload, RefreshCw, Check, X, Store, Phone, MapPin, DollarSign, FileText, Package, AlertCircle, Lock, KeyRound, Type, Sliders } from 'lucide-react';
+import { Settings, Save, Download, Upload, RefreshCw, Check, X, Store, Phone, MapPin, DollarSign, FileText, Package, AlertCircle, Lock, KeyRound, Type, Sliders, LogOut } from 'lucide-react';
 
 export default function SettingsModal({ isOpen, onClose, store, onOpenChangePassword }) {
   const { settings, currentUser, updateSettings, exportBackupJSON, importBackupJSON, resetToSampleData } = store;
@@ -100,21 +100,36 @@ export default function SettingsModal({ isOpen, onClose, store, onOpenChangePass
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-[11px]">
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-[11px] gap-2 flex-wrap">
                 <span className="text-slate-400">
                   صلاحية الاشتراك: <strong className="text-emerald-400 font-mono">{currentUser.role === 'super_admin' ? 'دائم' : currentUser.expiresAt}</strong>
                 </span>
 
-                {onOpenChangePassword && (
+                <div className="flex items-center gap-2">
+                  {onOpenChangePassword && (
+                    <button
+                      type="button"
+                      onClick={() => { onClose(); onOpenChangePassword(); }}
+                      className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer text-xs"
+                    >
+                      <KeyRound size={13} />
+                      <span>تغيير كلمة المرور</span>
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => { onClose(); onOpenChangePassword(); }}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer text-xs"
+                    onClick={() => {
+                      if (window.confirm('هل أنت متأكد من تسجيل الخروج؟')) {
+                        onClose();
+                        store.logout();
+                      }
+                    }}
+                    className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer text-xs"
                   >
-                    <KeyRound size={13} />
-                    <span>تغيير كلمة المرور</span>
+                    <LogOut size={13} />
+                    <span>تسجيل الخروج</span>
                   </button>
-                )}
+                </div>
               </div>
             </div>
           )}

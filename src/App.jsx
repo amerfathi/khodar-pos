@@ -549,12 +549,12 @@ export default function App() {
               </motion.div>
             )}
 
-            {/* Mobile Settings button */}
-            {(!store.hasPermission || store.hasPermission('canAccessSettings')) && (
-              <div 
-                style={{ WebkitAppRegion: 'no-drag' }}
-                className="flex items-center gap-1 shrink-0"
-              >
+            {/* Mobile Actions: Settings & Logout */}
+            <div 
+              style={{ WebkitAppRegion: 'no-drag' }}
+              className="flex items-center gap-1 shrink-0"
+            >
+              {(!store.hasPermission || store.hasPermission('canAccessSettings')) && (
                 <button
                   type="button"
                   onClick={() => setIsSettingsOpen(true)}
@@ -563,8 +563,22 @@ export default function App() {
                 >
                   <Settings size={18} />
                 </button>
-              </div>
-            )}
+              )}
+              {currentUser && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('هل أنت متأكد من تسجيل الخروج؟')) {
+                      logout();
+                    }
+                  }}
+                  className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                  title="تسجيل الخروج"
+                >
+                  <LogOut size={18} />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* B. Desktop Slim Top Bar (>= md) */}
