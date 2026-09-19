@@ -82,11 +82,15 @@ export async function onRequestGet(context) {
   // 1. Try fetching from Cloudflare D1
   if (env && env.DB) {
     try {
-      const row = await env.DB.prepare(
-        "SELECT * FROM app_releases WHERE platform = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1"
-      ).bind(platform).first();
+      const { results } = await env.DB.prepare(
+        "SELECT * FROM app_releases WHERE platform = ? AND status = 'published'"
+      ).bind(platform).all();
 
-      if (row) {
+      if (results && results.length > 0) {
+        // Sort by semantic version descending so the true newest version always wins regardless of date format
+        results.sort((a, b) => compareSemver(b.version, a.version));
+        const row = results[0];
+
         let notes = [];
         try { notes = JSON.parse(row.release_notes); } catch (e) { notes = [row.release_notes]; }
         release = {
@@ -100,7 +104,7 @@ export async function onRequestGet(context) {
         };
       }
     } catch (e) {
-      // D1 query failed or table not yet migrated; will use FALLBACK_RELEASES
+      // D1 query failed; will use FALLBACK_RELEASES
     }
   }
 
