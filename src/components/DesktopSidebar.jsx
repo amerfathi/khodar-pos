@@ -162,18 +162,20 @@ export default function DesktopSidebar({
       {/* 1. Header / Brand Bar */}
       <div className="h-16 border-b border-slate-200/80 px-3 flex items-center justify-between shrink-0">
         <div className={`flex items-center gap-2.5 overflow-hidden ${isCollapsed ? 'justify-center w-full' : ''}`}>
-          <div className="w-8 h-8 rounded-lg bg-navy-850 text-white flex items-center justify-center font-bold text-sm shadow-2xs shrink-0">
-            <Store size={17} />
-          </div>
+          <img 
+            src="/brraka-icon.png" 
+            alt="براكه" 
+            className="w-8 h-8 rounded-lg object-cover shadow-2xs shrink-0 border border-slate-200" 
+          />
           {!isCollapsed && (
             <div className="truncate text-right">
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-xs text-navy-850 truncate tracking-tight">
-                  {settings.shopName || 'سوق الخضار الفاخر'}
+                  {settings.shopName || 'براكه'}
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 truncate">
-                {settings.subTitle || 'نظام محاسبي وكاشير'}
+                {settings.subTitle || 'منظومة كاشير ومحاسبة'}
               </p>
             </div>
           )}

@@ -445,15 +445,17 @@ export default function App() {
                   <span className="text-slate-800 text-xs font-semibold">رجوع</span>
                 </motion.button>
               ) : (
-                <div className="w-7 h-7 rounded-lg bg-navy-850 text-white flex items-center justify-center shadow-2xs">
-                  <Store size={15} />
-                </div>
+                <img 
+                  src="/brraka-icon.png" 
+                  alt="براكه" 
+                  className="w-7 h-7 rounded-lg object-cover shadow-2xs border border-slate-200" 
+                />
               )}
 
               {/* Shop Name & Subtitle */}
               <div className="truncate max-w-[120px]">
                 <span className="font-bold text-xs text-navy-850 truncate block">
-                  {settings.shopName || 'سوق الخضار'}
+                  {settings.shopName || 'براكه'}
                 </span>
                 <span className="text-[10px] text-slate-400 truncate block">
                   {settings.subTitle}

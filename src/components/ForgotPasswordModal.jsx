@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { 
   KeyRound, Mail, Phone, Lock, ArrowRight, CheckCircle2, 
   AlertCircle, ShieldCheck, RefreshCw, MessageSquareText, X
@@ -169,7 +169,7 @@ export default function ForgotPasswordModal({ isOpen, onClose, store }) {
                 </Button>
 
                 <a 
-                  href={`https://wa.me/201019934185?text=${encodeURIComponent(`مرحباً إدارة سوق الخضار، أحتاج مساعدة في استرداد كلمة المرور لحسابي: ${identifier || ''}`)}`}
+                  href={`https://wa.me/201019934185?text=${encodeURIComponent(`مرحباً إدارة منظومة براكه، أحتاج مساعدة في استرداد كلمة المرور لحسابي: ${identifier || ''}`)}`}
                   target="_blank"
                   rel="noreferrer"
                   className="w-full py-2.5 text-xs text-slate-600 hover:text-emerald-700 border border-slate-200 hover:border-emerald-200 rounded-xl flex items-center justify-center gap-2 transition-colors bg-white"

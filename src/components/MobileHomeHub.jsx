@@ -212,20 +212,22 @@ export default function MobileHomeHub({
       <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-2xs space-y-4">
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2.5 truncate">
-            <div className="w-10 h-10 rounded-xl bg-navy-850 text-white flex items-center justify-center shrink-0 shadow-2xs">
-              <Store size={20} />
-            </div>
+            <img 
+              src="/brraka-icon.png" 
+              alt="براكه" 
+              className="w-10 h-10 rounded-xl object-cover shrink-0 shadow-2xs border border-slate-200" 
+            />
             <div className="truncate text-right">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <h1 className="text-sm sm:text-base font-bold text-navy-850 truncate tracking-tight">
-                  {settings.shopName || 'سوق الخضار'}
+                  {settings.shopName || 'براكه'}
                 </h1>
                 <span className="text-[10px] bg-slate-100 text-slate-700 font-semibold px-2 py-0.5 rounded-md border border-slate-200">
                   {store.activeBranch?.name || 'الفرع الرئيسي'}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                {settings.subTitle || 'نظام إدارة ونقاط بيع الخضار والفواكه'}
+                {settings.subTitle || 'منظومة كاشير ومحاسبة سحابية'}
               </p>
             </div>
           </div>

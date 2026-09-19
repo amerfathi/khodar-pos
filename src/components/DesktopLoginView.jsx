@@ -69,11 +69,13 @@ export default function DesktopLoginView({ store }) {
         className="h-10 bg-white border-b border-slate-200/90 flex items-center justify-between px-3 shrink-0 text-slate-700 select-none z-50 shadow-2xs"
       >
         <div className="flex items-center gap-2.5" style={{ WebkitAppRegion: 'no-drag' }}>
-          <div className="w-5 h-5 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200">
-            <Store size={13} />
-          </div>
+          <img 
+            src="/brraka-icon.png" 
+            alt="براكه" 
+            className="w-6 h-6 rounded-md object-cover border border-slate-200" 
+          />
           <span className="text-xs font-bold text-slate-800">
-            {settings?.shopName || 'سوق الخضار'} | محطة سطح المكتب
+            {settings?.shopName || 'براكه'} | محطة سطح المكتب
           </span>
           <span className="text-[10px] bg-slate-100 text-slate-600 font-mono font-bold px-1.5 py-0.5 rounded border border-slate-200">
             v{APP_VERSION}
@@ -88,21 +90,21 @@ export default function DesktopLoginView({ store }) {
             className="w-8 h-7 flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors cursor-pointer"
             title="تصغير"
           >
-            <Minus size={13} />
+            <Minus size={14} />
           </button>
           <button
             type="button"
             onClick={handleMaximize}
             className="w-8 h-7 flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors cursor-pointer"
-            title={isMaximized ? 'استعادة' : 'تكبير'}
+            title={isMaximized ? "استعادة" : "تكبير"}
           >
-            <Square size={11} className={isMaximized ? 'text-emerald-600' : ''} />
+            {isMaximized ? <Copy size={12} className="rotate-180" /> : <Square size={12} />}
           </button>
           <button
             type="button"
             onClick={handleClose}
             className="w-8 h-7 flex items-center justify-center text-slate-500 hover:text-white hover:bg-rose-600 rounded transition-colors cursor-pointer"
-            title="إغلاق البرنامج"
+            title="إغلاق"
           >
             <X size={14} />
           </button>
@@ -119,11 +121,13 @@ export default function DesktopLoginView({ store }) {
             
             {/* Header / Brand */}
             <div className="text-center mb-6">
-              <div className="w-14 h-14 mx-auto mb-3 bg-emerald-50 border border-emerald-200 text-emerald-600 rounded-2xl flex items-center justify-center shadow-xs">
-                <Store size={28} />
-              </div>
+              <img 
+                src="/brraka-icon.png" 
+                alt="براكه" 
+                className="w-16 h-16 mx-auto mb-3 rounded-2xl shadow-sm border border-slate-200/80 object-cover" 
+              />
               <h1 className="text-xl font-black text-slate-900 tracking-tight">
-                {settings?.shopName || 'سوق الخضار المركزي'}
+                {settings?.shopName || 'براكه | Brraka'}
               </h1>
               <p className="text-xs text-slate-500 mt-1 font-medium">
                 تسجيل الدخول لمحطة الكاشير والمحاسبة المعتمدة

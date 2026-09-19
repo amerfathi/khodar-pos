@@ -43,7 +43,7 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
 
     // 3. Build WhatsApp notification
     const message = encodeURIComponent(
-      `مرحباً، أود طلب تجربة مجانية لمدة شهر لنظام المحاسبة وسوق الخضار:\n` +
+      `مرحباً، أود طلب تجربة مجانية لمدة شهر لمنظومة براكه للكاشير والمحاسبة:\n` +
       `- الاسم: ${trialForm.name}\n` +
       `- المنشأة: ${trialForm.shopName}\n` +
       `- رقم الهاتف: ${trialForm.phone}\n` +
@@ -68,12 +68,14 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
           
           {/* Logo & Brand */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-slate-900 text-emerald-400 flex items-center justify-center shadow-xs border border-slate-800">
-              <Store size={22} />
-            </div>
+            <img 
+              src="/brraka-icon.png" 
+              alt="براكه" 
+              className="w-10 h-10 rounded-xl object-cover shadow-xs border border-slate-200" 
+            />
             <div>
-              <span className="font-bold text-base text-slate-900 block tracking-tight">سوق الخضار</span>
-              <span className="text-[11px] text-slate-500 block font-medium">المنظومة المحاسبية المعتمدة</span>
+              <span className="font-bold text-base text-slate-900 block tracking-tight">براكه | Brraka</span>
+              <span className="text-[11px] text-slate-500 block font-medium">المنظومة المحاسبية السحابية</span>
             </div>
           </div>
 
@@ -656,11 +658,13 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-6 pb-8 border-b border-slate-800">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                <Store size={20} />
-              </div>
+              <img 
+                src="/brraka-icon.png" 
+                alt="براكه" 
+                className="w-9 h-9 rounded-xl object-cover border border-slate-700 shadow-xs" 
+              />
               <div>
-                <span className="font-bold text-sm text-white block">نظام سوق الخضار والمحاسبة</span>
+                <span className="font-bold text-sm text-white block">منظومة براكه المحاسبية | Brraka</span>
                 <span className="text-[11px] text-slate-400 block">إدارة تجارية متقدمة &bull; v{APP_VERSION}</span>
               </div>
             </div>

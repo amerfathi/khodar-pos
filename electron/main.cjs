@@ -9,7 +9,8 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 720,
-    title: 'سوق الخضار - كاشير ومحاسبة',
+    title: 'براكه - كاشير ومحاسبة',
+    icon: path.join(__dirname, 'icon.png'),
     frame: false, // Seamless frameless window (no white Windows titlebar)
     titleBarStyle: 'hidden',
     autoHideMenuBar: true,

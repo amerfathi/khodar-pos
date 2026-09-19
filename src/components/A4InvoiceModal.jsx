@@ -145,7 +145,7 @@ export default function A4InvoiceModal({
                 <div className="flex items-center gap-2">
                   <span className="text-2xl">🥬</span>
                   <h1 className="text-xl font-black text-slate-900 tracking-tight">
-                    {settings.shopName || 'سوق الخضار المركزي'}
+                    {settings.shopName || 'براكه'}
                   </h1>
                 </div>
                 <p className="text-xs text-slate-600 font-semibold">{settings.subTitle}</p>
@@ -385,7 +385,7 @@ export default function A4InvoiceModal({
 
             {/* Footer Notice */}
             <div className="pt-8 text-center text-[10px] text-slate-400 border-t border-slate-100 mt-6">
-              تم إصدار هذا المستند عبر نظام حسابات وإدارة سوق الخضار بالجملة والتجزئة • {settings.shopName}
+              تم إصدار هذا المستند عبر منظومة براكه للمبيعات والمحاسبة • {settings.shopName}
             </div>
 
           </div>

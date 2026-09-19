@@ -3,8 +3,8 @@ export const INITIAL_PRODUCTS = [];
 export const INITIAL_CUSTOMERS = [];
 
 export const INITIAL_SETTINGS = {
-  shopName: 'سوق ومحل الخضار والفواكه',
-  subTitle: 'مبيعات وتوريد بالجملة والتجزئة',
+  shopName: 'براكه',
+  subTitle: 'منظومة كاشير ومحاسبة سحابية',
   phone: '',
   secondaryPhone: '',
   currency: 'ريال',

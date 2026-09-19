@@ -1320,7 +1320,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                 <div className="flex flex-col gap-2 pt-2">
                   {resettingTenant.phone && (
                     <a
-                      href={`https://wa.me/${resettingTenant.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`مرحباً ${resettingTenant.companyName}، تم إعادة تعيين كلمة المرور الخاصة بحسابكم على سوق الخضار بنجاح.\nاسم المستخدم: ${resettingTenant.username}\nكلمة المرور الجديدة: ${newTenantPass}\nرابط الدخول: https://khodar-pos.pages.dev`)}`}
+                      href={`https://wa.me/${resettingTenant.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`مرحباً ${resettingTenant.companyName}، تم إعادة تعيين كلمة المرور الخاصة بحسابكم على منظومة براكه بنجاح.\nاسم المستخدم: ${resettingTenant.username}\nكلمة المرور الجديدة: ${newTenantPass}\nرابط الدخول: https://khodar-pos.pages.dev`)}`}
                       target="_blank"
                       rel="noreferrer"
                       className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20"

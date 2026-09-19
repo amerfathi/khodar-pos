@@ -64,15 +64,17 @@ export default function LoginView({ store, onClose }) {
             </button>
           )}
 
-          <div className="w-14 h-14 mx-auto mb-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-center text-emerald-600 shadow-xs">
-            <Store size={26} />
-          </div>
+          <img 
+            src="/brraka-icon.png" 
+            alt="براكه" 
+            className="w-16 h-16 mx-auto mb-3 rounded-2xl shadow-sm border border-slate-200/80 object-cover" 
+          />
 
           <div className="flex items-center justify-center gap-2">
-            <h1 className="text-xl font-black text-slate-900 tracking-tight">نظام سوق الخضار والمحاسبة المركزي</h1>
+            <h1 className="text-xl font-black text-slate-900 tracking-tight">منظومة براكه | Brraka</h1>
             <Badge variant="success" size="sm">v{APP_VERSION}</Badge>
           </div>
-          <p className="text-xs text-slate-500 mt-1 font-medium">منظومة موحدة لإدارة المبيعات والتوريد والموازين السحابية</p>
+          <p className="text-xs text-slate-500 mt-1 font-medium">منظومة موحدة لإدارة الكاشير والمبيعات والموازين السحابية</p>
 
           {/* Navigation Pill Switcher */}
           <div className="mt-4 grid grid-cols-2 p-1 bg-slate-100 rounded-xl text-xs font-bold max-w-xs mx-auto border border-slate-200/80">

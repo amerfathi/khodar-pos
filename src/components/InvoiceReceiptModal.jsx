@@ -75,7 +75,7 @@ export default function InvoiceReceiptModal({ isOpen, onClose, invoice, settings
             {/* Store Header */}
             <div className="text-center pb-3 border-b-2 border-dashed border-slate-300">
               <div className="inline-block p-2 bg-slate-900 text-white rounded-full font-black text-sm mb-1.5">
-                🥬 {settings.shopName || 'سوق الخضار'}
+                {settings.shopName || 'براكه'}
               </div>
               <p className="text-[11px] text-slate-600 font-medium">{settings.subTitle}</p>
               <p className="text-[10px] text-slate-500 mt-0.5">{settings.address}</p>
@@ -253,7 +253,7 @@ export default function InvoiceReceiptModal({ isOpen, onClose, invoice, settings
               <div className="w-32 h-6 mx-auto bg-slate-100 flex items-center justify-center font-mono text-[9px] text-slate-400 border border-slate-200 rounded">
                 ||| |||| || ||||| ||||
               </div>
-              <p className="text-[8px] text-slate-400">نظام سوق الخضار والمبيعات</p>
+              <p className="text-[8px] text-slate-400">منظومة براكه للمبيعات والمحاسبة</p>
             </div>
           </div>
         </div>

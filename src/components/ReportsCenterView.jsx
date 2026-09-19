@@ -1462,7 +1462,7 @@ export default function ReportsCenterView({ store, initialReportType = 'sales' }
           </div>
 
           <div className="pt-8 text-center text-[10px] text-slate-400 border-t border-slate-100 mt-6">
-            مستند رسمي صادر عن نظام محاسبة ومبيعات سوق الخضار • تم الاستخراج بتاريخ {todayStr}
+            مستند رسمي صادر عن منظومة براكه للمحاسبة والمبيعات • تم الاستخراج بتاريخ {todayStr}
           </div>
 
         </div>

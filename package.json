@@ -12,8 +12,8 @@
     "electron:build": "vite build && electron-builder --win"
   },
   "build": {
-    "appId": "com.khodarpos.app",
-    "productName": "KhodarPOS",
+    "appId": "com.brraka.pos",
+    "productName": "براكه",
     "directories": {
       "output": "C:/Users/IMDAD/AppData/Local/Temp/khodar-release"
     },
@@ -23,7 +23,8 @@
     ],
     "asar": true,
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "electron/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -31,7 +32,9 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "سوق الخضار - كاشير ومحاسبة",
+      "installerIcon": "electron/icon.ico",
+      "uninstallerIcon": "electron/icon.ico",
+      "shortcutName": "براكه - كاشير ومحاسبة",
       "artifactName": "KhodarPOS-Setup.exe"
     }
   },
