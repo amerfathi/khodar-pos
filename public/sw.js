@@ -1,5 +1,5 @@
 // Khodar POS Service Worker - Unified Multi-Platform PWA Cache & Update
-const CACHE_NAME = 'khodar-pos-v2.4.0';
+const CACHE_NAME = 'khodar-pos-v2.6.0';
 
 self.addEventListener('install', (event) => {
   // Activate new worker immediately

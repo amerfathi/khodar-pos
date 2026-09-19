@@ -74,6 +74,24 @@ const setStoredItem = (key, value) => {
   }
 };
 
+/**
+ * Authoritative User Permissions Resolver
+ * Eliminates stale permission inheritance and guarantees role preset integrity.
+ */
+export const resolveUserPermissions = (user) => {
+  if (!user) return DEFAULT_PERMISSIONS;
+  if (user.role === 'super_admin' || user.role === 'company_owner' || user.role === 'admin') {
+    return { ...ROLE_PERMISSIONS_PRESETS.admin.permissions };
+  }
+  // If a standard preset is assigned (cashier, accountant, inventory_manager),
+  // the preset permissions are the authoritative source of truth.
+  if (user.role && user.role !== 'custom' && ROLE_PERMISSIONS_PRESETS[user.role]) {
+    return { ...ROLE_PERMISSIONS_PRESETS[user.role].permissions };
+  }
+  // If custom role, use explicit permissions
+  return user.permissions ? { ...DEFAULT_PERMISSIONS, ...user.permissions } : { ...DEFAULT_PERMISSIONS };
+};
+
 export function useAppStore() {
   const [products, setProducts] = useState(() => getStoredItem(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS));
   const [customers, setCustomers] = useState(() => getStoredItem(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS));
@@ -201,18 +219,13 @@ export function useAppStore() {
     );
 
     if (freshUser) {
+      const freshPerms = resolveUserPermissions(freshUser);
       const hasRoleChanged = freshUser.role !== currentUser.role;
       const hasStatusChanged = freshUser.status !== currentUser.status;
       const hasBranchChanged = freshUser.branchId !== currentUser.branchId;
-      const hasPermsChanged = JSON.stringify(freshUser.permissions || {}) !== JSON.stringify(currentUser.permissions || {});
+      const hasPermsChanged = JSON.stringify(currentUser.permissions || {}) !== JSON.stringify(freshPerms);
 
       if (hasRoleChanged || hasStatusChanged || hasBranchChanged || hasPermsChanged) {
-        const rolePreset = ROLE_PERMISSIONS_PRESETS[freshUser.role] || ROLE_PERMISSIONS_PRESETS.cashier;
-        const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
-        const freshPerms = freshUser.role === 'custom'
-          ? (freshUser.permissions ? { ...DEFAULT_PERMISSIONS, ...freshUser.permissions } : { ...DEFAULT_PERMISSIONS })
-          : { ...defaultPerms, ...(freshUser.permissions || {}) };
-
         setCurrentUser(prev => ({
           ...prev,
           name: freshUser.name,
@@ -224,6 +237,113 @@ export function useAppStore() {
       }
     }
   }, [users, currentUser?.id, currentUser?.role, currentUser?.status, currentUser?.isStaff]);
+
+  // Real-Time Cross-Tab / Window Synchronization (BroadcastChannel)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    let channel = null;
+    try {
+      if ('BroadcastChannel' in window) {
+        channel = new BroadcastChannel('khodar_auth_sync_channel');
+        channel.onmessage = (event) => {
+          const { type, payload } = event.data || {};
+          if (type === 'USER_UPDATED' && payload) {
+            setUsers(prev => prev.map(u => u.id === payload.id ? { ...u, ...payload } : u));
+            
+            // If the updated user is the currently logged-in user in this tab
+            setCurrentUser(prevUser => {
+              if (!prevUser) return prevUser;
+              if (prevUser.id === payload.id || (prevUser.username?.toLowerCase() === payload.username?.toLowerCase() && prevUser.tenantId === payload.tenantId)) {
+                const updatedSession = {
+                  ...prevUser,
+                  ...payload,
+                  permissions: resolveUserPermissions(payload)
+                };
+                try {
+                  localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(updatedSession));
+                } catch (e) {}
+                return updatedSession;
+              }
+              return prevUser;
+            });
+          } else if (type === 'USER_DELETED' && payload?.id) {
+            setUsers(prev => prev.filter(u => u.id !== payload.id));
+            setCurrentUser(prevUser => {
+              if (prevUser?.id === payload.id) {
+                try { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); } catch (e) {}
+                return null; // Force logout
+              }
+              return prevUser;
+            });
+          }
+        };
+      }
+    } catch (e) {
+      console.warn('BroadcastChannel sync init warning:', e);
+    }
+
+    return () => {
+      if (channel) channel.close();
+    };
+  }, []);
+
+  // Background Cloud Permissions Sync & Window Focus Revalidation
+  useEffect(() => {
+    if (typeof window === 'undefined' || !currentUser || !currentUser.isStaff) return;
+
+    const checkCloudPermissions = async () => {
+      try {
+        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+          ? window.location.origin
+          : 'https://khodar-pos.pages.dev';
+        const res = await fetch(`${baseUrl}/api/users?id=${encodeURIComponent(currentUser.id)}&tenantId=${encodeURIComponent(currentUser.tenantId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.users) && data.users.length > 0) {
+            const fresh = data.users[0];
+            const freshPerms = resolveUserPermissions(fresh);
+            
+            setCurrentUser(prev => {
+              if (!prev) return prev;
+              const hasChanged = prev.role !== fresh.role || 
+                                prev.status !== fresh.status || 
+                                JSON.stringify(prev.permissions || {}) !== JSON.stringify(freshPerms);
+              if (hasChanged) {
+                const updated = {
+                  ...prev,
+                  name: fresh.name,
+                  role: fresh.role,
+                  status: fresh.status,
+                  branchId: fresh.branchId,
+                  permissions: freshPerms
+                };
+                setUsers(uList => uList.map(u => u.id === fresh.id ? { ...u, ...fresh, permissions: freshPerms } : u));
+                return updated;
+              }
+              return prev;
+            });
+          }
+        }
+      } catch (e) {}
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkCloudPermissions();
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    const interval = setInterval(checkCloudPermissions, 15000);
+
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      clearInterval(interval);
+    };
+  }, [currentUser?.id, currentUser?.tenantId, currentUser?.isStaff]);
 
   // Background Auto-sync to Cloudflare Edge
   useEffect(() => {
@@ -2164,13 +2284,26 @@ export function useAppStore() {
     return true;
   };
 
+  const broadcastAuthEvent = (type, payload) => {
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        const channel = new BroadcastChannel('khodar_auth_sync_channel');
+        channel.postMessage({ type, payload });
+        channel.close();
+      }
+    } catch (e) {
+      console.warn('broadcastAuthEvent warning:', e);
+    }
+  };
+
   // Staff Users & Permissions Management (إدارة المستخدمين والموظفين والصلاحيات)
   const hasPermission = (permissionKey) => {
     if (!currentUser) return false;
     if (currentUser.role === 'super_admin' || currentUser.role === 'company_owner' || currentUser.role === 'admin') {
       return true;
     }
-    return Boolean(currentUser?.permissions?.[permissionKey]);
+    const perms = resolveUserPermissions(currentUser);
+    return Boolean(perms?.[permissionKey]);
   };
 
   const addUser = ({ name, username, password, role = 'cashier', branchId = 'all', permissions, phone = '' }) => {
@@ -2203,8 +2336,10 @@ export function useAppStore() {
       permissions: finalPerms,
       createdAt: getCurrentDateFormatted()
     };
+    newUser.permissions = resolveUserPermissions(newUser);
 
     setUsers(prev => [newUser, ...prev]);
+    broadcastAuthEvent('USER_UPDATED', newUser);
 
     // 1. Central Cloudflare D1 Persistence (Cloud-First)
     if (typeof window !== 'undefined') {
@@ -2245,15 +2380,24 @@ export function useAppStore() {
           ...updates,
           permissions: newPerms
         };
+        updated.permissions = resolveUserPermissions(updated);
         updatedObj = updated;
 
         if (currentUser && (currentUser.id === userId || (currentUser.username?.toLowerCase() === u.username?.toLowerCase() && currentUser.tenantId === u.tenantId))) {
-          setCurrentUser(prevUser => ({ ...prevUser, ...updated, permissions: newPerms }));
+          setCurrentUser(prevUser => {
+            const next = { ...prevUser, ...updated, permissions: updated.permissions };
+            try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(next)); } catch (e) {}
+            return next;
+          });
         }
         return updated;
       }
       return u;
     }));
+
+    if (updatedObj) {
+      broadcastAuthEvent('USER_UPDATED', updatedObj);
+    }
 
     const activeTenantId = currentUser?.tenantId || updatedObj?.tenantId || 'tenant-demo';
 
@@ -2291,6 +2435,7 @@ export function useAppStore() {
     }
 
     setUsers(prev => prev.filter(u => u.id !== userId));
+    broadcastAuthEvent('USER_DELETED', { id: userId });
 
     const activeTenantId = currentUser?.tenantId || target.tenantId || 'tenant-demo';
 

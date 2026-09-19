@@ -14,6 +14,7 @@ import { ROLE_PERMISSIONS_PRESETS, DEFAULT_PERMISSIONS } from '../data/initialDa
 import { APP_VERSION, APP_RELEASE_DATE, getClientPlatform } from '../config/appVersion';
 import { checkLatestRelease } from '../services/releaseService';
 import DesktopUpdateModal from './DesktopUpdateModal';
+import { resolveUserPermissions } from '../store/useAppStore';
 
 export default function SettingsView({ 
   store, 
@@ -218,7 +219,7 @@ export default function SettingsView({
       role: u.role || 'cashier',
       branchId: u.branchId || 'all',
       status: u.status || 'active',
-      permissions: { ...(u.permissions || DEFAULT_PERMISSIONS) }
+      permissions: resolveUserPermissions(u)
     });
     setIsUserModalOpen(true);
   };
