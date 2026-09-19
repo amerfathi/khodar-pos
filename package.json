@@ -1,7 +1,7 @@
 {
   "name": "khodar-pos",
   "private": true,
-  "version": "2.5.3",
+  "version": "2.5.4",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -32,6 +32,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh",
       "installerIcon": "electron/icon.ico",
       "uninstallerIcon": "electron/icon.ico",
       "shortcutName": "براكه - كاشير ومحاسبة",

@@ -193,9 +193,21 @@ ipcMain.handle('install-update', async (event, installerPath) => {
     const tempDir = app.getPath('temp');
     const updaterBat = path.join(tempDir, `khodar-updater-${Date.now()}.bat`);
     const batContent = `@echo off
-timeout /t 2 /nobreak >nul
-taskkill /F /IM KhodarPOS.exe >nul 2>&1
+chcp 65001 >nul
 timeout /t 1 /nobreak >nul
+taskkill /F /T /IM "براكه.exe" >nul 2>&1
+taskkill /F /T /IM "KhodarPOS.exe" >nul 2>&1
+taskkill /F /T /IM "electron.exe" >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+:WAIT_PROCESS
+tasklist /FI "IMAGENAME eq براكه.exe" 2>NUL | find /I /N "براكه.exe">NUL
+if "%ERRORLEVEL%"=="0" (
+    taskkill /F /T /IM "براكه.exe" >nul 2>&1
+    timeout /t 1 /nobreak >nul
+    goto WAIT_PROCESS
+)
+
 start "" "${targetPath}" /S
 exit
 `;
@@ -210,7 +222,7 @@ exit
     // Immediately exit Electron cleanly to release all file locks
     setTimeout(() => {
       app.exit(0);
-    }, 200);
+    }, 100);
 
     return { success: true };
   } catch (err) {
