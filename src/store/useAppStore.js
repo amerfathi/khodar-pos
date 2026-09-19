@@ -1875,11 +1875,37 @@ export function useAppStore() {
   };
 
   const updateTenantAccount = (tenantId, updates) => {
+    // Validate uniqueness if username is being changed
+    if (updates.username) {
+      const cleanUser = updates.username.trim().toLowerCase();
+      const existingUser = tenants.find(t => t.id !== tenantId && t.username.toLowerCase() === cleanUser);
+      if (existingUser) {
+        throw new Error(`اسم المستخدم (${updates.username}) مسجل مسبقاً لمشترك آخر`);
+      }
+    }
+
+    // Validate uniqueness if storeCode is being changed
+    if (updates.storeCode) {
+      const cleanCode = updates.storeCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+      const existingCode = tenants.find(t => t.id !== tenantId && (t.storeCode || '').toUpperCase() === cleanCode);
+      if (existingCode) {
+        throw new Error(`كود المتجر (${updates.storeCode}) مسجل مسبقاً لمتجر آخر`);
+      }
+    }
+
     setTenants(prev => prev.map(t => {
       if (t.id === tenantId) {
-        // username is immutable!
-        const { username, ...allowedUpdates } = updates;
-        const updated = { ...t, ...allowedUpdates };
+        const updated = {
+          ...t,
+          ...updates,
+          ...(updates.username ? { username: updates.username.trim().toLowerCase() } : {}),
+          ...(updates.storeCode ? { storeCode: updates.storeCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') } : {}),
+          ...(updates.password ? { password: updates.password.trim() } : {}),
+          ...(updates.companyName ? { companyName: updates.companyName.trim() } : {}),
+          ...(updates.phone !== undefined ? { phone: updates.phone.trim() } : {}),
+          ...(updates.notes !== undefined ? { notes: updates.notes.trim() } : {}),
+          ...(updates.allowedBranches ? { allowedBranches: Number(updates.allowedBranches) || 1 } : {})
+        };
         if (currentUser && currentUser.id === tenantId) {
           setCurrentUser(updated);
         }

@@ -21,28 +21,55 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
   });
   const [trialSubmitted, setTrialSubmitted] = useState(false);
 
-  const handleTrialSubmit = (e) => {
+  const handleTrialSubmit = async (e) => {
     e.preventDefault();
     if (!trialForm.name || !trialForm.phone || !trialForm.shopName) return;
 
-    // 1. Record lead into Central Platform Store
+    const payload = {
+      id: `trial-${Date.now()}`,
+      name: trialForm.name.trim(),
+      shopName: trialForm.shopName.trim(),
+      phone: trialForm.phone.trim(),
+      city: (trialForm.city || '').trim(),
+      notes: (trialForm.notes || '').trim(),
+      status: 'pending',
+      createdAt: new Date().toISOString().split('T')[0],
+      timestamp: Date.now()
+    };
+
+    // 1. Send directly to Central Cloud API (Cloudflare D1) so it reaches the platform owner's SuperAdmin portal
+    const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
+      ? window.location.origin
+      : 'https://khodar-pos.pages.dev';
+
+    try {
+      await fetch(`${baseUrl}/api/trial-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (apiErr) {
+      console.warn('Could not post to cloud trial-requests API:', apiErr);
+    }
+
+    // 2. Record lead into Central Platform Store
     if (store && store.addTrialRequest) {
       try {
-        store.addTrialRequest(trialForm);
+        store.addTrialRequest(payload);
       } catch (err) {
         console.warn('Could not add to store:', err);
       }
     }
 
-    // 2. Also save to localStorage fallback queue
+    // 3. Also save to localStorage fallback queue
     try {
       const leads = JSON.parse(localStorage.getItem('khodar_trial_leads_v1') || localStorage.getItem('khodar_trial_leads') || '[]');
-      leads.push({ ...trialForm, id: `trial-${Date.now()}`, status: 'pending', date: new Date().toISOString() });
+      leads.unshift(payload);
       localStorage.setItem('khodar_trial_leads_v1', JSON.stringify(leads));
       localStorage.setItem('khodar_trial_leads', JSON.stringify(leads));
     } catch (_) {}
 
-    // 3. Build WhatsApp notification
+    // 4. Build WhatsApp notification
     const message = encodeURIComponent(
       `مرحباً، أود طلب تجربة مجانية لمدة شهر لمنظومة براكه للكاشير والمحاسبة:\n` +
       `- الاسم: ${trialForm.name}\n` +

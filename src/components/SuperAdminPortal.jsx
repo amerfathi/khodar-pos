@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { OFFICIAL_RELEASES } from '../services/releaseService';
 import { APP_VERSION } from '../config/appVersion';
 import { 
   Building2, Users, Monitor, Smartphone, Globe, Download, Tag, Plus, ShieldCheck, Calendar, Clock, Phone, 
   Check, X, Copy, Trash2, Power, RefreshCw, Key, MessageCircle, 
-  ExternalLink, Search, Sparkles, ArrowRight
+  ExternalLink, Search, Sparkles, ArrowRight, Edit3
 } from 'lucide-react';
 
 export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToStore }) {
@@ -29,6 +29,67 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   const [resettingTenant, setResettingTenant] = useState(null);
   const [newTenantPass, setNewTenantPass] = useState('');
   const [resetSuccessMsg, setResetSuccessMsg] = useState('');
+
+  // Comprehensive Edit Tenant State (تعديل شامل لكافة بيانات المشترك)
+  const [editingTenant, setEditingTenant] = useState(null);
+  const [editForm, setEditForm] = useState({
+    companyName: '',
+    storeCode: '',
+    username: '',
+    password: '',
+    status: 'active',
+    expiresAt: '',
+    allowedBranches: 1,
+    phone: '',
+    notes: ''
+  });
+  const [editError, setEditError] = useState('');
+  const [editSuccess, setEditSuccess] = useState('');
+
+  // Live Cloud Trial Requests Synchronization (مزامنة طلبات التجربة مع سحابة Cloudflare D1)
+  const [cloudTrialRequests, setCloudTrialRequests] = useState([]);
+  const [isLoadingTrials, setIsLoadingTrials] = useState(false);
+
+  const fetchCloudTrials = async () => {
+    setIsLoadingTrials(true);
+    try {
+      const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : 'https://khodar-pos.pages.dev';
+      const res = await fetch(`${baseUrl}/api/trial-requests`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.requests)) {
+        setCloudTrialRequests(data.requests);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch cloud trials:', e);
+    } finally {
+      setIsLoadingTrials(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchCloudTrials();
+    }
+  }, [isOpen, activeTab]);
+
+  // Merge store local trial requests and cloud D1 requests seamlessly
+  const combinedTrialRequests = useMemo(() => {
+    const map = new Map();
+    cloudTrialRequests.forEach(r => map.set(r.id, r));
+    trialRequests.forEach(r => {
+      if (!map.has(r.id)) {
+        map.set(r.id, r);
+      } else {
+        const existing = map.get(r.id);
+        if (r.status === 'activated' || existing.status === 'activated') {
+          map.set(r.id, { ...existing, ...r, status: 'activated' });
+        }
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  }, [cloudTrialRequests, trialRequests]);
 
   // New Tenant Form State
   const [companyName, setCompanyName] = useState('');
@@ -140,8 +201,18 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
       });
 
       // Mark trial request as activated if this was initiated from a trial request
-      if (activatingTrialId && updateTrialRequest) {
-        updateTrialRequest(activatingTrialId, { status: 'activated', tenantUsername: newTenant.username });
+      if (activatingTrialId) {
+        if (updateTrialRequest) {
+          updateTrialRequest(activatingTrialId, { status: 'activated', tenantUsername: newTenant.username });
+        }
+        const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
+          ? window.location.origin
+          : 'https://khodar-pos.pages.dev';
+        fetch(`${baseUrl}/api/trial-requests`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: activatingTrialId, status: 'activated', tenantUsername: newTenant.username })
+        }).catch(console.warn);
         setActivatingTrialId(null);
       }
 
@@ -164,6 +235,54 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
       setIsAddModalOpen(false);
     } catch (err) {
       setFormError(err.message || 'حدث خطأ أثناء إنشاء الحساب');
+    }
+  };
+
+  const handleOpenEditTenant = (t) => {
+    setEditingTenant(t);
+    setEditForm({
+      companyName: t.companyName || '',
+      storeCode: t.storeCode || '',
+      username: t.username || '',
+      password: t.password || '',
+      status: t.status || 'active',
+      expiresAt: t.expiresAt || '',
+      allowedBranches: t.allowedBranches || 1,
+      phone: t.phone || '',
+      notes: t.notes || ''
+    });
+    setEditError('');
+    setEditSuccess('');
+  };
+
+  const handleSaveEditTenant = (e) => {
+    e.preventDefault();
+    setEditError('');
+    setEditSuccess('');
+
+    try {
+      updateTenantAccount(editingTenant.id, editForm);
+      setEditSuccess('تم حفظ كافة تعديلات المشترك بنجاح!');
+      setTimeout(() => {
+        setEditingTenant(null);
+      }, 800);
+    } catch (err) {
+      setEditError(err.message || 'حدث خطأ أثناء حفظ التعديلات');
+    }
+  };
+
+  const handleDeleteTrial = async (reqId, reqName) => {
+    if (window.confirm(`هل أنت متأكد من حذف طلب التجربة للتاجر "${reqName || ''}"؟`)) {
+      if (deleteTrialRequest) deleteTrialRequest(reqId);
+      setCloudTrialRequests(prev => prev.filter(r => r.id !== reqId));
+      const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : 'https://khodar-pos.pages.dev';
+      try {
+        await fetch(`${baseUrl}/api/trial-requests?id=${reqId}`, { method: 'DELETE' });
+      } catch (e) {
+        console.warn(e);
+      }
     }
   };
 
@@ -242,9 +361,9 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
               }`}
             >
               <span>طلبات التجربة (شهر مجاني)</span>
-              {trialRequests.length > 0 && (
+              {combinedTrialRequests.length > 0 && (
                 <span className="px-1.5 py-0.2 bg-amber-400 text-slate-950 font-black rounded-full text-[10px]">
-                  {trialRequests.length}
+                  {combinedTrialRequests.length}
                 </span>
               )}
             </button>
@@ -506,6 +625,17 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
                         <td className="p-3.5">
                           <div className="flex items-center justify-center gap-1.5">
+                            {/* Full Edit Subscriber button */}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditTenant(tenant)}
+                              title="تعديل شامل لكافة بيانات واشتراك المشترك (الباسوورد، الكود، الفروع، الصلاحية)"
+                              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-bold shadow-2xs"
+                            >
+                              <Edit3 size={13} />
+                              <span>تعديل شامل</span>
+                            </button>
+
                             {/* Copy Credentials button */}
                             <button
                               type="button"
@@ -770,7 +900,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                 <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between">
                   <div>
                     <span className="text-xs text-slate-500 font-bold block">إجمالي طلبات التجربة</span>
-                    <span className="text-2xl font-black text-slate-900 mt-1 block">{trialRequests.length}</span>
+                    <span className="text-2xl font-black text-slate-900 mt-1 block">{combinedTrialRequests.length}</span>
                   </div>
                   <div className="w-11 h-11 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
                     <Sparkles size={22} />
@@ -781,7 +911,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                   <div>
                     <span className="text-xs text-slate-500 font-bold block">طلبات بانتظار التفعيل</span>
                     <span className="text-2xl font-black text-amber-600 mt-1 block">
-                      {trialRequests.filter(r => r.status !== 'activated').length}
+                      {combinedTrialRequests.filter(r => r.status !== 'activated').length}
                     </span>
                   </div>
                   <div className="w-11 h-11 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
@@ -793,7 +923,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                   <div>
                     <span className="text-xs text-slate-500 font-bold block">تم تفعيل اشتراكهم المجاني</span>
                     <span className="text-2xl font-black text-emerald-600 mt-1 block">
-                      {trialRequests.filter(r => r.status === 'activated').length}
+                      {combinedTrialRequests.filter(r => r.status === 'activated').length}
                     </span>
                   </div>
                   <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
@@ -807,24 +937,37 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                 <div className="p-4 bg-slate-50 border-b border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Sparkles size={18} className="text-amber-500" />
-                    <h3 className="font-bold text-slate-800 text-sm">طلبات تجربة المنظومة (شهر مجاني) الواردة من الموقع</h3>
+                    <h3 className="font-bold text-slate-800 text-sm">طلبات تجربة المنظومة (شهر مجاني) الواردة من الموقع والسحابة</h3>
                     <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">
-                      {trialRequests.length} طلب
+                      {combinedTrialRequests.length} طلب
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 font-medium">
-                    يمكنك بضغطة زر واحدة إنشاء حساب المتجر وتوليد اسم المستخدم وكلمة المرور ومراسلتهم عبر واتساب
-                  </p>
+                  
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={fetchCloudTrials}
+                      disabled={isLoadingTrials}
+                      className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                      title="فحص السحابة لجلب أي طلبات تجربة جديدة فوراً"
+                    >
+                      <RefreshCw size={13} className={isLoadingTrials ? 'animate-spin' : ''} />
+                      <span>تحديث من السحابة</span>
+                    </button>
+                    <p className="text-xs text-slate-500 font-medium hidden sm:block">
+                      تفعيل الحساب يملأ كود المتجر وبيانات الدخول ومراسلتهم واتساب
+                    </p>
+                  </div>
                 </div>
 
-                {trialRequests.length === 0 ? (
+                {combinedTrialRequests.length === 0 ? (
                   <div className="py-16 px-4 text-center">
                     <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
                       <Sparkles size={28} />
                     </div>
                     <h4 className="font-bold text-slate-800 text-sm">لا توجد طلبات تجربة واردة حالياً</h4>
                     <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
-                      عند قيام أي تاجر أو عميل بالضغط على زر "طلب تجربة مجانية لمدة شهر" في الموقع وتعبئة بياناته، ستظهر بيانات طلبه هنا فوراً لمراجعتها وتفعيل حسابه.
+                      عند قيام أي تاجر أو عميل بالضغط على زر "طلب تجربة مجانية لمدة شهر" في الموقع وتعبئة بياناته، ستصل رسالته إلى منصة المالك هنا فوراً لمراجعتها وتفعيل حسابه.
                     </p>
                   </div>
                 ) : (
@@ -842,7 +985,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {trialRequests.map((req) => {
+                        {combinedTrialRequests.map((req) => {
                           const isActivated = req.status === 'activated';
                           const cleanPhone = (req.phone || '').replace(/[^0-9]/g, '');
                           const waUrl = cleanPhone ? `https://wa.me/${cleanPhone.startsWith('0') ? '20' + cleanPhone.slice(1) : cleanPhone}` : null;
@@ -916,11 +1059,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                                   )}
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      if (confirm(`هل أنت متأكد من حذف طلب "${req.name}"؟`)) {
-                                        deleteTrialRequest(req.id);
-                                      }
-                                    }}
+                                    onClick={() => handleDeleteTrial(req.id, req.name)}
                                     className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                                     title="حذف الطلب"
                                   >
@@ -1119,6 +1258,282 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                 >
                   <Plus size={16} />
                   <span>تفعيل وحفظ الاشتراك</span>
+                </button>
+              </div>
+
+            </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* Comprehensive Edit Tenant Modal (تعديل شامل لكافة بيانات واشتراك المشترك) */}
+      {editingTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 backdrop-blur-sm p-3 sm:p-4 text-right overflow-y-auto">
+          <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl p-5 sm:p-6 space-y-4 animate-in zoom-in-95 max-h-[92vh] flex flex-col">
+            
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center font-bold">
+                  <Edit3 size={18} />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-slate-900">تعديل شامل لبيانات المشترك والاشتراك</h3>
+                  <span className="text-[10px] text-slate-400">تحكم كامل في كلمة المرور، كود المتجر، الصلاحية، والفروع</span>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setEditingTenant(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold p-1 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {editError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl font-bold text-xs shrink-0">
+                {editError}
+              </div>
+            )}
+
+            {editSuccess && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl font-bold text-xs shrink-0">
+                {editSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditTenant} className="space-y-3.5 text-xs overflow-y-auto pr-1">
+              
+              {/* Row 1: Company Name */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">اسم المتجر أو المؤسسة *</label>
+                <input
+                  type="text"
+                  required
+                  value={editForm.companyName}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, companyName: e.target.value }))}
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Row 2: Store Code + Username */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                    <span>كود المتجر (Store Code) *</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const num = Math.floor(100 + Math.random() * 900);
+                        setEditForm(prev => ({ ...prev, storeCode: `BRK-${num}` }));
+                      }}
+                      className="text-[10px] text-blue-600 hover:underline font-bold cursor-pointer"
+                    >
+                      توليد كود
+                    </button>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.storeCode}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, storeCode: e.target.value.toUpperCase() }))}
+                    className="w-full px-3 py-2.5 bg-emerald-50/50 border border-emerald-300 rounded-xl text-xs font-mono font-black text-emerald-900 uppercase tracking-wider focus:ring-2 focus:ring-emerald-500"
+                    dir="ltr"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">كود ربط المحطة للكاشير</span>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    اسم المستخدم (Username) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.username}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, username: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '') }))}
+                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500"
+                    dir="ltr"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">حساب تسجيل الدخول</span>
+                </div>
+              </div>
+
+              {/* Row 3: Password */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>كلمة المرور *</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+                      let p = '';
+                      for (let i = 0; i < 6; i++) p += chars.charAt(Math.floor(Math.random() * chars.length));
+                      setEditForm(prev => ({ ...prev, password: p }));
+                    }}
+                    className="text-[10px] text-blue-600 hover:underline font-bold cursor-pointer"
+                  >
+                    توليد كلمة سر
+                  </button>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editForm.password}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, password: e.target.value }))}
+                  className="w-full px-3 py-2.5 bg-amber-50/50 border border-amber-300 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-amber-500"
+                  dir="ltr"
+                />
+              </div>
+
+              {/* Row 4: Status & Allowed Branches */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">حالة الاشتراك</label>
+                  <select
+                    value={editForm.status}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, status: e.target.value }))}
+                    className="w-full px-2.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+                  >
+                    <option value="active">ساري ونشط (Active)</option>
+                    <option value="suspended">معلّق / موقوف (Suspended)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">الفروع المسموحة</label>
+                  <select
+                    value={editForm.allowedBranches}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, allowedBranches: e.target.value }))}
+                    className="w-full px-2.5 py-2.5 bg-blue-50/60 border border-blue-200 rounded-xl text-xs font-bold text-blue-900"
+                  >
+                    <option value="1">1 فرع (فردي)</option>
+                    <option value="2">2 فرعان</option>
+                    <option value="3">3 فروع</option>
+                    <option value="5">5 فروع</option>
+                    <option value="10">10 فروع</option>
+                    <option value="20">20 فرعاً</option>
+                    <option value="999">غير محدود</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 5: Expiration Date + Quick Extensions */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>تاريخ انتهاء الاشتراك</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const base = new Date(editForm.expiresAt || new Date());
+                        base.setMonth(base.getMonth() + 1);
+                        setEditForm(prev => ({ ...prev, expiresAt: base.toISOString().split('T')[0] }));
+                      }}
+                      className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors cursor-pointer"
+                    >
+                      + شهر
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const base = new Date(editForm.expiresAt || new Date());
+                        base.setMonth(base.getMonth() + 3);
+                        setEditForm(prev => ({ ...prev, expiresAt: base.toISOString().split('T')[0] }));
+                      }}
+                      className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors cursor-pointer"
+                    >
+                      + 3 أشهر
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const base = new Date(editForm.expiresAt || new Date());
+                        base.setFullYear(base.getFullYear() + 1);
+                        setEditForm(prev => ({ ...prev, expiresAt: base.toISOString().split('T')[0] }));
+                      }}
+                      className="px-2 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-lg text-[10px] font-bold hover:bg-emerald-200 transition-colors cursor-pointer"
+                    >
+                      + سنة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditForm(prev => ({ ...prev, expiresAt: '2099-12-31' }))}
+                      className="px-2 py-0.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-lg text-[10px] font-bold hover:bg-slate-200 transition-colors cursor-pointer"
+                    >
+                      دائم
+                    </button>
+                  </div>
+                </label>
+                <input
+                  type="date"
+                  value={editForm.expiresAt || ''}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, expiresAt: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900"
+                  dir="ltr"
+                />
+              </div>
+
+              {/* Row 6: Phone */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">هاتف المشترك / واتساب</label>
+                <input
+                  type="text"
+                  value={editForm.phone}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900"
+                  dir="ltr"
+                  placeholder="05XXXXXXXX"
+                />
+              </div>
+
+              {/* Row 7: Notes */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">ملاحظات وسجل العميل</label>
+                <input
+                  type="text"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
+                  placeholder="ملاحظات دفع أو شروط خاصة..."
+                />
+              </div>
+
+              {/* Bottom Actions */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingTenant(null)}
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl cursor-pointer"
+                  >
+                    إلغاء
+                  </button>
+
+                  {editingTenant.role !== 'super_admin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm(`هل أنت متأكد من حذف حساب المشترك (${editingTenant.companyName}) نهائياً؟`)) {
+                          deleteTenantAccount(editingTenant.id);
+                          setEditingTenant(null);
+                        }
+                      }}
+                      className="px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Trash2 size={14} />
+                      <span>حذف الحساب</span>
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all cursor-pointer"
+                >
+                  <Check size={16} />
+                  <span>حفظ كافة التعديلات</span>
                 </button>
               </div>
 
