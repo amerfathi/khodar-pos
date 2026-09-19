@@ -10,6 +10,7 @@ import {
 export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToStore }) {
   const { 
     tenants = [], 
+    syncCloudTenants,
     currentUser, 
     createTenantAccount, 
     updateTenantAccount, 
@@ -22,6 +23,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
   // Navigation & Modal State
   const [activeTab, setActiveTab] = useState('tenants'); // 'tenants' | 'releases' | 'trials'
+  const [isSyncingTenants, setIsSyncingTenants] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedTenantId, setCopiedTenantId] = useState(null);
@@ -500,6 +502,21 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
               />
               <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             </div>
+
+            <button
+              type="button"
+              onClick={async () => {
+                setIsSyncingTenants(true);
+                if (syncCloudTenants) await syncCloudTenants();
+                setIsSyncingTenants(false);
+              }}
+              disabled={isSyncingTenants}
+              className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer text-xs"
+              title="مزامنة وتحديث قائمة المشتركين من السحابة المركزية"
+            >
+              <RefreshCw size={14} className={isSyncingTenants ? 'animate-spin' : ''} />
+              <span>{isSyncingTenants ? 'جاري التحديث...' : 'تحديث من السحابة'}</span>
+            </button>
 
             <button
               type="button"

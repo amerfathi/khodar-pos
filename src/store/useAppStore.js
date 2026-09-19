@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   INITIAL_PRODUCTS, 
   INITIAL_CUSTOMERS, 
@@ -128,6 +128,34 @@ export function useAppStore() {
   useEffect(() => { setStoredItem(STORAGE_KEYS.STOCK_TRANSFERS, stockTransfers); }, [stockTransfers]);
   useEffect(() => { setStoredItem(STORAGE_KEYS.TRIAL_REQUESTS, trialRequests); }, [trialRequests]);
   
+  // Central Cloud Tenants Synchronization (Cloud-First & Offline-First)
+  const syncCloudTenants = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    try {
+      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : 'https://khodar-pos.pages.dev';
+      const res = await fetch(`${baseUrl}/api/tenants`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.tenants)) {
+          setTenants(prev => {
+            const map = new Map();
+            prev.forEach(t => map.set(t.id, t));
+            data.tenants.forEach(t => map.set(t.id, { ...map.get(t.id), ...t }));
+            return Array.from(map.values());
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Sync cloud tenants warning:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    syncCloudTenants();
+  }, [syncCloudTenants]);
+
   // Background Auto-sync to Cloudflare Edge
   useEffect(() => {
     const tenantId = currentUser?.tenantId || 'tenant-demo';
@@ -1556,7 +1584,7 @@ export function useAppStore() {
   };
 
   // Authentication & Multi-Tenant Actions (with Store Code support)
-  const login = (username, password, explicitStoreCode = '') => {
+  const login = async (username, password, explicitStoreCode = '') => {
     let cleanUser = (username || '').trim().toLowerCase();
     let cleanStoreCode = (explicitStoreCode || '').trim().toUpperCase();
 
@@ -1616,10 +1644,37 @@ export function useAppStore() {
 
     // 1. If Store Code is specified, target that specific tenant
     if (cleanStoreCode) {
-      const targetTenant = tenants.find(t => 
+      let targetTenant = tenants.find(t => 
         (t.storeCode || '').toUpperCase() === cleanStoreCode || 
         t.id === cleanStoreCode.toLowerCase()
       );
+
+      // Real-time Cloud Lookup Fallback (Cloud-First & Offline-First)
+      // If store code is not yet in local storage, query Cloudflare D1 and cache locally
+      if (!targetTenant && typeof window !== 'undefined') {
+        try {
+          const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+            ? window.location.origin
+            : 'https://khodar-pos.pages.dev';
+          const res = await fetch(`${baseUrl}/api/tenants/lookup?code=${encodeURIComponent(cleanStoreCode)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.tenant) {
+              targetTenant = data.tenant;
+              // Cache locally so it is permanently available even if internet cuts out later
+              setTenants(prev => [targetTenant, ...prev.filter(t => t.id !== targetTenant.id && (t.storeCode || '').toUpperCase() !== cleanStoreCode)]);
+              if (Array.isArray(data.users) && data.users.length > 0) {
+                setUsers(prev => {
+                  const existingIds = new Set(data.users.map(u => u.id));
+                  return [...data.users, ...prev.filter(u => !existingIds.has(u.id))];
+                });
+              }
+            }
+          }
+        } catch (netErr) {
+          console.warn('Cloud store code lookup failed or offline:', netErr);
+        }
+      }
 
       if (!targetTenant) {
         return { success: false, error: `كود المتجر (${cleanStoreCode}) غير موجود بالنظام، يرجى التحقق من الكود المعتمد` };
@@ -1757,7 +1812,29 @@ export function useAppStore() {
     }
 
     // Fallback to Tenant / Owner accounts
-    const target = tenants.find(t => t.username.toLowerCase() === cleanUser);
+    let target = tenants.find(t => t.username.toLowerCase() === cleanUser);
+    if (!target && typeof window !== 'undefined') {
+      try {
+        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+          ? window.location.origin
+          : 'https://khodar-pos.pages.dev';
+        const res = await fetch(`${baseUrl}/api/tenants/lookup?username=${encodeURIComponent(cleanUser)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.tenant) {
+            target = data.tenant;
+            setTenants(prev => [target, ...prev.filter(t => t.id !== target.id)]);
+            if (Array.isArray(data.users) && data.users.length > 0) {
+              setUsers(prev => {
+                const existingIds = new Set(data.users.map(u => u.id));
+                return [...data.users, ...prev.filter(u => !existingIds.has(u.id))];
+              });
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
     if (!target) {
       return { success: false, error: 'اسم المستخدم أو كود المتجر غير صحيح، يرجى التأكد من البيانات' };
     }
@@ -1871,6 +1948,19 @@ export function useAppStore() {
     };
 
     setTenants(prev => [newTenant, ...prev]);
+
+    // Asynchronously synchronize new tenant to Cloudflare D1 central database
+    if (typeof window !== 'undefined') {
+      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : 'https://khodar-pos.pages.dev';
+      fetch(`${baseUrl}/api/tenants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTenant)
+      }).catch(err => console.warn('Cloud tenant sync warning:', err));
+    }
+
     return newTenant;
   };
 
@@ -1913,6 +2003,18 @@ export function useAppStore() {
       }
       return t;
     }));
+
+    // Synchronize tenant updates to Cloudflare D1
+    if (typeof window !== 'undefined') {
+      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : 'https://khodar-pos.pages.dev';
+      fetch(`${baseUrl}/api/tenants`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: tenantId, ...updates })
+      }).catch(err => console.warn('Cloud tenant update sync warning:', err));
+    }
   };
 
   const deleteTenantAccount = (tenantId) => {
@@ -1921,6 +2023,16 @@ export function useAppStore() {
       return;
     }
     setTenants(prev => prev.filter(t => t.id !== tenantId));
+
+    // Delete tenant from Cloudflare D1
+    if (typeof window !== 'undefined') {
+      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
+        ? window.location.origin
+        : 'https://khodar-pos.pages.dev';
+      fetch(`${baseUrl}/api/tenants?id=${encodeURIComponent(tenantId)}`, {
+        method: 'DELETE'
+      }).catch(err => console.warn('Cloud tenant delete sync warning:', err));
+    }
   };
 
   const resetPassword = (identifier, newPassword) => {
@@ -2207,6 +2319,8 @@ export function useAppStore() {
     updateTrialRequest,
     deleteTrialRequest,
     tenants,
+    setTenants,
+    syncCloudTenants,
     currentUser,
     branches,
     activeBranchId,

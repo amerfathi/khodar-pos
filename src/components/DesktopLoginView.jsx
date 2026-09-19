@@ -90,24 +90,29 @@ export default function DesktopLoginView({ store }) {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      const res = login(cleanUser, password, storeCode.trim());
-      setLoading(false);
-      if (res.success) {
-        try {
-          if (rememberMe) {
-            localStorage.setItem('khodar_remembered_username', cleanUser);
-            localStorage.setItem('khodar_remembered_store_code', storeCode.trim().toUpperCase());
-          } else {
-            localStorage.removeItem('khodar_remembered_username');
+    setTimeout(async () => {
+      try {
+        const res = await login(cleanUser, password, storeCode.trim());
+        setLoading(false);
+        if (res.success) {
+          try {
+            if (rememberMe) {
+              localStorage.setItem('khodar_remembered_username', cleanUser);
+              localStorage.setItem('khodar_remembered_store_code', storeCode.trim().toUpperCase());
+            } else {
+              localStorage.removeItem('khodar_remembered_username');
+            }
+          } catch (e) {
+            console.warn('Failed to save remembered credentials', e);
           }
-        } catch (e) {
-          console.warn('Failed to save remembered credentials', e);
+        } else {
+          setErrorMessage(res.error || 'بيانات الدخول غير صحيحة');
         }
-      } else {
-        setErrorMessage(res.error || 'بيانات الدخول غير صحيحة');
+      } catch (err) {
+        setLoading(false);
+        setErrorMessage('حدث خطأ أثناء فحص بيانات الدخول');
       }
-    }, 200);
+    }, 150);
   };
 
   return (
