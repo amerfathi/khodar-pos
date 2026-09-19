@@ -35,6 +35,7 @@ export default function SaleScreen({
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [productSearch, setProductSearch] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Current items in cart
   const [cartItems, setCartItems] = useState([]);
@@ -244,6 +245,7 @@ export default function SaleScreen({
 
   // Handle invoice submission
   const handleSaveInvoice = (printImmediately = false) => {
+    if (isSubmitting) return;
     if (cartItems.length === 0) {
       alert('الفاتورة فارغة، يرجى إضافة أصناف أولاً');
       return;
@@ -283,46 +285,54 @@ export default function SaleScreen({
       return;
     }
 
-    const invoiceData = {
-      date: getCurrentDateFormatted(),
-      time: getCurrentTimeFormatted(),
-      customerId: selectedCustomerId || (effectiveName !== 'زبون نقدي عام' ? `cust-walkin-${Date.now()}` : 'walk_in'),
-      customerName: effectiveName,
-      customerPhone: customerPhone || '',
-      saleType,
-      paymentMethod: saleType,
-      bankName: (saleType === 'bank' || (saleType === 'split' && calculatedBankAmount > 0)) ? effectiveBankName : '',
-      bankAccountNumber: (saleType === 'bank' || (saleType === 'split' && calculatedBankAmount > 0)) ? bankAccountNumber : '',
-      cashAmount: calculatedCashAmount,
-      bankAmount: calculatedBankAmount,
-      creditAmount: calculatedCreditAmount,
-      weightMode,
-      items: cartItems,
-      totalPackages,
-      totalGrossWeight,
-      totalTareWeight,
-      totalNetWeight,
-      totalWeighingsCount,
-      subtotal,
-      discountAmount: discount,
-      finalTotal,
-      paidAmount: calculatedPaidAmount,
-      changeAmount: calculatedChangeAmount,
-      remainingDebt: calculatedRemainingDebt,
-      notes,
-    };
+    setIsSubmitting(true);
+    try {
+      const invoiceData = {
+        date: getCurrentDateFormatted(),
+        time: getCurrentTimeFormatted(),
+        customerId: selectedCustomerId || (effectiveName !== 'زبون نقدي عام' ? `cust-walkin-${Date.now()}` : 'walk_in'),
+        customerName: effectiveName,
+        customerPhone: customerPhone || '',
+        saleType,
+        paymentMethod: saleType,
+        bankName: (saleType === 'bank' || (saleType === 'split' && calculatedBankAmount > 0)) ? effectiveBankName : '',
+        bankAccountNumber: (saleType === 'bank' || (saleType === 'split' && calculatedBankAmount > 0)) ? bankAccountNumber : '',
+        cashAmount: calculatedCashAmount,
+        bankAmount: calculatedBankAmount,
+        creditAmount: calculatedCreditAmount,
+        weightMode,
+        items: cartItems,
+        totalPackages,
+        totalGrossWeight,
+        totalTareWeight,
+        totalNetWeight,
+        totalWeighingsCount,
+        subtotal,
+        discountAmount: discount,
+        finalTotal,
+        paidAmount: calculatedPaidAmount,
+        changeAmount: calculatedChangeAmount,
+        remainingDebt: calculatedRemainingDebt,
+        notes,
+      };
 
-    const saved = saveInvoice(invoiceData);
+      const saved = saveInvoice(invoiceData);
 
-    // Reset current form
-    handleResetInvoice();
+      // Reset current form
+      handleResetInvoice();
 
-    if (printImmediately) {
-      if (onViewA4Invoice) {
-        onViewA4Invoice(saved);
-      } else {
-        onViewReceipt(saved);
+      if (printImmediately) {
+        if (onViewA4Invoice) {
+          onViewA4Invoice(saved);
+        } else {
+          onViewReceipt(saved);
+        }
       }
+    } catch (err) {
+      console.error('Invoice save error:', err);
+      alert('حدث خطأ أثناء حفظ الفاتورة: ' + (err.message || ''));
+    } finally {
+      setTimeout(() => setIsSubmitting(false), 400);
     }
   };
 
@@ -1003,21 +1013,27 @@ export default function SaleScreen({
             <div className="space-y-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
+                disabled={isSubmitting || cartItems.length === 0}
                 onClick={() => handleSaveInvoice(true)}
-                className="w-full py-2.5 px-4 bg-primary-600 hover:bg-primary-700 active:scale-[0.98] text-white font-semibold text-xs rounded-lg flex items-center justify-center gap-2 shadow-2xs transition-colors cursor-pointer"
+                className={`w-full py-2.5 px-4 bg-primary-600 hover:bg-primary-700 active:scale-[0.98] text-white font-semibold text-xs rounded-lg flex items-center justify-center gap-2 shadow-2xs transition-all ${
+                  isSubmitting || cartItems.length === 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                }`}
               >
                 <Printer size={15} />
-                <span>حفظ وطباعة الفاتورة A4</span>
+                <span>{isSubmitting ? 'جاري الحفظ والترحيل...' : 'حفظ وطباعة الفاتورة A4'}</span>
               </button>
 
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
+                  disabled={isSubmitting || cartItems.length === 0}
                   onClick={() => handleSaveInvoice(false)}
-                  className="py-2 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                  className={`py-2 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-2xs ${
+                    isSubmitting || cartItems.length === 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                  }`}
                 >
                   <Check size={14} className="text-primary-600" />
-                  <span>حفظ بدون طباعة</span>
+                  <span>{isSubmitting ? 'حفظ...' : 'حفظ بدون طباعة'}</span>
                 </button>
 
                 <button

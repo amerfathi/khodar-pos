@@ -376,8 +376,10 @@ export function useAppStore() {
 
   // Customer Actions
   const addCustomer = (cust) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     const newCust = {
       id: `cust-${Date.now()}`,
+      tenantId: activeTenantId,
       name: cust.name,
       phone: cust.phone || '',
       balance: Number(cust.initialBalance || 0),
@@ -398,6 +400,7 @@ export function useAppStore() {
 
     const targetCustomer = customers.find(c => c.id === customerId);
     const customerName = targetCustomer ? targetCustomer.name : 'عميل';
+    const activeTenantId = currentUser?.tenantId || targetCustomer?.tenantId || 'tenant-demo';
 
     setCustomers(prev => prev.map(c => {
       if (c.id === customerId) {
@@ -411,6 +414,7 @@ export function useAppStore() {
 
     const newPayment = {
       id: `pay-${Date.now()}`,
+      tenantId: activeTenantId,
       customerId,
       customerName,
       amount: numAmount,
@@ -459,9 +463,11 @@ export function useAppStore() {
     const targetBranchId = activeB?.id || 'branch-main';
     const targetBranchName = activeB?.name || 'الفرع الرئيسي';
 
+    const activeTenantId = invoiceData.tenantId || currentUser?.tenantId || 'tenant-demo';
     const newInvoice = {
       ...invoiceData,
       id: invoiceId,
+      tenantId: activeTenantId,
       branchId: targetBranchId,
       branchName: targetBranchName,
       remainingDebt: Math.round(creditDebt * 100) / 100,
@@ -847,9 +853,11 @@ export function useAppStore() {
       addExpenseCategory(trimmedCat);
     }
     const activeB = branches.find(b => b.id === (exp.branchId || activeBranchId)) || branches[0];
+    const activeTenantId = exp.tenantId || currentUser?.tenantId || 'tenant-demo';
     const newExp = {
       ...exp,
       id: `exp-${Date.now()}`,
+      tenantId: activeTenantId,
       branchId: activeB?.id || 'branch-main',
       branchName: activeB?.name || 'الفرع الرئيسي',
       category: trimmedCat,
@@ -1012,8 +1020,10 @@ export function useAppStore() {
       computedBalance = Math.abs(initialAmt);
     }
 
+    const activeTenantId = sup.tenantId || currentUser?.tenantId || 'tenant-demo';
     const newSup = {
       id: `sup-${Date.now()}`,
+      tenantId: activeTenantId,
       name: (sup.name || '').trim(),
       phone: (sup.phone || '').trim(),
       marketOrFarm: (sup.marketOrFarm || '').trim(),
