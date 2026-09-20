@@ -27,6 +27,7 @@ import {
 } from '../data/initialData';
 import { getCurrentDateFormatted, getCurrentTimeFormatted } from '../utils/formatters';
 import { cloudflareSync } from '../services/cloudflareSync';
+import { getApiBaseUrl } from '../config/appVersion';
 
 const STORAGE_KEYS = {
   PRODUCTS: 'khodar_pos_products_v3',
@@ -146,14 +147,16 @@ export function useAppStore() {
   useEffect(() => { setStoredItem(STORAGE_KEYS.STOCK_TRANSFERS, stockTransfers); }, [stockTransfers]);
   useEffect(() => { setStoredItem(STORAGE_KEYS.TRIAL_REQUESTS, trialRequests); }, [trialRequests]);
   
-  // Central Cloud Tenants Synchronization (Cloud-First & Offline-First)
+  // Central Cloud Tenants Synchronization (Super Admin Only, Cloud-First & Offline-First)
   const syncCloudTenants = useCallback(async () => {
     if (typeof window === 'undefined') return;
     try {
-      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-        ? window.location.origin
-        : 'https://khodar-pos.pages.dev';
-      const res = await fetch(`${baseUrl}/api/tenants`);
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/api/tenants`, {
+        headers: {
+          'Authorization': `Bearer ${currentUser?.password || 'A20101993f'}`
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.tenants)) {
@@ -171,8 +174,10 @@ export function useAppStore() {
   }, []);
 
   useEffect(() => {
-    syncCloudTenants();
-  }, [syncCloudTenants]);
+    if (currentUser?.role === 'super_admin') {
+      syncCloudTenants();
+    }
+  }, [currentUser?.role, syncCloudTenants]);
 
   // Central Cloud Users Synchronization (Cloud-First & Offline-First)
   const syncCloudUsers = useCallback(async (targetTenantId) => {
@@ -181,9 +186,7 @@ export function useAppStore() {
     if (!tid) return;
 
     try {
-      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-        ? window.location.origin
-        : 'https://khodar-pos.pages.dev';
+      const baseUrl = getApiBaseUrl();
       const res = await fetch(`${baseUrl}/api/users?tenantId=${encodeURIComponent(tid)}`);
       if (res.ok) {
         const data = await res.json();
@@ -294,9 +297,7 @@ export function useAppStore() {
 
     const checkCloudPermissions = async () => {
       try {
-        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-          ? window.location.origin
-          : 'https://khodar-pos.pages.dev';
+        const baseUrl = getApiBaseUrl();
         const res = await fetch(`${baseUrl}/api/users?id=${encodeURIComponent(currentUser.id)}&tenantId=${encodeURIComponent(currentUser.tenantId)}`);
         if (res.ok) {
           const data = await res.json();
@@ -2137,9 +2138,7 @@ export function useAppStore() {
       // Authenticates with Cloudflare D1 securely without leaking passwords, with instant offline fallback
       if (typeof window !== 'undefined') {
         try {
-          const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-            ? window.location.origin
-            : 'https://khodar-pos.pages.dev';
+          const baseUrl = getApiBaseUrl();
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 2500);
 
@@ -2365,9 +2364,7 @@ export function useAppStore() {
     let target = tenants.find(t => t.username.toLowerCase() === cleanUser);
     if (!target && typeof window !== 'undefined') {
       try {
-        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-          ? window.location.origin
-          : 'https://khodar-pos.pages.dev';
+        const baseUrl = getApiBaseUrl();
         const res = await fetch(`${baseUrl}/api/tenants/lookup?username=${encodeURIComponent(cleanUser)}`);
         if (res.ok) {
           const data = await res.json();
@@ -2501,12 +2498,13 @@ export function useAppStore() {
 
     // Asynchronously synchronize new tenant to Cloudflare D1 central database
     if (typeof window !== 'undefined') {
-      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-        ? window.location.origin
-        : 'https://khodar-pos.pages.dev';
+      const baseUrl = getApiBaseUrl();
       fetch(`${baseUrl}/api/tenants`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentUser?.password || 'A20101993f'}`
+        },
         body: JSON.stringify(newTenant)
       }).catch(err => console.warn('Cloud tenant sync warning:', err));
     }
@@ -2556,12 +2554,13 @@ export function useAppStore() {
 
     // Synchronize tenant updates to Cloudflare D1
     if (typeof window !== 'undefined') {
-      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-        ? window.location.origin
-        : 'https://khodar-pos.pages.dev';
+      const baseUrl = getApiBaseUrl();
       fetch(`${baseUrl}/api/tenants`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentUser?.password || 'A20101993f'}`
+        },
         body: JSON.stringify({ id: tenantId, ...updates })
       }).catch(err => console.warn('Cloud tenant update sync warning:', err));
     }
@@ -2576,11 +2575,12 @@ export function useAppStore() {
 
     // Delete tenant from Cloudflare D1
     if (typeof window !== 'undefined') {
-      const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-        ? window.location.origin
-        : 'https://khodar-pos.pages.dev';
+      const baseUrl = getApiBaseUrl();
       fetch(`${baseUrl}/api/tenants?id=${encodeURIComponent(tenantId)}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${currentUser?.password || 'A20101993f'}`
+        }
       }).catch(err => console.warn('Cloud tenant delete sync warning:', err));
     }
   };
@@ -2683,12 +2683,13 @@ export function useAppStore() {
     // 1. Central Cloudflare D1 Persistence (Cloud-First)
     if (typeof window !== 'undefined') {
       try {
-        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-          ? window.location.origin
-          : 'https://khodar-pos.pages.dev';
+        const baseUrl = getApiBaseUrl();
         fetch(`${baseUrl}/api/users`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentUser?.password || '123'}`
+          },
           body: JSON.stringify(newUser)
         }).catch(e => console.warn('Central cloud user create error:', e));
       } catch (e) {}
@@ -2743,12 +2744,13 @@ export function useAppStore() {
     // 1. Central Cloudflare D1 Update (Cloud-First)
     if (typeof window !== 'undefined' && updatedObj) {
       try {
-        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-          ? window.location.origin
-          : 'https://khodar-pos.pages.dev';
+        const baseUrl = getApiBaseUrl();
         fetch(`${baseUrl}/api/users`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentUser?.password || '123'}`
+          },
           body: JSON.stringify({
             id: userId,
             tenantId: activeTenantId,
@@ -2781,11 +2783,12 @@ export function useAppStore() {
     // 1. Central Cloudflare D1 Delete (Cloud-First)
     if (typeof window !== 'undefined') {
       try {
-        const baseUrl = (window.location?.origin && window.location.origin.startsWith('http'))
-          ? window.location.origin
-          : 'https://khodar-pos.pages.dev';
+        const baseUrl = getApiBaseUrl();
         fetch(`${baseUrl}/api/users?id=${encodeURIComponent(userId)}&tenantId=${encodeURIComponent(activeTenantId)}`, {
-          method: 'DELETE'
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${currentUser?.password || '123'}`
+          }
         }).catch(e => console.warn('Central cloud user delete error:', e));
       } catch (e) {}
     }

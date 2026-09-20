@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { OFFICIAL_RELEASES } from '../services/releaseService';
-import { APP_VERSION } from '../config/appVersion';
+import { APP_VERSION, getApiBaseUrl } from '../config/appVersion';
 import { 
   Building2, Users, Monitor, Smartphone, Globe, Download, Tag, Plus, ShieldCheck, Calendar, Clock, Phone, 
   Check, X, Copy, Trash2, Power, RefreshCw, Key, MessageCircle, 
@@ -84,9 +84,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   const fetchCloudTrials = useCallback(async () => {
     setIsLoadingTrials(true);
     try {
-      const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
-        ? window.location.origin
-        : 'https://khodar-pos.pages.dev';
+      const baseUrl = getApiBaseUrl();
       const res = await fetch(`${baseUrl}/api/trial-requests`);
       const data = await res.json();
       if (data.success && Array.isArray(data.requests)) {
@@ -208,9 +206,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
         if (updateTrialRequest) {
           updateTrialRequest(activatingTrialId, { status: 'activated', tenantUsername: newTenant.username });
         }
-        const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
-          ? window.location.origin
-          : 'https://khodar-pos.pages.dev';
+        const baseUrl = getApiBaseUrl();
         fetch(`${baseUrl}/api/trial-requests`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -278,9 +274,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     if (window.confirm(`هل أنت متأكد من حذف طلب التجربة للتاجر "${reqName || ''}"؟`)) {
       if (deleteTrialRequest) deleteTrialRequest(reqId);
       setCloudTrialRequests(prev => prev.filter(r => r.id !== reqId));
-      const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
-        ? window.location.origin
-        : 'https://khodar-pos.pages.dev';
+      const baseUrl = getApiBaseUrl();
       try {
         await fetch(`${baseUrl}/api/trial-requests?id=${reqId}`, { method: 'DELETE' });
       } catch (e) {

@@ -2,7 +2,7 @@
  * Central Multi-Platform Release Service
  * Handles update detection, minimum supported version enforcement, and release notes
  */
-import { APP_VERSION, MINIMUM_SUPPORTED_VERSION, getClientPlatform, compareSemver } from '../config/appVersion';
+import { APP_VERSION, MINIMUM_SUPPORTED_VERSION, getClientPlatform, compareSemver, getApiBaseUrl } from '../config/appVersion';
 import { UPDATE_TYPES } from '../types/contracts';
 
 // Embedded Fallback Releases (Offline-safe & Zero Mock Data)
@@ -61,10 +61,7 @@ export async function checkLatestRelease(customPlatform = null) {
   const platform = customPlatform || getClientPlatform();
   const currentVersion = APP_VERSION;
 
-  // Use live Cloudflare domain when on Electron desktop file:/// or mobile
-  const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
-    ? window.location.origin
-    : 'https://khodar-pos.pages.dev';
+  const baseUrl = getApiBaseUrl();
 
   try {
     // Attempt remote check first

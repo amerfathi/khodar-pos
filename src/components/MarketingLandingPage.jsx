@@ -7,7 +7,7 @@ import {
   Layers, Package, AlertOctagon, Receipt, Sparkle, ExternalLink
 } from 'lucide-react';
 import { Button, Badge } from './ui';
-import { APP_VERSION } from '../config/appVersion';
+import { APP_VERSION, getApiBaseUrl } from '../config/appVersion';
 import { BRRAKA_LOGO } from '../assets/branding';
 
 export default function MarketingLandingPage({ onOpenLogin, store }) {
@@ -38,9 +38,7 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
     };
 
     // 1. Send directly to Central Cloud API (Cloudflare D1) so it reaches the platform owner's SuperAdmin portal
-    const baseUrl = (typeof window !== 'undefined' && window.location?.origin && window.location.origin.startsWith('http'))
-      ? window.location.origin
-      : 'https://khodar-pos.pages.dev';
+    const baseUrl = getApiBaseUrl();
 
     try {
       await fetch(`${baseUrl}/api/trial-requests`, {
