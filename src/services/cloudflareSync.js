@@ -10,6 +10,8 @@
  * 3. Automatic Recovery: Flushes queue immediately once internet returns.
  */
 
+import { getApiBaseUrl } from '../config/appVersion';
+
 const QUEUE_STORAGE_KEY = 'khodar_offline_sync_queue';
 const LAST_SYNC_KEY = 'khodar_last_sync_timestamp';
 
@@ -19,6 +21,7 @@ class CloudflareSyncService {
     this.syncIntervalId = null;
     this.isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
     this.listeners = new Set();
+    this.updateHandler = null;
 
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
@@ -119,7 +122,8 @@ class CloudflareSyncService {
       const branchId = queue[0].branchId;
       const batch = queue.slice(0, 100); // Process in batches of 100
 
-      const response = await fetch('/api/sync/push', {
+      const baseUrl = getApiBaseUrl();
+      const response = await fetch(`${baseUrl}/api/sync/push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -156,16 +160,18 @@ class CloudflareSyncService {
     if (!this.isOnline || !tenantId) return;
 
     const lastSync = parseInt(localStorage.getItem(LAST_SYNC_KEY) || '0', 10);
+    const callback = onUpdatesReceived || this.updateHandler;
 
     try {
-      const res = await fetch(`/api/sync/pull?tenantId=${encodeURIComponent(tenantId)}&since=${lastSync}`);
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/api/sync/pull?tenantId=${encodeURIComponent(tenantId)}&since=${lastSync}`);
       if (!res.ok) return;
 
       const data = await res.json();
       if (data.success && Array.isArray(data.events) && data.events.length > 0) {
         localStorage.setItem(LAST_SYNC_KEY, String(data.latestTimestamp || Date.now()));
-        if (typeof onUpdatesReceived === 'function') {
-          onUpdatesReceived(data.events);
+        if (typeof callback === 'function') {
+          callback(data.events);
         }
       }
     } catch (err) {
@@ -178,13 +184,14 @@ class CloudflareSyncService {
     if (!tenantId || !fullSnapshotData) return false;
 
     try {
-      const res = await fetch('/api/backup', {
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/api/backup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tenantId,
           snapshot: fullSnapshotData,
-          version: '2.5.0'
+          version: '2.6.1'
         })
       });
 
@@ -199,13 +206,21 @@ class CloudflareSyncService {
     }
   }
 
+  // Set handler for applying inbound synced events to local store
+  setUpdateHandler(handler) {
+    this.updateHandler = handler;
+  }
+
   // Start periodic sync daemon (runs every 30 seconds)
-  startAutoSync(tenantId, intervalMs = 30000) {
+  startAutoSync(tenantId, onUpdatesReceived = null, intervalMs = 30000) {
+    if (onUpdatesReceived) {
+      this.updateHandler = onUpdatesReceived;
+    }
     this.stopAutoSync();
     this.syncIntervalId = setInterval(() => {
       this.flushQueue();
       if (tenantId) {
-        this.pullUpdates(tenantId);
+        this.pullUpdates(tenantId, this.updateHandler);
       }
     }, intervalMs);
   }

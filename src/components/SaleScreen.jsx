@@ -171,6 +171,7 @@ export default function SaleScreen({
       ...activeItem,
       id: activeItem.id || `item-${Date.now()}`,
       productId: matchingProduct ? matchingProduct.id : (activeItem.productId || null),
+      costPerKg: matchingProduct ? (Number(matchingProduct.costPerKg) || 0) : (Number(activeItem.costPerKg) || 0),
       packageCount,
       tarePerUnit,
       totalTareWeight,

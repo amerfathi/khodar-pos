@@ -63,6 +63,8 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
 
   // Helper for partner specific calculations
   const getPartnerStats = (partnerId) => {
+    const partner = partners.find(p => p.id === partnerId);
+    const capital = Number(partner?.initialCapital) || 0;
     const drawings = partnerDrawings.filter(d => d.partnerId === partnerId);
     const totalDrawn = drawings.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
@@ -74,8 +76,9 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
       }
     });
 
-    const netBalance = totalEarned - totalDrawn;
-    return { totalDrawn, totalEarned, netBalance, drawingsCount: drawings.length };
+    const netProfitBalance = totalEarned - totalDrawn;
+    const totalEquity = capital + netProfitBalance;
+    return { capital, totalDrawn, totalEarned, netProfitBalance, totalEquity, netBalance: totalEquity, drawingsCount: drawings.length };
   };
 
   // Handlers for Partner Create/Edit
@@ -395,27 +398,37 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
                       </div>
 
                       {/* Financial Numbers for this Partner */}
-                      <div className="grid grid-cols-2 gap-2.5 mt-4 pt-3 border-t border-slate-100 text-xs">
-                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
-                          <span className="text-[10px] text-slate-400 font-bold block">إجمالي المسحوبات:</span>
-                          <span className="text-sm font-black font-mono text-purple-700 block mt-0.5">
+                      <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100 text-xs">
+                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-200/60">
+                          <span className="text-[10px] text-slate-400 font-bold block">رأس المال:</span>
+                          <span className="text-xs font-black font-mono text-slate-800 block mt-0.5">
+                            {formatCurrency(stats.capital, settings.currency)}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-200/60">
+                          <span className="text-[10px] text-slate-400 font-bold block">المسحوبات:</span>
+                          <span className="text-xs font-black font-mono text-purple-700 block mt-0.5">
                             {formatCurrency(stats.totalDrawn, settings.currency)}
                           </span>
                         </div>
 
-                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
+                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-200/60">
                           <span className="text-[10px] text-slate-400 font-bold block">الأرباح المعتمدة:</span>
-                          <span className="text-sm font-black font-mono text-emerald-700 block mt-0.5">
+                          <span className="text-xs font-black font-mono text-emerald-700 block mt-0.5">
                             {formatCurrency(stats.totalEarned, settings.currency)}
                           </span>
                         </div>
                       </div>
 
-                      {/* Net Partner Current Balance */}
+                      {/* Net Partner Total Equity */}
                       <div className="mt-2.5 p-2.5 bg-slate-900 text-white rounded-xl flex items-center justify-between">
-                        <span className="text-[11px] text-slate-300 font-bold">صافي الرصيد المتبقي له:</span>
-                        <span className={`text-sm font-black font-mono ${stats.netBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {formatCurrency(stats.netBalance, settings.currency)}
+                        <div>
+                          <span className="text-[11px] text-slate-300 font-bold block">صافي حقوق الملكية للشريك:</span>
+                          <span className="text-[9px] text-slate-400 font-medium">رأس المال + الأرباح - المسحوبات</span>
+                        </div>
+                        <span className={`text-sm font-black font-mono ${stats.totalEquity >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {formatCurrency(stats.totalEquity, settings.currency)}
                         </span>
                       </div>
 

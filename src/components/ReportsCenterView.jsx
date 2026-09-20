@@ -104,8 +104,8 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
   const totalPurchasesKg = totalNetPurchasesKg;
   const totalPurchasesPackages = filteredPurchases.reduce((sum, p) => sum + (Number(p.packagesCount) || 0), 0);
 
-  // 3. Expenses & Loss Totals
-  const generalExpensesAmount = filteredExpenses.filter(e => !e.isSupplierPayment).reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
+  // 3. Expenses & Loss Totals (Strictly exclude supplier payments and worker payments to avoid double counting)
+  const generalExpensesAmount = filteredExpenses.filter(e => !e.isSupplierPayment && !e.isWorkerPayment).reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
   const totalExpensesAmount = generalExpensesAmount;
   const totalDamagedLoss = filteredDamaged.reduce((sum, dmg) => sum + (Number(dmg.totalLoss) || 0), 0);
   const totalDamagedKg = filteredDamaged.reduce((sum, dmg) => sum + (Number(dmg.quantityKg) || 0), 0);
@@ -117,12 +117,14 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
   const netEstimatedProfit = totalNetSales - totalNetPurchasesCost - generalExpensesAmount - totalSalariesPaid - totalDamagedLoss;
 
   // 5. Drawer Cash Reconciliation for shift
-  const shiftCashExpenses = filteredExpenses.filter(e => !e.isSupplierPayment && e.paymentMethod !== 'bank').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  const shiftCashExpenses = filteredExpenses.filter(e => !e.isSupplierPayment && !e.isWorkerPayment && e.paymentMethod !== 'bank').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
   const shiftCashPurchases = filteredPurchases.filter(p => p.paymentMethod === 'cash').reduce((sum, p) => sum + (Number(p.totalCost) - (Number(p.creditAmount) || 0)), 0);
   const shiftSupplierCashPayments = filteredSupPayments.filter(p => p.paymentMethod !== 'bank').reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const shiftPartnerCashDrawings = partnerDrawings.filter(d => filterByDate(d.date) && d.source !== 'bank').reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  const shiftPartnerCashDrawings = partnerDrawings.filter(d => filterByDate(d.date) && d.method !== 'bank' && d.source !== 'bank').reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  const shiftWorkerCashSalaries = filteredWorkerTxs.filter(t => t.type === 'salary_payment' && t.paymentMethod !== 'bank').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  const shiftWorkerCashAdvances = filteredWorkerTxs.filter(t => t.type === 'advance' && t.paymentMethod !== 'bank').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
-  const shiftCashOutflow = shiftCashExpenses + shiftCashPurchases + shiftSupplierCashPayments + shiftPartnerCashDrawings;
+  const shiftCashOutflow = shiftCashExpenses + shiftCashPurchases + shiftSupplierCashPayments + shiftPartnerCashDrawings + shiftWorkerCashSalaries + shiftWorkerCashAdvances;
   const expectedDrawerCash = totalCashFromCustomers - shiftCashOutflow;
   const actualCounted = cashierActualCash === '' ? expectedDrawerCash : Number(cashierActualCash);
   const cashDiff = actualCounted - expectedDrawerCash;

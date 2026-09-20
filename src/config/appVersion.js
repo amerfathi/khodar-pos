@@ -42,3 +42,17 @@ export function compareSemver(v1, v2) {
   }
   return 0;
 }
+
+/**
+ * Authoritative API Base URL Resolver
+ * Resolves Cloudflare Edge endpoint across Web, Electron Desktop (file://), and Android Capacitor (localhost).
+ */
+export function getApiBaseUrl() {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const origin = window.location.origin;
+    if (origin.startsWith('http') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+      return origin;
+    }
+  }
+  return 'https://khodar-pos.pages.dev';
+}

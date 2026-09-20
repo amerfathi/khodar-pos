@@ -17,6 +17,7 @@
     "directories": {
       "output": "C:/Users/IMDAD/AppData/Local/Temp/khodar-release"
     },
+    "electronDist": "node_modules/electron/dist",
     "files": [
       "dist/**/*",
       "electron/**/*"

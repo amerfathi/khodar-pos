@@ -111,12 +111,12 @@ export default function StoreAuditView({ store, onOpenA4Report, onNavigate }) {
     .filter(r => r.refundMethod === 'bank')
     .reduce((sum, r) => sum + (Number(r.totalRefundAmount) || 0), 0);
 
-  // Period Outflows (Excluding supplier payments from general expenses to prevent double counting)
+  // Period Outflows (Excluding supplier payments and worker payments from general expenses to prevent double counting)
   const periodExpensesCash = periodExpenses
-    .filter(e => e.paymentMethod !== 'bank' && !e.isSupplierPayment)
+    .filter(e => e.paymentMethod !== 'bank' && !e.isSupplierPayment && !e.isWorkerPayment)
     .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
   const periodExpensesBank = periodExpenses
-    .filter(e => e.paymentMethod === 'bank' && !e.isSupplierPayment)
+    .filter(e => e.paymentMethod === 'bank' && !e.isSupplierPayment && !e.isWorkerPayment)
     .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
   const periodPurchasesCash = periodPurchases.reduce((sum, p) => {

@@ -345,12 +345,99 @@ export function useAppStore() {
     };
   }, [currentUser?.id, currentUser?.tenantId, currentUser?.isStaff]);
 
+  // Inbound Cloud Synchronization Ingestion Handler
+  // Merges transactions and changes received from other cashiers and mobile devices
+  const handleInboundSyncEvents = useCallback((events) => {
+    if (!Array.isArray(events) || events.length === 0) return;
+
+    events.forEach(evt => {
+      const { entityType, entityId, action, payload } = evt;
+      if (!payload) return;
+
+      if (entityType === 'invoice') {
+        if (action === 'create') {
+          setInvoices(prev => prev.some(i => i.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'update' || action === 'void') {
+          setInvoices(prev => prev.map(i => i.id === entityId ? { ...i, ...payload } : i));
+        } else if (action === 'delete') {
+          setInvoices(prev => prev.filter(i => i.id !== entityId));
+        }
+      } else if (entityType === 'customer') {
+        if (action === 'create') {
+          setCustomers(prev => prev.some(c => c.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'update') {
+          setCustomers(prev => prev.map(c => c.id === entityId ? { ...c, ...payload } : c));
+        } else if (action === 'delete') {
+          setCustomers(prev => prev.filter(c => c.id !== entityId));
+        }
+      } else if (entityType === 'product') {
+        if (action === 'create') {
+          setProducts(prev => prev.some(p => p.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'update') {
+          setProducts(prev => prev.map(p => p.id === entityId ? { ...p, ...payload } : p));
+        } else if (action === 'delete') {
+          setProducts(prev => prev.filter(p => p.id !== entityId));
+        }
+      } else if (entityType === 'expense') {
+        if (action === 'create') {
+          setExpenses(prev => prev.some(e => e.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setExpenses(prev => prev.filter(e => e.id !== entityId));
+        }
+      } else if (entityType === 'purchase') {
+        if (action === 'create') {
+          setPurchases(prev => prev.some(p => p.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setPurchases(prev => prev.filter(p => p.id !== entityId));
+        }
+      } else if (entityType === 'customer_payment') {
+        if (action === 'create') {
+          setCustomerPayments(prev => prev.some(p => p.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setCustomerPayments(prev => prev.filter(p => p.id !== entityId));
+        }
+      } else if (entityType === 'supplier_payment') {
+        if (action === 'create') {
+          setSupplierPayments(prev => prev.some(p => p.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setSupplierPayments(prev => prev.filter(p => p.id !== entityId));
+        }
+      } else if (entityType === 'supplier') {
+        if (action === 'create') {
+          setSuppliers(prev => prev.some(s => s.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'update') {
+          setSuppliers(prev => prev.map(s => s.id === entityId ? { ...s, ...payload } : s));
+        } else if (action === 'delete') {
+          setSuppliers(prev => prev.filter(s => s.id !== entityId));
+        }
+      } else if (entityType === 'sales_return') {
+        if (action === 'create') {
+          setSalesReturns(prev => prev.some(r => r.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setSalesReturns(prev => prev.filter(r => r.id !== entityId));
+        }
+      } else if (entityType === 'purchase_return') {
+        if (action === 'create') {
+          setPurchaseReturns(prev => prev.some(r => r.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setPurchaseReturns(prev => prev.filter(r => r.id !== entityId));
+        }
+      } else if (entityType === 'damaged_item') {
+        if (action === 'create') {
+          setDamagedItems(prev => prev.some(d => d.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setDamagedItems(prev => prev.filter(d => d.id !== entityId));
+        }
+      }
+    });
+  }, []);
+
   // Background Auto-sync to Cloudflare Edge
   useEffect(() => {
     const tenantId = currentUser?.tenantId || 'tenant-demo';
-    cloudflareSync.startAutoSync(tenantId, 30000);
+    cloudflareSync.startAutoSync(tenantId, handleInboundSyncEvents, 30000);
     return () => cloudflareSync.stopAutoSync();
-  }, [currentUser?.tenantId]);
+  }, [currentUser?.tenantId, handleInboundSyncEvents]);
 
   // Product Actions
   const addProduct = (prod) => {
@@ -438,6 +525,11 @@ export function useAppStore() {
     };
 
     setCustomerPayments(prev => [newPayment, ...prev]);
+
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'customer_payment', newPayment.id, 'create', newPayment);
+    } catch (e) {}
+
     return newPayment;
   };
 
@@ -454,6 +546,10 @@ export function useAppStore() {
         return c;
       }));
       setCustomerPayments(prev => prev.filter(p => p.id !== paymentId));
+      try {
+        const activeTenantId = currentUser?.tenantId || target.tenantId || 'tenant-demo';
+        cloudflareSync.recordMutation(activeTenantId, null, 'customer_payment', paymentId, 'delete', { id: paymentId });
+      } catch (e) {}
     }
   };
 
@@ -620,6 +716,11 @@ export function useAppStore() {
     }
 
     setInvoices(prev => prev.map(i => i.id === invoiceId ? { ...i, status: 'voided' } : i));
+
+    try {
+      const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'invoice', invoiceId, 'void', { id: invoiceId, status: 'voided' });
+    } catch (e) {}
   };
 
   const deleteInvoice = (invoiceId) => {
@@ -670,6 +771,10 @@ export function useAppStore() {
       }
     }
     setInvoices(prev => prev.filter(i => i.id !== invoiceId));
+    try {
+      const activeTenantId = currentUser?.tenantId || target?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, target?.branchId || null, 'invoice', invoiceId, 'delete', { id: invoiceId });
+    } catch (e) {}
   };
 
   // Sales Return Actions (مردودات المبيعات - بالسعر الفعلي التاريخي المحمي المسجل في الفاتورة)
@@ -768,6 +873,11 @@ export function useAppStore() {
 
     setSalesReturns(prev => [newReturn, ...prev]);
 
+    try {
+      const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, originalInvoice.branchId || null, 'sales_return', newReturn.id, 'create', newReturn);
+    } catch (e) {}
+
     // Update invoice record to track returned quantities
     setInvoices(prev => prev.map(inv => {
       if (inv.id === invoiceId) {
@@ -862,6 +972,10 @@ export function useAppStore() {
     }));
 
     setSalesReturns(prev => prev.filter(r => r.id !== returnId));
+    try {
+      const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, null, 'sales_return', returnId, 'delete', { id: returnId });
+    } catch (e) {}
   };
 
   // Expense Categories Actions
@@ -909,11 +1023,21 @@ export function useAppStore() {
       amount: Number(exp.amount) || 0
     };
     setExpenses(prev => [newExp, ...prev]);
+
+    try {
+      cloudflareSync.recordMutation(activeTenantId, newExp.branchId, 'expense', newExp.id, 'create', newExp);
+    } catch (e) {}
+
     return newExp;
   };
 
   const deleteExpense = (id) => {
+    const target = expenses.find(e => e.id === id);
     setExpenses(prev => prev.filter(e => e.id !== id));
+    try {
+      const activeTenantId = currentUser?.tenantId || target?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, target?.branchId || null, 'expense', id, 'delete', { id });
+    } catch (e) {}
   };
 
   // Damaged / Spoiled Items Actions (التوالف والإعدامات)
@@ -957,6 +1081,12 @@ export function useAppStore() {
     }
 
     setDamagedItems(prev => [newItem, ...prev]);
+
+    try {
+      const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'damaged_item', newItem.id, 'create', newItem);
+    } catch (e) {}
+
     return newItem;
   };
 
@@ -978,6 +1108,10 @@ export function useAppStore() {
       }));
     }
     setDamagedItems(prev => prev.filter(d => d.id !== id));
+    try {
+      const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, null, 'damaged_item', id, 'delete', { id });
+    } catch (e) {}
   };
 
   // Workers & Payroll Actions (العمال والرواتب)
@@ -1004,10 +1138,12 @@ export function useAppStore() {
   // Worker Transactions (سلفيات ورواتب)
   const addWorkerTransaction = (transaction) => {
     const amount = Number(transaction.amount) || 0;
+    const paymentMethod = transaction.paymentMethod || 'cash';
     const newTx = {
       ...transaction,
       id: `wt-${Date.now()}`,
       amount,
+      paymentMethod,
       date: transaction.date || new Date().toISOString().split('T')[0]
     };
 
@@ -1015,7 +1151,7 @@ export function useAppStore() {
     setWorkers(prev => prev.map(w => {
       if (w.id === transaction.workerId) {
         if (transaction.type === 'advance') {
-          // Worker took advance money -> advance increases
+          // Worker took advance money -> advance asset increases (NOT a general expense)
           return { ...w, currentAdvance: (w.currentAdvance || 0) + amount };
         } else if (transaction.type === 'salary_payment') {
           // Salary paid -> deducts deductedAdvances if any
@@ -1028,20 +1164,54 @@ export function useAppStore() {
 
     setWorkerTransactions(prev => [newTx, ...prev]);
 
-    // Also optionally record as general expense so cash register reflects the cash payout
-    addExpense({
-      title: `${transaction.type === 'advance' ? 'سلفة لعامل' : 'صرف راتب'}: ${transaction.workerName}`,
-      category: 'رواتب وعمالة',
-      amount: amount,
-      date: newTx.date,
-      time: newTx.time || '',
-      notes: transaction.notes || ''
-    });
+    // ONLY salaries are operational expenses. Advances are Balance Sheet assets (Employee Receivables), not P&L expenses.
+    // Tag with isWorkerPayment: true to prevent double deduction in cash calculations.
+    if (transaction.type === 'salary_payment') {
+      addExpense({
+        id: `exp-${newTx.id}`,
+        clientTransactionId: `tx-exp-${newTx.id}`,
+        title: `صرف راتب: ${transaction.workerName || 'عامل'}`,
+        category: 'رواتب وعمالة',
+        amount: amount,
+        paymentMethod: paymentMethod,
+        date: newTx.date,
+        time: newTx.time || '',
+        notes: transaction.notes || '',
+        isWorkerPayment: true,
+        workerTransactionId: newTx.id
+      });
+    }
+
+    // Cloudflare sync
+    try {
+      const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, null, 'worker_transaction', newTx.id, 'create', newTx);
+    } catch (e) {}
 
     return newTx;
   };
 
   const deleteWorkerTransaction = (id) => {
+    const target = workerTransactions.find(t => t.id === id);
+    if (target) {
+      setWorkers(prev => prev.map(w => {
+        if (w.id === target.workerId) {
+          if (target.type === 'advance') {
+            return { ...w, currentAdvance: Math.max(0, (w.currentAdvance || 0) - (Number(target.amount) || 0)) };
+          } else if (target.type === 'salary_payment') {
+            const deducted = Number(target.deductedAdvance) || 0;
+            return { ...w, currentAdvance: (w.currentAdvance || 0) + deducted };
+          }
+        }
+        return w;
+      }));
+      // Remove linked expense if it was a salary payment
+      setExpenses(prev => prev.filter(e => e.workerTransactionId !== id && e.id !== `exp-${id}`));
+      try {
+        const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+        cloudflareSync.recordMutation(activeTenantId, null, 'worker_transaction', id, 'delete', { id });
+      } catch (e) {}
+    }
     setWorkerTransactions(prev => prev.filter(t => t.id !== id));
   };
 
@@ -1155,6 +1325,11 @@ export function useAppStore() {
       });
     }
 
+    try {
+      const activeTenantId = currentUser?.tenantId || targetSupplier?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, null, 'supplier_payment', newPayment.id, 'create', newPayment);
+    } catch (e) {}
+
     return newPayment;
   };
 
@@ -1174,6 +1349,10 @@ export function useAppStore() {
       setSupplierPayments(prev => prev.filter(p => p.id !== paymentId));
       // Remove the linked expense if it was created
       setExpenses(prev => prev.filter(e => e.supplierPaymentId !== paymentId));
+      try {
+        const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+        cloudflareSync.recordMutation(activeTenantId, null, 'supplier_payment', paymentId, 'delete', { id: paymentId });
+      } catch (e) {}
     }
   };
 
@@ -1364,6 +1543,12 @@ export function useAppStore() {
     }
 
     setPurchases(prev => [newPurchase, ...prev]);
+
+    try {
+      const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'purchase', newPurchase.id, 'create', newPurchase);
+    } catch (e) {}
+
     return newPurchase;
   };
 
@@ -1398,6 +1583,10 @@ export function useAppStore() {
           return p;
         }));
       }
+      try {
+        const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+        cloudflareSync.recordMutation(activeTenantId, target.branchId || null, 'purchase', id, 'delete', { id });
+      } catch (e) {}
     }
     setPurchases(prev => prev.filter(p => p.id !== id));
   };
@@ -1465,6 +1654,11 @@ export function useAppStore() {
 
     setPurchaseReturns(prev => [newReturn, ...prev]);
 
+    try {
+      const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, originalPurchase.branchId || null, 'purchase_return', newReturn.id, 'create', newReturn);
+    } catch (e) {}
+
     // Update purchase record
     setPurchases(prev => prev.map(p => {
       if (p.id === purchaseId) {
@@ -1526,6 +1720,10 @@ export function useAppStore() {
     }));
 
     setPurchaseReturns(prev => prev.filter(r => r.id !== returnId));
+    try {
+      const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+      cloudflareSync.recordMutation(activeTenantId, null, 'purchase_return', returnId, 'delete', { id: returnId });
+    } catch (e) {}
   };
 
   // Reset or Export/Import
@@ -1669,9 +1867,9 @@ export function useAppStore() {
       .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
     // 2. Cash Outflows
-    // Exclude supplier payments from general expenses to prevent double deduction
+    // Exclude supplier payments and worker payments from general expenses to prevent double deduction
     const cashExpenses = expenses
-      .filter(e => e.paymentMethod !== 'bank' && !e.isSupplierPayment)
+      .filter(e => e.paymentMethod !== 'bank' && !e.isSupplierPayment && !e.isWorkerPayment)
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
     const cashPurchases = (purchases || []).reduce((sum, p) => {
@@ -1738,7 +1936,7 @@ export function useAppStore() {
 
     // 4. Bank Outflows
     const bankExpenses = expenses
-      .filter(e => e.paymentMethod === 'bank' && !e.isSupplierPayment)
+      .filter(e => e.paymentMethod === 'bank' && !e.isSupplierPayment && !e.isWorkerPayment)
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
     const bankPurchases = (purchases || []).reduce((sum, p) => {
