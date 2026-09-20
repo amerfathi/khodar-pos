@@ -80,6 +80,31 @@ export async function onRequestGet(context) {
   }
 
   try {
+    const latestOnly = url.searchParams.get('latest') === 'true';
+    if (latestOnly) {
+      const latest = await env.DB.prepare(`
+        SELECT id, tenant_id, snapshot_json, size_bytes, version, created_at
+        FROM tenant_backups
+        WHERE tenant_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).bind(tenantId).first();
+
+      let parsedSnapshot = null;
+      if (latest && latest.snapshot_json) {
+        try {
+          parsedSnapshot = JSON.parse(latest.snapshot_json);
+        } catch (e) {
+          parsedSnapshot = latest.snapshot_json;
+        }
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        backup: latest ? { ...latest, snapshot: parsedSnapshot } : null
+      }), { status: 200, headers: corsHeaders });
+    }
+
     const list = await env.DB.prepare(`
       SELECT id, tenant_id, size_bytes, version, created_at
       FROM tenant_backups

@@ -35,14 +35,16 @@ export async function onRequestPost(context) {
     }
 
     // Insert events into D1 sync_events table inside a transaction or batch
-    const statements = events.map(evt => {
-      const eventId = evt.id || `evt_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const nowMs = Date.now();
+    const statements = events.map((evt, idx) => {
+      const eventId = evt.id || `evt_${nowMs}_${idx}_${Math.random().toString(36).substring(2, 9)}`;
       const payload = typeof evt.payload === 'string' ? evt.payload : JSON.stringify(evt.payload || {});
-      const clientTime = evt.timestamp || Date.now();
+      const clientTime = evt.timestamp || nowMs;
+      const serverTime = nowMs + idx;
 
       return env.DB.prepare(`
-        INSERT OR IGNORE INTO sync_events (id, tenant_id, branch_id, entity_type, entity_id, action, payload_json, client_timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR IGNORE INTO sync_events (id, tenant_id, branch_id, entity_type, entity_id, action, payload_json, client_timestamp, server_timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
         eventId,
         tenantId,
@@ -51,7 +53,8 @@ export async function onRequestPost(context) {
         evt.entityId || 'none',
         evt.action || 'update',
         payload,
-        clientTime
+        clientTime,
+        serverTime
       );
     });
 

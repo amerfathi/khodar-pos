@@ -1,19 +1,21 @@
 /**
  * Cloudflare Edge Synchronization Service
  * ----------------------------------------------------
- * High-performance background sync between Local POS (IndexedDB/LocalStorage)
+ * High-performance real-time background sync between Local POS (IndexedDB/LocalStorage)
  * and Cloudflare Edge (Workers & D1 Database).
  * 
  * Key Principles:
- * 1. Zero UI blocking: Cashier operations always execute in <5ms locally.
- * 2. Offline-First: If network drops, events queue safely in LocalStorage.
- * 3. Automatic Recovery: Flushes queue immediately once internet returns.
+ * 1. Zero UI blocking: Cashier operations execute locally in <5ms.
+ * 2. Real-time parity: Rapid delta polling (4s) + instant on-focus triggers.
+ * 3. Offline-First: If network drops, mutations queue safely in LocalStorage.
+ * 4. Automatic Recovery: Instant flush and pull once connectivity returns.
+ * 5. Multi-Tenant isolation: Per-tenant sync cursor and state partitioning.
  */
 
 import { getApiBaseUrl } from '../config/appVersion';
 
 const QUEUE_STORAGE_KEY = 'khodar_offline_sync_queue';
-const LAST_SYNC_KEY = 'khodar_last_sync_timestamp';
+const getTenantSyncKey = (tenantId) => `khodar_last_sync_timestamp_${tenantId || 'default'}`;
 
 class CloudflareSyncService {
   constructor() {
@@ -22,19 +24,46 @@ class CloudflareSyncService {
     this.isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
     this.listeners = new Set();
     this.updateHandler = null;
+    this.currentTenantId = null;
+    this.focusListenerAttached = false;
 
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
         this.isOnline = true;
         this.notifyListeners('online');
         this.flushQueue();
+        if (this.currentTenantId) {
+          this.pullUpdates(this.currentTenantId, this.updateHandler);
+        }
       });
 
       window.addEventListener('offline', () => {
         this.isOnline = false;
         this.notifyListeners('offline');
       });
+
+      this.setupFocusListeners();
     }
+  }
+
+  setupFocusListeners() {
+    if (this.focusListenerAttached || typeof window === 'undefined') return;
+
+    const onWindowActive = () => {
+      if (this.isOnline && this.currentTenantId && !this.isSyncing) {
+        this.flushQueue();
+        this.pullUpdates(this.currentTenantId, this.updateHandler);
+      }
+    };
+
+    window.addEventListener('focus', onWindowActive);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        onWindowActive();
+      }
+    });
+
+    this.focusListenerAttached = true;
   }
 
   // Subscribe to sync status changes (for UI indicators)
@@ -46,7 +75,13 @@ class CloudflareSyncService {
   notifyListeners(status, details = {}) {
     for (const cb of this.listeners) {
       try {
-        cb({ status, isOnline: this.isOnline, queueLength: this.getQueueLength(), ...details });
+        cb({ 
+          status, 
+          isOnline: this.isOnline, 
+          queueLength: this.getQueueLength(), 
+          lastSyncTime: Date.now(),
+          ...details 
+        });
       } catch (err) {
         console.error('Error in sync listener:', err);
       }
@@ -74,7 +109,7 @@ class CloudflareSyncService {
     }
   }
 
-  // Record an action to sync (e.g. new invoice, expense, stock change)
+  // Record an action to sync (e.g. new invoice, expense, product, customer, stock change)
   recordMutation(tenantId, branchId, entityType, entityId, action, payload) {
     const queue = this.getQueue();
     const eventId = payload?.idempotencyKey 
@@ -142,6 +177,11 @@ class CloudflareSyncService {
         // If more items remain, flush next batch
         if (remainingQueue.length > 0) {
           setTimeout(() => this.flushQueue(), 100);
+        } else {
+          // Immediately pull to stay completely in lockstep with cloud
+          if (tenantId) {
+            this.pullUpdates(tenantId, this.updateHandler);
+          }
         }
       } else {
         console.warn('Cloudflare sync returned non-200 status:', response.status);
@@ -156,26 +196,51 @@ class CloudflareSyncService {
   }
 
   // Pull latest updates from Cloudflare edge
-  async pullUpdates(tenantId, onUpdatesReceived) {
-    if (!this.isOnline || !tenantId) return;
+  async pullUpdates(tenantId, onUpdatesReceived = null, forceSince = null) {
+    if (!this.isOnline || !tenantId) return 0;
 
-    const lastSync = parseInt(localStorage.getItem(LAST_SYNC_KEY) || '0', 10);
+    const syncKey = getTenantSyncKey(tenantId);
+    const lastSync = forceSince !== null ? forceSince : parseInt(localStorage.getItem(syncKey) || '0', 10);
     const callback = onUpdatesReceived || this.updateHandler;
 
     try {
       const baseUrl = getApiBaseUrl();
       const res = await fetch(`${baseUrl}/api/sync/pull?tenantId=${encodeURIComponent(tenantId)}&since=${lastSync}`);
-      if (!res.ok) return;
+      if (!res.ok) return 0;
 
       const data = await res.json();
       if (data.success && Array.isArray(data.events) && data.events.length > 0) {
-        localStorage.setItem(LAST_SYNC_KEY, String(data.latestTimestamp || Date.now()));
+        localStorage.setItem(syncKey, String(data.latestTimestamp || Date.now()));
         if (typeof callback === 'function') {
           callback(data.events);
         }
+        this.notifyListeners('synced_inbound', { count: data.events.length });
+        return data.events.length;
       }
+      return 0;
     } catch (err) {
       console.warn('Cloudflare pull error:', err.message);
+      return 0;
+    }
+  }
+
+  // Fetch the latest full snapshot backup from Cloudflare D1
+  async fetchLatestSnapshot(tenantId) {
+    if (!this.isOnline || !tenantId) return null;
+
+    try {
+      const baseUrl = getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/api/backup?tenantId=${encodeURIComponent(tenantId)}&latest=true`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.backup?.snapshot) {
+          return data.backup.snapshot;
+        }
+      }
+      return null;
+    } catch (err) {
+      console.warn('Failed to fetch latest cloud snapshot:', err);
+      return null;
     }
   }
 
@@ -206,21 +271,41 @@ class CloudflareSyncService {
     }
   }
 
+  // Trigger immediate bidirectional sync on demand
+  async syncNow(tenantId, onUpdatesReceived = null) {
+    const targetTenant = tenantId || this.currentTenantId;
+    if (!targetTenant) return { success: false, error: 'No active tenant' };
+
+    this.notifyListeners('syncing');
+    await this.flushQueue();
+    const pulled = await this.pullUpdates(targetTenant, onUpdatesReceived || this.updateHandler);
+    this.notifyListeners('idle', { pulledCount: pulled });
+    return { success: true, pulledCount: pulled };
+  }
+
   // Set handler for applying inbound synced events to local store
   setUpdateHandler(handler) {
     this.updateHandler = handler;
   }
 
-  // Start periodic sync daemon (runs every 30 seconds)
-  startAutoSync(tenantId, onUpdatesReceived = null, intervalMs = 30000) {
+  // Start periodic sync daemon (default: rapid 4-second polling for real-time experience)
+  startAutoSync(tenantId, onUpdatesReceived = null, intervalMs = 4000) {
+    this.currentTenantId = tenantId;
     if (onUpdatesReceived) {
       this.updateHandler = onUpdatesReceived;
     }
     this.stopAutoSync();
-    this.syncIntervalId = setInterval(() => {
+
+    // Immediate initial sync (do not wait for first timer tick!)
+    if (tenantId && this.isOnline) {
       this.flushQueue();
-      if (tenantId) {
-        this.pullUpdates(tenantId, this.updateHandler);
+      this.pullUpdates(tenantId, this.updateHandler);
+    }
+
+    this.syncIntervalId = setInterval(() => {
+      if (this.isOnline && this.currentTenantId) {
+        this.flushQueue();
+        this.pullUpdates(this.currentTenantId, this.updateHandler);
       }
     }, intervalMs);
   }

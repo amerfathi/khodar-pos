@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   INITIAL_PRODUCTS, 
   INITIAL_CUSTOMERS, 
@@ -347,7 +347,7 @@ export function useAppStore() {
   }, [currentUser?.id, currentUser?.tenantId, currentUser?.isStaff]);
 
   // Inbound Cloud Synchronization Ingestion Handler
-  // Merges transactions and changes received from other cashiers and mobile devices
+  // Merges transactions and changes received from other cashiers and mobile devices in real time
   const handleInboundSyncEvents = useCallback((events) => {
     if (!Array.isArray(events) || events.length === 0) return;
 
@@ -358,6 +358,23 @@ export function useAppStore() {
       if (entityType === 'invoice') {
         if (action === 'create') {
           setInvoices(prev => prev.some(i => i.id === entityId) ? prev : [payload, ...prev]);
+          // Sync stock deduction and customer balance on receiving terminals
+          if (Array.isArray(payload.items)) {
+            setProducts(prev => prev.map(p => {
+              const soldItem = payload.items.find(it => it.productId === p.id || it.name === p.name);
+              if (soldItem) {
+                const soldQty = Number(soldItem.netWeight || soldItem.quantityKg || soldItem.packageCount) || 0;
+                return { ...p, currentStockKg: Math.round(((Number(p.currentStockKg) || 0) - soldQty) * 100) / 100 };
+              }
+              return p;
+            }));
+          }
+          if (payload.customerId && Number(payload.remainingDebt) > 0) {
+            setCustomers(prev => prev.map(c => c.id === payload.customerId 
+              ? { ...c, balance: Math.round(((Number(c.balance) || 0) + Number(payload.remainingDebt)) * 100) / 100 }
+              : c
+            ));
+          }
         } else if (action === 'update' || action === 'void') {
           setInvoices(prev => prev.map(i => i.id === entityId ? { ...i, ...payload } : i));
         } else if (action === 'delete') {
@@ -388,18 +405,42 @@ export function useAppStore() {
       } else if (entityType === 'purchase') {
         if (action === 'create') {
           setPurchases(prev => prev.some(p => p.id === entityId) ? prev : [payload, ...prev]);
+          if (payload.productId && Number(payload.quantityKg) > 0) {
+            setProducts(prev => prev.map(p => p.id === payload.productId
+              ? { ...p, currentStockKg: Math.round(((Number(p.currentStockKg) || 0) + Number(payload.quantityKg)) * 100) / 100 }
+              : p
+            ));
+          }
+          if (payload.supplierId && Number(payload.creditAmount) > 0) {
+            setSuppliers(prev => prev.map(s => s.id === payload.supplierId
+              ? { ...s, balance: Math.round(((Number(s.balance) || 0) + Number(payload.creditAmount)) * 100) / 100 }
+              : s
+            ));
+          }
         } else if (action === 'delete') {
           setPurchases(prev => prev.filter(p => p.id !== entityId));
         }
       } else if (entityType === 'customer_payment') {
         if (action === 'create') {
           setCustomerPayments(prev => prev.some(p => p.id === entityId) ? prev : [payload, ...prev]);
+          if (payload.customerId && Number(payload.amount) > 0) {
+            setCustomers(prev => prev.map(c => c.id === payload.customerId
+              ? { ...c, balance: Math.round(((Number(c.balance) || 0) - Number(payload.amount)) * 100) / 100 }
+              : c
+            ));
+          }
         } else if (action === 'delete') {
           setCustomerPayments(prev => prev.filter(p => p.id !== entityId));
         }
       } else if (entityType === 'supplier_payment') {
         if (action === 'create') {
           setSupplierPayments(prev => prev.some(p => p.id === entityId) ? prev : [payload, ...prev]);
+          if (payload.supplierId && Number(payload.amount) > 0) {
+            setSuppliers(prev => prev.map(s => s.id === payload.supplierId
+              ? { ...s, balance: Math.round(((Number(s.balance) || 0) - Number(payload.amount)) * 100) / 100 }
+              : s
+            ));
+          }
         } else if (action === 'delete') {
           setSupplierPayments(prev => prev.filter(p => p.id !== entityId));
         }
@@ -429,40 +470,186 @@ export function useAppStore() {
         } else if (action === 'delete') {
           setDamagedItems(prev => prev.filter(d => d.id !== entityId));
         }
+      } else if (entityType === 'worker') {
+        if (action === 'create') {
+          setWorkers(prev => prev.some(w => w.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'update') {
+          setWorkers(prev => prev.map(w => w.id === entityId ? { ...w, ...payload } : w));
+        } else if (action === 'delete') {
+          setWorkers(prev => prev.filter(w => w.id !== entityId));
+        }
+      } else if (entityType === 'worker_transaction') {
+        if (action === 'create') {
+          setWorkerTransactions(prev => prev.some(t => t.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setWorkerTransactions(prev => prev.filter(t => t.id !== entityId));
+        }
+      } else if (entityType === 'partner') {
+        if (action === 'create') {
+          setPartners(prev => prev.some(p => p.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'update') {
+          setPartners(prev => prev.map(p => p.id === entityId ? { ...p, ...payload } : p));
+        } else if (action === 'delete') {
+          setPartners(prev => prev.filter(p => p.id !== entityId));
+        }
+      } else if (entityType === 'partner_drawing') {
+        if (action === 'create') {
+          setPartnerDrawings(prev => prev.some(d => d.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setPartnerDrawings(prev => prev.filter(d => d.id !== entityId));
+        }
+      } else if (entityType === 'profit_distribution') {
+        if (action === 'create') {
+          setProfitDistributions(prev => prev.some(d => d.id === entityId) ? prev : [payload, ...prev]);
+        } else if (action === 'delete') {
+          setProfitDistributions(prev => prev.filter(d => d.id !== entityId));
+        }
+      } else if (entityType === 'settings') {
+        if (action === 'update') {
+          setSettings(prev => ({ ...prev, ...payload }));
+        }
       }
     });
   }, []);
 
-  // Background Auto-sync to Cloudflare Edge
+  // Background Auto-sync to Cloudflare Edge (Near Real-Time: 4-second polling + on-focus immediate sync)
   useEffect(() => {
     const tenantId = currentUser?.tenantId || 'tenant-demo';
-    cloudflareSync.startAutoSync(tenantId, handleInboundSyncEvents, 30000);
+    
+    // Initial Hydration for newly logged-in accounts / fresh device environments
+    const tenantSyncKey = `khodar_last_sync_timestamp_${tenantId}`;
+    const hasSyncedThisTenant = typeof window !== 'undefined' ? localStorage.getItem(tenantSyncKey) : 'yes';
+
+    if (!hasSyncedThisTenant && tenantId && tenantId !== 'tenant-demo') {
+      cloudflareSync.fetchLatestSnapshot(tenantId).then(snapshot => {
+        if (snapshot && typeof snapshot === 'object') {
+          if (Array.isArray(snapshot.products) && snapshot.products.length > 0) setProducts(snapshot.products);
+          if (Array.isArray(snapshot.customers) && snapshot.customers.length > 0) setCustomers(snapshot.customers);
+          if (Array.isArray(snapshot.suppliers) && snapshot.suppliers.length > 0) setSuppliers(snapshot.suppliers);
+          if (Array.isArray(snapshot.invoices) && snapshot.invoices.length > 0) setInvoices(snapshot.invoices);
+          if (Array.isArray(snapshot.expenses) && snapshot.expenses.length > 0) setExpenses(snapshot.expenses);
+          if (Array.isArray(snapshot.purchases) && snapshot.purchases.length > 0) setPurchases(snapshot.purchases);
+          if (Array.isArray(snapshot.workers) && snapshot.workers.length > 0) setWorkers(snapshot.workers);
+          if (Array.isArray(snapshot.workerTransactions) && snapshot.workerTransactions.length > 0) setWorkerTransactions(snapshot.workerTransactions);
+          if (Array.isArray(snapshot.partners) && snapshot.partners.length > 0) setPartners(snapshot.partners);
+          if (Array.isArray(snapshot.partnerDrawings) && snapshot.partnerDrawings.length > 0) setPartnerDrawings(snapshot.partnerDrawings);
+          if (Array.isArray(snapshot.profitDistributions) && snapshot.profitDistributions.length > 0) setProfitDistributions(snapshot.profitDistributions);
+          if (snapshot.settings && typeof snapshot.settings === 'object') setSettings(prev => ({ ...prev, ...snapshot.settings }));
+        }
+        // Then pull all historical delta events from since=0
+        cloudflareSync.pullUpdates(tenantId, handleInboundSyncEvents, 0);
+      }).catch(() => {
+        cloudflareSync.pullUpdates(tenantId, handleInboundSyncEvents, 0);
+      });
+    }
+
+    cloudflareSync.startAutoSync(tenantId, handleInboundSyncEvents, 4000);
     return () => cloudflareSync.stopAutoSync();
   }, [currentUser?.tenantId, handleInboundSyncEvents]);
 
-  // Product Actions
+  // Live Sync Status subscription
+  const [syncStatus, setSyncStatus] = useState(() => ({
+    status: 'idle',
+    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    queueLength: cloudflareSync.getQueueLength(),
+    lastSyncTime: Date.now()
+  }));
+
+  useEffect(() => {
+    return cloudflareSync.subscribe((state) => {
+      setSyncStatus(prev => ({ ...prev, ...state }));
+    });
+  }, []);
+
+  // Manual Instant Sync Trigger
+  const syncNow = useCallback(async () => {
+    const tenantId = currentUser?.tenantId || 'tenant-demo';
+    return await cloudflareSync.syncNow(tenantId, handleInboundSyncEvents);
+  }, [currentUser?.tenantId, handleInboundSyncEvents]);
+
+  // Debounced cloud backup snapshot upload (runs 5 seconds after mutations settle)
+  const isDirtyRef = useRef(false);
+  useEffect(() => {
+    isDirtyRef.current = true;
+    const activeTenantId = currentUser?.tenantId;
+    if (!activeTenantId || activeTenantId === 'tenant-demo') return;
+
+    const timer = setTimeout(() => {
+      if (isDirtyRef.current) {
+        isDirtyRef.current = false;
+        const fullSnapshot = {
+          products,
+          customers,
+          suppliers,
+          invoices,
+          expenses,
+          purchases,
+          workers,
+          workerTransactions,
+          customerPayments,
+          supplierPayments,
+          partners,
+          partnerDrawings,
+          profitDistributions,
+          salesReturns,
+          purchaseReturns,
+          damagedItems,
+          settings,
+          exportedAt: new Date().toISOString(),
+          version: '2.6.1'
+        };
+        cloudflareSync.uploadBackupSnapshot(activeTenantId, fullSnapshot).catch(() => {});
+      }
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [
+    products, customers, suppliers, invoices, expenses, purchases,
+    workers, workerTransactions, customerPayments, supplierPayments,
+    partners, partnerDrawings, profitDistributions, salesReturns,
+    purchaseReturns, damagedItems, settings, currentUser?.tenantId
+  ]);
+
+  // Product Actions (with real-time cloud mutation broadcasting)
   const addProduct = (prod) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     const newProd = {
       ...prod,
       id: prod.id || `prod-${Date.now()}`
     };
     setProducts(prev => [newProd, ...prev]);
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'product', newProd.id, 'create', newProd);
+    } catch (e) {}
     return newProd;
   };
 
   const updateProduct = (id, updates) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'product', id, 'update', updates);
+    } catch (e) {}
   };
 
   const updateProductPrice = (id, newPrice) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, defaultPricePerKg: Number(newPrice) } : p));
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const priceNum = Number(newPrice);
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, defaultPricePerKg: priceNum } : p));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'product', id, 'update', { defaultPricePerKg: priceNum });
+    } catch (e) {}
   };
 
   const deleteProduct = (id) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setProducts(prev => prev.filter(p => p.id !== id));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'product', id, 'delete', { id });
+    } catch (e) {}
   };
 
-  // Customer Actions
+  // Customer Actions (with real-time cloud mutation broadcasting)
   const addCustomer = (cust) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     const newCust = {
@@ -475,11 +662,26 @@ export function useAppStore() {
       notes: cust.notes || ''
     };
     setCustomers(prev => [newCust, ...prev]);
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'customer', newCust.id, 'create', newCust);
+    } catch (e) {}
     return newCust;
   };
 
   const updateCustomer = (id, updates) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'customer', id, 'update', updates);
+    } catch (e) {}
+  };
+
+  const deleteCustomer = (id) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    setCustomers(prev => prev.filter(c => c.id !== id));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'customer', id, 'delete', { id });
+    } catch (e) {}
   };
 
   const recordCustomerPayment = (customerId, amount, note = 'سداد دفعة نقدية', paymentMethod = 'cash', paymentId = null, clientTransactionId = null) => {
@@ -1115,8 +1317,9 @@ export function useAppStore() {
     } catch (e) {}
   };
 
-  // Workers & Payroll Actions (العمال والرواتب)
+  // Workers & Payroll Actions (العمال والرواتب مع المزامنة السحابية اللحظية)
   const addWorker = (worker) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     const newWorker = {
       ...worker,
       id: `work-${Date.now()}`,
@@ -1125,15 +1328,26 @@ export function useAppStore() {
       startDate: worker.startDate || new Date().toISOString().split('T')[0]
     };
     setWorkers(prev => [newWorker, ...prev]);
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'worker', newWorker.id, 'create', newWorker);
+    } catch (e) {}
     return newWorker;
   };
 
   const updateWorker = (id, updates) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setWorkers(prev => prev.map(w => w.id === id ? { ...w, ...updates } : w));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'worker', id, 'update', updates);
+    } catch (e) {}
   };
 
   const deleteWorker = (id) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setWorkers(prev => prev.filter(w => w.id !== id));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'worker', id, 'delete', { id });
+    } catch (e) {}
   };
 
   // Worker Transactions (سلفيات ورواتب)
@@ -1216,12 +1430,19 @@ export function useAppStore() {
     setWorkerTransactions(prev => prev.filter(t => t.id !== id));
   };
 
-  // Settings Actions
+  // Settings Actions (مع المزامنة السحابية اللحظية)
   const updateSettings = (updates) => {
-    setSettings(prev => ({ ...prev, ...updates }));
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    setSettings(prev => {
+      const nextSettings = { ...prev, ...updates };
+      try {
+        cloudflareSync.recordMutation(activeTenantId, null, 'settings', 'settings', 'update', nextSettings);
+      } catch (e) {}
+      return nextSettings;
+    });
   };
 
-  // Supplier Actions (الموردون وحسابات الديون والأرصدة)
+  // Supplier Actions (الموردون وحسابات الديون والأرصدة مع المزامنة السحابية)
   const addSupplier = (sup) => {
     const initialAmt = Number(sup.initialBalance) || 0;
     // initialBalanceType: 'due_to_supplier' (له فلوس / دائن) -> positive balance
@@ -1246,19 +1467,30 @@ export function useAppStore() {
       notes: (sup.notes || '').trim()
     };
     setSuppliers(prev => [newSup, ...prev]);
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'supplier', newSup.id, 'create', newSup);
+    } catch (e) {}
     return newSup;
   };
 
   const updateSupplier = (id, updates) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setSuppliers(prev => prev.map(s => s.id === id ? { 
       ...s, 
       ...updates,
       balance: updates.balance !== undefined ? Math.round(Number(updates.balance) * 100) / 100 : s.balance
     } : s));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'supplier', id, 'update', updates);
+    } catch (e) {}
   };
 
   const deleteSupplier = (id) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setSuppliers(prev => prev.filter(s => s.id !== id));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'supplier', id, 'delete', { id });
+    } catch (e) {}
   };
 
   const recordSupplierPayment = ({ supplierId, amount, paymentMethod = 'cash', notes = '', date = null, time = null, id = null, clientTransactionId = null, idempotencyKey = null }) => {
@@ -1779,8 +2011,9 @@ export function useAppStore() {
     URL.revokeObjectURL(url);
   };
 
-  // Partner Actions
+  // Partner Actions (مع المزامنة السحابية اللحظية)
   const addPartner = (partnerData) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     const newPartner = {
       ...partnerData,
       id: partnerData.id || `partner-${Date.now()}`,
@@ -1789,25 +2022,37 @@ export function useAppStore() {
       createdAt: partnerData.createdAt || getCurrentDateFormatted()
     };
     setPartners(prev => [...prev, newPartner]);
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'partner', newPartner.id, 'create', newPartner);
+    } catch (e) {}
     return newPartner;
   };
 
   const updatePartner = (id, updates) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setPartners(prev => prev.map(p => p.id === id ? {
       ...p,
       ...updates,
       sharePercentage: updates.sharePercentage !== undefined ? Number(updates.sharePercentage) : p.sharePercentage,
       initialCapital: updates.initialCapital !== undefined ? Number(updates.initialCapital) : p.initialCapital
     } : p));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'partner', id, 'update', updates);
+    } catch (e) {}
   };
 
   const deletePartner = (id) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setPartners(prev => prev.filter(p => p.id !== id));
     setPartnerDrawings(prev => prev.filter(d => d.partnerId !== id));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'partner', id, 'delete', { id });
+    } catch (e) {}
   };
 
-  // Partner Drawings (سحب الشركاء)
+  // Partner Drawings (سحب الشركاء مع المزامنة السحابية)
   const recordPartnerDrawing = (drawingData) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     const newDrawing = {
       ...drawingData,
       id: drawingData.id || `draw-${Date.now()}`,
@@ -1819,15 +2064,23 @@ export function useAppStore() {
       createdAt: new Date().toISOString()
     };
     setPartnerDrawings(prev => [newDrawing, ...prev]);
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'partner_drawing', newDrawing.id, 'create', newDrawing);
+    } catch (e) {}
     return newDrawing;
   };
 
   const deletePartnerDrawing = (id) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setPartnerDrawings(prev => prev.filter(d => d.id !== id));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'partner_drawing', id, 'delete', { id });
+    } catch (e) {}
   };
 
-  // Profit Distributions (توزيعات الأرباح)
+  // Profit Distributions (توزيعات الأرباح مع المزامنة السحابية)
   const recordProfitDistribution = (distData) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     const newDist = {
       ...distData,
       id: distData.id || `dist-${Date.now()}`,
@@ -1840,11 +2093,18 @@ export function useAppStore() {
       createdAt: new Date().toISOString()
     };
     setProfitDistributions(prev => [newDist, ...prev]);
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'profit_distribution', newDist.id, 'create', newDist);
+    } catch (e) {}
     return newDist;
   };
 
   const deleteProfitDistribution = (id) => {
+    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     setProfitDistributions(prev => prev.filter(d => d.id !== id));
+    try {
+      cloudflareSync.recordMutation(activeTenantId, null, 'profit_distribution', id, 'delete', { id });
+    } catch (e) {}
   };
 
   // --------------------------------------------------------------------------
@@ -3013,6 +3273,7 @@ export function useAppStore() {
     deleteProduct,
     addCustomer,
     updateCustomer,
+    deleteCustomer,
     recordCustomerPayment,
     deleteCustomerPayment,
     saveInvoice,
@@ -3051,6 +3312,8 @@ export function useAppStore() {
     getFinancialPosition,
     updateSettings,
     resetToSampleData,
+    syncStatus,
+    syncNow,
     syncService: cloudflareSync,
     exportBackupJSON,
     importBackupJSON
