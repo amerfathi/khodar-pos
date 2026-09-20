@@ -593,7 +593,7 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
 
               <div>
                 <a
-                  href="https://github.com/amerfathi/khodar-pos/releases/download/v2.4.0/KhodarPOS-Setup.exe"
+                  href="https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS-Setup.exe"
                   target="_blank"
                   rel="noreferrer"
                   download

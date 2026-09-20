@@ -426,7 +426,7 @@ export default function LoginView({ store, onClose }) {
                 </div>
 
                 <a
-                  href="https://github.com/amerfathi/khodar-pos/releases/download/v2.4.0/KhodarPOS-Setup.exe"
+                  href="https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS-Setup.exe"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium transition-colors shadow-2xs shrink-0"
                 >
                   <Download size={13} />
