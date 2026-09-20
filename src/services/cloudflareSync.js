@@ -210,12 +210,34 @@ class CloudflareSyncService {
 
       const data = await res.json();
       if (data.success && Array.isArray(data.events) && data.events.length > 0) {
-        localStorage.setItem(syncKey, String(data.latestTimestamp || Date.now()));
+        // CRITICAL FIX: only advance cursor using the real server_timestamp from D1.
+        // NEVER use Date.now() fallback — it jumps the cursor into the future and
+        // causes any events pushed from Desktop/Mobile to be permanently skipped.
+        if (data.latestTimestamp && data.latestTimestamp > 0) {
+          localStorage.setItem(syncKey, String(data.latestTimestamp));
+        }
         if (typeof callback === 'function') {
           callback(data.events);
         }
         this.notifyListeners('synced_inbound', { count: data.events.length });
         return data.events.length;
+      }
+
+      // When 0 events returned: use serverMaxTimestamp (returned by server)
+      // to detect and repair a corrupted cursor.
+      // If our cursor is HIGHER than the server's true max, we walked past all
+      // real data — walk the cursor back to (serverMaxTimestamp - 1) so next
+      // poll will catch any newly arriving events.
+      if (forceSince === null && data.serverMaxTimestamp && data.serverMaxTimestamp > 0) {
+        const currentCursor = parseInt(localStorage.getItem(syncKey) || '0', 10);
+        if (currentCursor > data.serverMaxTimestamp) {
+          const repairedCursor = Math.max(0, data.serverMaxTimestamp - 1);
+          console.warn(
+            `[Sync] Cursor repair: ${currentCursor} → ${repairedCursor} ` +
+            `(server max: ${data.serverMaxTimestamp})`
+          );
+          localStorage.setItem(syncKey, String(repairedCursor));
+        }
       }
       return 0;
     } catch (err) {
@@ -295,6 +317,22 @@ class CloudflareSyncService {
       this.updateHandler = onUpdatesReceived;
     }
     this.stopAutoSync();
+
+    // ─── Cursor Sanity Check ─────────────────────────────────────────────────
+    // If the stored cursor is in the future (caused by the Date.now() fallback
+    // bug that was shipped in earlier versions), reset it to 0 so we re-pull
+    // all events and nothing is permanently skipped.
+    if (tenantId && typeof localStorage !== 'undefined') {
+      const syncKey = getTenantSyncKey(tenantId);
+      const storedCursor = parseInt(localStorage.getItem(syncKey) || '0', 10);
+      const nowMs = Date.now();
+      if (storedCursor > nowMs + 5000) {
+        // Cursor is more than 5 seconds in the future — clearly corrupted.
+        console.warn(`[Sync] Resetting corrupted future cursor for ${tenantId}: ${storedCursor} → 0`);
+        localStorage.removeItem(syncKey);
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Immediate initial sync (do not wait for first timer tick!)
     if (tenantId && this.isOnline) {

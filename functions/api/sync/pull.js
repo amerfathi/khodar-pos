@@ -56,13 +56,28 @@ export async function onRequestGet(context) {
 
     const latestTimestamp = events.length > 0
       ? events[events.length - 1].serverTimestamp
-      : since;
+      : since; // keep caller's cursor unchanged when nothing new arrived
+
+    // Also return the absolute max server_timestamp for this tenant in D1.
+    // This helps clients with corrupted (too-high) cursors to re-anchor correctly.
+    let serverMaxTimestamp = latestTimestamp;
+    if (events.length === 0 && since > 0) {
+      try {
+        const maxResult = await env.DB.prepare(
+          'SELECT MAX(server_timestamp) as max_ts FROM sync_events WHERE tenant_id = ?'
+        ).bind(tenantId).first();
+        if (maxResult && maxResult.max_ts) {
+          serverMaxTimestamp = maxResult.max_ts;
+        }
+      } catch (e) { /* non-critical */ }
+    }
 
     return new Response(JSON.stringify({
       success: true,
       events,
       count: events.length,
-      latestTimestamp
+      latestTimestamp,
+      serverMaxTimestamp
     }), { status: 200, headers: corsHeaders });
 
   } catch (error) {
