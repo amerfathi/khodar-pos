@@ -8,52 +8,50 @@ import { UPDATE_TYPES } from '../types/contracts';
 // Embedded Fallback Releases (Offline-safe & Zero Mock Data)
 export const OFFICIAL_RELEASES = [
   {
-    id: 'rel-web-2-6-0',
+    id: 'rel-web-2-6-1',
     platform: 'web',
-    version: '2.6.0',
+    version: '2.6.1',
     minimumVersion: '2.2.0',
     status: 'published',
     updateType: 'recommended',
     releaseNotes: [
-      'تحديثات مهمة لرفع كفاءة واستقرار المنظومة',
-      'إصلاحات أمنية وبرمجية عامة وشاملة',
-      'إضافة ميزات وترقيات برمجية جديدة',
+      'مركز تقارير استراتيجي بتصميم بطاقات تنفيذية موحدة',
+      'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين',
       'تحسينات عامة على واجهة وتجربة المستخدم'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev',
     fileSizeBytes: 980000,
-    publishedAt: '2026-09-19T00:00:00Z'
+    publishedAt: '2026-09-20T00:00:00Z'
   },
   {
-    id: 'rel-win-2-6-0',
+    id: 'rel-win-2-6-1',
     platform: 'windows',
-    version: '2.6.0',
-    minimumVersion: '2.2.0',
-    status: 'published',
-    updateType: 'required',
-    releaseNotes: [
-      'تحديثات مهمة لرفع كفاءة واستقرار المنظومة',
-      'إصلاحات أمنية وبرمجية عامة وشاملة',
-      'إضافة ميزات وترقيات تشغيلية جديدة',
-      'تحسينات عامة على واجهة وتجربة المستخدم'
-    ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.0/KhodarPOS-Setup.exe',
-    fileSizeBytes: 131108786,
-    publishedAt: '2026-09-19T00:00:00Z'
-  },
-  {
-    id: 'rel-and-2-6-0',
-    platform: 'android',
-    version: '2.6.0',
+    version: '2.6.1',
     minimumVersion: '2.2.0',
     status: 'published',
     updateType: 'recommended',
     releaseNotes: [
-      'شاشة ترحيبية انسيابية (Splash Screen) لمدة 5 ثواني بهوية براكه',
-      'واجهة تسجيل دخول متجاوبة ومريحة بالكامل لشاشات الهواتف',
-      'حزمة خطوط آبل المتناسقة (Apple Typography SF Pro / SF Arabic)'
+      'مركز تقارير استراتيجي بتصميم بطاقات تنفيذية موحدة',
+      'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين',
+      'تحسينات عامة على واجهة وتجربة المستخدم'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.0/KhodarPOS.apk',
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS-Setup.exe',
+    fileSizeBytes: 131108786,
+    publishedAt: '2026-09-20T00:00:00Z'
+  },
+  {
+    id: 'rel-and-2-6-1',
+    platform: 'android',
+    version: '2.6.1',
+    minimumVersion: '2.2.0',
+    status: 'published',
+    updateType: 'recommended',
+    releaseNotes: [
+      'مركز تقارير استراتيجي بتصميم بطاقات تنفيذية موحدة',
+      'شاشة ترحيبية انسيابية (Splash Screen) وخطوط آبل الرسمية',
+      'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين'
+    ],
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS.apk',
     fileSizeBytes: 29684009,
     publishedAt: '2026-09-20T00:00:00Z'
   }

@@ -455,7 +455,7 @@ export default function LoginView({ store, onClose }) {
                 </div>
 
                 <a
-                  href="https://github.com/amerfathi/khodar-pos/releases/download/v2.6.0/KhodarPOS.apk"
+                  href="https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS.apk"
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-medium transition-colors shadow-2xs shrink-0"

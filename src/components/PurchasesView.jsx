@@ -424,7 +424,7 @@ export default function PurchasesView({ store, onOpenA4Report }) {
             <EmptyState
               icon={Truck}
               title="لا توجد فواتير توريد مطابقة"
-              description="سجل فواتير شراء الخضار والفواكه الواردة من المزارع وسوق الجملة لمتابعة الأرباح وحسابات التكلفة بدقة."
+              description="سجل فواتير شراء الخضار والفواكه الواردة من الموردين لمتابعة الأرباح وحسابات التكلفة بدقة."
               actionLabel="تسجيل أول توريد"
               onAction={() => {
                 setDate(getCurrentDateFormatted());
@@ -966,7 +966,7 @@ export default function PurchasesView({ store, onOpenA4Report }) {
                     <div className="space-y-1">
                       <input
                         type="text"
-                        placeholder="مثال: مزارع الخرج، تاجر الجملة أبو أحمد..."
+                        placeholder="مثال: شركة التوريد، المورد أبو أحمد..."
                         value={supplierName}
                         onChange={(e) => setSupplierName(e.target.value)}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-600"

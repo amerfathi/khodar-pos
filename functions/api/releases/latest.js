@@ -5,45 +5,43 @@
 
 const FALLBACK_RELEASES = {
   web: {
-    version: '2.6.0',
+    version: '2.6.1',
     minimumVersion: '2.2.0',
     updateType: 'recommended',
     releaseNotes: [
-      'تحديثات مهمة لرفع كفاءة واستقرار المنظومة',
-      'إصلاحات أمنية وبرمجية عامة وشاملة',
-      'إضافة ميزات وترقيات برمجية جديدة',
+      'مركز تقارير استراتيجي بتصميم بطاقات تنفيذية موحدة',
+      'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين',
       'تحسينات عامة على واجهة وتجربة المستخدم'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev',
     fileSizeBytes: 980000,
-    publishedAt: '2026-09-19T00:00:00Z'
+    publishedAt: '2026-09-20T00:00:00Z'
   },
   windows: {
-    version: '2.6.0',
-    minimumVersion: '2.2.0',
-    updateType: 'required',
-    releaseNotes: [
-      'تحديثات مهمة لرفع كفاءة واستقرار المنظومة',
-      'إصلاحات أمنية وبرمجية عامة وشاملة',
-      'إضافة ميزات وترقيات تشغيلية جديدة',
-      'تحسينات عامة على واجهة وتجربة المستخدم'
-    ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.0/KhodarPOS-Setup.exe',
-    fileSizeBytes: 131108786,
-    publishedAt: '2026-09-19T00:00:00Z'
-  },
-  android: {
-    version: '2.5.0',
+    version: '2.6.1',
     minimumVersion: '2.2.0',
     updateType: 'recommended',
     releaseNotes: [
-      'نظام استرداد كلمة المرور وتأمين الحسابات',
-      'واجهة رئيسية للهواتف الذكية (Mobile Home Hub) سريعة ومريحة للمس',
-      'شريط تنقل سفلي ذكي ومزامنة سحابية مع Cloudflare D1'
+      'مركز تقارير استراتيجي بتصميم بطاقات تنفيذية موحدة',
+      'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين',
+      'تحسينات عامة على واجهة وتجربة المستخدم'
     ],
-    downloadUrl: 'https://khodar-pos.pages.dev/downloads/KhodarPOS.apk',
-    fileSizeBytes: 3386842,
-    publishedAt: '2026-09-19T00:00:00Z'
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS-Setup.exe',
+    fileSizeBytes: 131108786,
+    publishedAt: '2026-09-20T00:00:00Z'
+  },
+  android: {
+    version: '2.6.1',
+    minimumVersion: '2.2.0',
+    updateType: 'recommended',
+    releaseNotes: [
+      'مركز تقارير استراتيجي بتصميم بطاقات تنفيذية موحدة',
+      'شاشة ترحيبية انسيابية (Splash Screen) وخطوط آبل الرسمية',
+      'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين'
+    ],
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS.apk',
+    fileSizeBytes: 5577618,
+    publishedAt: '2026-09-20T00:00:00Z'
   },
   ios: {
     version: '2.5.0',

@@ -392,7 +392,7 @@ export default function StoreAuditView({ store, onOpenA4Report, onNavigate }) {
               </div>
             </div>
             <p className="text-[11px] text-slate-500 mt-2.5 pt-2.5 border-t border-slate-100 leading-tight">
-              إجمالي الالتزامات المستحقة لتجار الجملة والمزارع عن شحنات الخضار الواردة
+              إجمالي الالتزامات المستحقة للموردين عن شحنات البضاعة الواردة
             </p>
           </div>
 

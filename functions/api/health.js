@@ -9,7 +9,7 @@ export async function onRequestGet(context) {
     system: 'سوق الخضار - كاشير ومحاسبة سحابية',
     edge: 'Cloudflare Pages & Workers',
     d1Connected: hasDb,
-    version: '2.6.0',
+    version: '2.6.1',
     timestamp: new Date().toISOString()
   }, null, 2), {
     headers: {

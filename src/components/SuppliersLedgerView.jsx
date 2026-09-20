@@ -264,10 +264,10 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
             </div>
           </div>
           <div className="text-2xl font-black font-mono text-slate-900 mt-1.5">
-            {totalSuppliersCount} <span className="text-xs font-medium text-slate-500">مورد / مزرعة</span>
+            {totalSuppliersCount} <span className="text-xs font-medium text-slate-500">مورد معتمد</span>
           </div>
           <span className="text-[10px] text-slate-500 block mt-1">
-            حلقات الجملة، المزارع، والموزعون المباشرون
+            الموردون المعتمدون والموزعون المباشرون
           </span>
         </div>
       </div>
@@ -348,7 +348,7 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
           <Truck size={40} className="mx-auto mb-2 text-slate-300" />
           <h3 className="text-sm font-black text-slate-800 mb-1">لا يوجد موردون مسجلون في هذا القسم</h3>
           <p className="text-xs text-slate-500 mb-4 max-w-sm mx-auto">
-            سجل بيانات الموردين والمزارع لمتابعة أرصدتهم وحسابات الآجل والدفعات النقدية بدقة متناهية.
+            سجل بيانات الموردين لمتابعة أرصدتهم وحسابات الآجل والدفعات النقدية بدقة متناهية.
           </p>
           <button
             type="button"
@@ -522,10 +522,10 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
 
               <div className="space-y-3 text-xs">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">اسم المورد أو المزرعة *</label>
+                  <label className="block font-bold text-slate-700 mb-1">اسم المورد *</label>
                   <input
                     type="text"
-                    placeholder="مثال: مزارع الخرج - أبو راشد"
+                    placeholder="مثال: شركة التوريد - أبو راشد"
                     value={supplierForm.name}
                     onChange={(e) => setSupplierForm(prev => ({ ...prev, name: e.target.value }))}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900"

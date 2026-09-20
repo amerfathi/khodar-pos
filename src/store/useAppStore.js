@@ -1177,7 +1177,7 @@ export function useAppStore() {
     }
   };
 
-  // Purchases Actions (المشتريات وتوريد البضاعة من المزارع وحلقات وسوق الجملة)
+  // Purchases Actions (المشتريات وتوريد البضاعة من الموردين)
   const addPurchase = (purData) => {
     // 0. Idempotency Guard: prevent duplicate purchase creation, double stock additions & double supplier balances
     const clientTxId = purData.clientTransactionId || purData.idempotencyKey || purData.id;
