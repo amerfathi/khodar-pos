@@ -136,8 +136,8 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
     let totalRevenue = 0;
 
     filteredInvoices.forEach(inv => {
-      inv.items.forEach(item => {
-        if (item.productId === prod.id || item.name.includes(prod.name.split(' ')[0])) {
+      (inv.items || []).forEach(item => {
+        if (item.productId === prod.id || item.name?.includes(prod.name.split(' ')[0])) {
           soldKg += Number(item.netWeight) || 0;
           packagesCount += Number(item.packageCount) || 0;
           totalRevenue += Number(item.total) || 0;
@@ -320,7 +320,7 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
       .reduce((sum, p) => sum + (Number(p.quantityKg) || 0), 0);
 
     const soldKg = filteredInvoices.reduce((sum, inv) => {
-      const item = inv.items.find(i => i.productId === prod.id || i.name.includes(prod.name.split(' ')[0]));
+      const item = (inv.items || []).find(i => i.productId === prod.id || i.name?.includes(prod.name.split(' ')[0]));
       return sum + (item ? (Number(item.netWeight) || 0) : 0);
     }, 0);
 

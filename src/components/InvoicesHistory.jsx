@@ -27,7 +27,7 @@ export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice 
     }
 
     const matchSearch = 
-      inv.id.includes(searchTerm) || 
+      inv.id?.includes(searchTerm) || 
       (inv.customerName && inv.customerName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (inv.customerPhone && inv.customerPhone.includes(searchTerm));
 
