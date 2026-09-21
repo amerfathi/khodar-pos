@@ -35,7 +35,7 @@ export const OFFICIAL_RELEASES = [
       'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين',
       'تحسينات عامة على واجهة وتجربة المستخدم'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS-Setup.exe',
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.2/KhodarPOS-Setup.exe',
     fileSizeBytes: 131108786,
     publishedAt: '2026-09-20T00:00:00Z'
   },
@@ -51,7 +51,7 @@ export const OFFICIAL_RELEASES = [
       'شاشة ترحيبية انسيابية (Splash Screen) وخطوط آبل الرسمية',
       'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS.apk',
+    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.2/KhodarPOS.apk',
     fileSizeBytes: 29684009,
     publishedAt: '2026-09-20T00:00:00Z'
   }
