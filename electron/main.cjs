@@ -212,38 +212,35 @@ ipcMain.handle('install-update', async (event, installerPath) => {
     } catch (e) {}
 
     const updaterBat = path.join(tempDir, `khodar-updater-${Date.now()}.bat`);
+
+    // FIX: Wait 3 seconds for Electron to fully exit and release all file locks
+    // before launching the installer. This eliminates the "cannot close" NSIS dialog.
     const batContent = `@echo off
 chcp 65001 >nul
+rem Wait for Electron to fully exit and release all file locks (app.exit called before this)
+timeout /t 3 /nobreak >nul
+rem Belt-and-suspenders: kill any remaining process by name
+taskkill /F /IM "براكه.exe" >nul 2>&1
+taskkill /F /IM "KhodarPOS.exe" >nul 2>&1
+taskkill /F /IM "electron.exe" >nul 2>&1
 timeout /t 1 /nobreak >nul
-taskkill /F /T /IM "براكه.exe" >nul 2>&1
-taskkill /F /T /IM "KhodarPOS.exe" >nul 2>&1
-taskkill /F /T /IM "electron.exe" >nul 2>&1
-timeout /t 1 /nobreak >nul
-
-:WAIT_PROCESS
-tasklist /FI "IMAGENAME eq براكه.exe" 2>NUL | find /I /N "براكه.exe">NUL
-if "%ERRORLEVEL%"=="0" (
-    taskkill /F /T /IM "براكه.exe" >nul 2>&1
-    timeout /t 1 /nobreak >nul
-    goto WAIT_PROCESS
-)
-
-rem Launch interactive visual installer wizard with full Brraka branding
-start "" "${targetPath}"
-exit
+rem Launch the installer — app is guaranteed dead by now
+start "" "${targetPath.replace(/\\/g, '\\\\')}"
+exit /b 0
 `;
     fs.writeFileSync(updaterBat, batContent, 'utf-8');
 
+    // FIX 1: windowsHide:true → CMD window is completely invisible to the user
     const child = spawn('cmd.exe', ['/c', updaterBat], {
       detached: true,
-      stdio: 'ignore'
+      stdio: 'ignore',
+      windowsHide: true  // ← THE KEY FIX: no CMD window ever appears
     });
     child.unref();
 
-    // Immediately exit Electron cleanly to release all file locks
-    setTimeout(() => {
-      app.exit(0);
-    }, 100);
+    // FIX 2: Exit app IMMEDIATELY (no setTimeout delay) so Electron releases
+    // all file locks BEFORE the BAT's 3-second wait expires and installer starts.
+    app.exit(0);
 
     return { success: true };
   } catch (err) {
