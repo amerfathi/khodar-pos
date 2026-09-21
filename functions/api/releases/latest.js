@@ -1,61 +1,73 @@
 /**
- * GET /api/releases/latest?platform=windows&current=2.3.1
- * Cloudflare Pages Function
+ * GET /api/releases/latest?platform=windows&current=2.6.2
+ * Cloudflare Pages Function — Live Release Manifest
+ * 
+ * Source of truth: D1 table `app_releases`
+ * Fallback: FALLBACK_RELEASES (updated on each release)
+ * 
+ * To publish a new release, INSERT a row into D1 — no code change needed.
  */
+
+// ─── FALLBACK RELEASES ────────────────────────────────────────────────────────
+// Updated automatically on each release. Used when D1 is unreachable.
+// IMPORTANT: Keep this in sync with the latest published version.
+const CURRENT_VERSION = '2.6.3';
+const MINIMUM_VERSION = '2.2.0';
 
 const FALLBACK_RELEASES = {
   web: {
-    version: '2.6.1',
-    minimumVersion: '2.2.0',
+    version: CURRENT_VERSION,
+    minimumVersion: MINIMUM_VERSION,
     updateType: 'recommended',
     releaseNotes: [
-      'مركز تقارير استراتيجي بتصميم بطاقات تنفيذية موحدة',
-      'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين',
-      'تحسينات عامة على واجهة وتجربة المستخدم'
+      'إصلاح شاشة الخطأ في سجل الفواتير ومركز التقارير',
+      'إصلاح المزامنة الثنائية الاتجاه Desktop ↔ Web في 4 ثواني',
+      'إصلاح cursor المزامنة لضمان وصول التحديثات من جميع الأجهزة'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev',
     fileSizeBytes: 980000,
-    publishedAt: '2026-09-20T00:00:00Z'
+    publishedAt: '2026-09-21T00:00:00Z'
   },
   windows: {
-    version: '2.6.1',
-    minimumVersion: '2.2.0',
+    version: CURRENT_VERSION,
+    minimumVersion: MINIMUM_VERSION,
     updateType: 'recommended',
     releaseNotes: [
-      'مركز تقارير استراتيجي بتصميم بطاقات تنفيذية موحدة',
-      'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين',
-      'تحسينات عامة على واجهة وتجربة المستخدم'
+      'إصلاح شاشة الخطأ في سجل الفواتير ومركز التقارير',
+      'إصلاح المزامنة الثنائية الاتجاه Desktop ↔ Web في 4 ثواني',
+      'إصلاح cursor المزامنة لضمان وصول التحديثات من جميع الأجهزة'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS-Setup.exe',
-    fileSizeBytes: 131108786,
-    publishedAt: '2026-09-20T00:00:00Z'
+    downloadUrl: `https://github.com/amerfathi/khodar-pos/releases/download/v${CURRENT_VERSION}/KhodarPOS-Setup.exe`,
+    fileSizeBytes: 133955791,
+    publishedAt: '2026-09-21T00:00:00Z'
   },
   android: {
-    version: '2.6.1',
-    minimumVersion: '2.2.0',
+    version: CURRENT_VERSION,
+    minimumVersion: MINIMUM_VERSION,
     updateType: 'recommended',
     releaseNotes: [
-      'مركز تقارير استراتيجي بتصميم بطاقات تنفيذية موحدة',
-      'شاشة ترحيبية انسيابية (Splash Screen) وخطوط آبل الرسمية',
-      'إضافة تقارير الأرباح والهوامش وأعمار الديون والوردية وحساب الموردين'
+      'إصلاح شاشة الخطأ في سجل الفواتير ومركز التقارير',
+      'إصلاح المزامنة الثنائية الاتجاه بشكل كامل',
+      'التطبيق يُحدَّث تلقائياً من السحابة عند كل فتح'
     ],
-    downloadUrl: 'https://github.com/amerfathi/khodar-pos/releases/download/v2.6.1/KhodarPOS.apk',
+    downloadUrl: `https://github.com/amerfathi/khodar-pos/releases/download/v${CURRENT_VERSION}/KhodarPOS.apk`,
     fileSizeBytes: 5577618,
-    publishedAt: '2026-09-20T00:00:00Z'
+    publishedAt: '2026-09-21T00:00:00Z'
   },
   ios: {
-    version: '2.5.0',
-    minimumVersion: '2.2.0',
+    version: CURRENT_VERSION,
+    minimumVersion: MINIMUM_VERSION,
     updateType: 'recommended',
     releaseNotes: [
-      'نظام استرداد كلمة المرور وتأمين الحسابات',
-      'دعم كامل كتطبيق PWA لشاشات iPhone و iPad'
+      'إصلاح شاشة الخطأ في سجل الفواتير ومركز التقارير',
+      'تحديثات تلقائية عبر PWA'
     ],
     downloadUrl: 'https://khodar-pos.pages.dev',
     fileSizeBytes: 1200000,
-    publishedAt: '2026-09-19T00:00:00Z'
+    publishedAt: '2026-09-21T00:00:00Z'
   }
 };
+// ─────────────────────────────────────────────────────────────────────────────
 
 function compareSemver(v1, v2) {
   const p1 = (v1 || '0.0.0').split('.').map(n => parseInt(n, 10) || 0);
@@ -77,20 +89,35 @@ export async function onRequestGet(context) {
 
   let release = null;
 
-  // 1. Try fetching from Cloudflare D1
+  // ── 1. Try D1 database (source of truth for live releases) ──────────────────
   if (env && env.DB) {
     try {
+      // Ensure table exists (idempotent)
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS app_releases (
+          id TEXT PRIMARY KEY,
+          platform TEXT NOT NULL,
+          version TEXT NOT NULL,
+          minimum_version TEXT NOT NULL DEFAULT '2.2.0',
+          status TEXT NOT NULL DEFAULT 'published',
+          update_type TEXT NOT NULL DEFAULT 'recommended',
+          release_notes TEXT,
+          download_url TEXT,
+          file_size_bytes INTEGER DEFAULT 0,
+          published_at TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      `).run();
+
       const { results } = await env.DB.prepare(
         "SELECT * FROM app_releases WHERE platform = ? AND status = 'published'"
       ).bind(platform).all();
 
       if (results && results.length > 0) {
-        // Sort by semantic version descending so the true newest version always wins regardless of date format
         results.sort((a, b) => compareSemver(b.version, a.version));
         const row = results[0];
-
         let notes = [];
-        try { notes = JSON.parse(row.release_notes); } catch (e) { notes = [row.release_notes]; }
+        try { notes = JSON.parse(row.release_notes); } catch (e) { notes = [row.release_notes || '']; }
         release = {
           version: row.version,
           minimumVersion: row.minimum_version,
@@ -102,19 +129,21 @@ export async function onRequestGet(context) {
         };
       }
     } catch (e) {
-      // D1 query failed; will use FALLBACK_RELEASES
+      // D1 unavailable — fall through to hardcoded fallback
     }
   }
 
+  // ── 2. Fallback to hardcoded release data ───────────────────────────────────
   if (!release) {
     release = FALLBACK_RELEASES[platform] || FALLBACK_RELEASES.web;
   }
 
+  // ── 3. Compute update availability ─────────────────────────────────────────
   const isAvailable = compareSemver(release.version, currentVersion) > 0;
   const isBelowMin = compareSemver(currentVersion, release.minimumVersion) < 0;
   const isRequired = isBelowMin || release.updateType === 'required';
 
-  const responsePayload = {
+  return new Response(JSON.stringify({
     platform,
     currentVersion,
     latestVersion: release.version,
@@ -126,9 +155,7 @@ export async function onRequestGet(context) {
     downloadUrl: release.downloadUrl,
     fileSizeBytes: release.fileSizeBytes,
     publishedAt: release.publishedAt
-  };
-
-  return new Response(JSON.stringify(responsePayload), {
+  }), {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Access-Control-Allow-Origin': '*',
