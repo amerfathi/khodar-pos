@@ -17,6 +17,11 @@ on:
         required: true
         default: '0'
         type: string
+      windows_staging_version:
+        description: Higher semver for a non-publishing Windows upgrade test only
+        required: true
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -73,7 +78,13 @@ jobs:
       - run: npm ci
       - name: Verify requested version
         shell: pwsh
-        run: if ((Get-Content package.json | ConvertFrom-Json).version -ne '${{ inputs.version }}') { exit 1 }
+        env:
+          VERSION: "${{ inputs.version }}"
+          STAGING_VERSION: "${{ inputs.windows_staging_version }}"
+          PUBLISH: "${{ inputs.publish }}"
+        run: |
+          if ((Get-Content package.json | ConvertFrom-Json).version -ne $env:VERSION) { exit 1 }
+          if ($env:STAGING_VERSION -and ($env:STAGING_VERSION -notmatch '^\d+\.\d+\.\d+$' -or $env:PUBLISH -eq 'true')) { exit 1 }
       - name: Restore encrypted updater signing key
         shell: pwsh
         env:
@@ -82,13 +93,22 @@ jobs:
           if (-not $env:PRIVATE_KEY) { throw 'Updater signing key is missing' }
           [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'release-private-key.pem'), $env:PRIVATE_KEY)
       - name: Build Windows installer
-        run: npm run electron:build
+        shell: pwsh
+        env: { STAGING_VERSION: "${{ inputs.windows_staging_version }}" }
+        run: |
+          if ($env:STAGING_VERSION) {
+            node scripts/verify-release-public-key.cjs
+            npm run build
+            npx electron-builder --win --publish never --config.extraMetadata.version=$env:STAGING_VERSION
+          } else {
+            npm run electron:build
+          }
       - name: Sign update manifest
         shell: pwsh
         env:
           BRRAKA_RELEASE_PRIVATE_KEY_FILE: "${{ runner.temp }}/release-private-key.pem"
           BRRAKA_RELEASE_PRIVATE_KEY_PASSPHRASE: "${{ secrets.BRRAKA_RELEASE_PRIVATE_KEY_PASSPHRASE }}"
-        run: npm run release:sign-windows -- '${{ inputs.version }}' 'dist-electron\KhodarPOS-Setup.exe' 'windows-manifest.json'
+        run: npm run release:sign-windows -- '${{ inputs.windows_staging_version || inputs.version }}' 'dist-electron\KhodarPOS-Setup.exe' 'windows-manifest.json'
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release
