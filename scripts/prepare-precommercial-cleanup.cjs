@@ -35,12 +35,13 @@ const dropOrder = [
   'customer_payments', 'customers', 'branch_inventory', 'products', 'branches',
   'app_releases', 'trial_requests', 'tenants',
 ];
-const migrations = Array.from({ length: 14 }, (_, index) =>
+const migrations = Array.from({ length: 15 }, (_, index) =>
   `${String(index + 1).padStart(4, '0')}_${[
     'initial_schema', 'create_app_releases', 'security_and_runtime_schema',
     'session_revocation', 'sync_sequence', 'recovery_tokens', 'signed_releases',
     'sync_immutable_retry', 'sync_commit_groups', 'sync_group_registry',
     'branch_limit', 'sync_conflict_heads', 'platform_security_audit', 'platform_owner_email_guards',
+    'platform_owner_main_branch',
   ][index]}.sql`
 );
 
@@ -50,6 +51,7 @@ const sql = [
   ...dropOrder.map((table) => `DROP TABLE IF EXISTS ${table};`),
   schema,
   `INSERT INTO tenants (id, company_name, username, password_hash, role, status, expires_at, allowed_branches, phone, notes, store_code, auth_version) VALUES ('tenant-super-admin', 'BRAKA Platform Owner', ${quote(normalizedEmail)}, ${quote(passwordHash)}, 'super_admin', 'active', '2099-12-31', 99, '', 'Pre-commercial clean-state platform owner', 'BRK-000', 1);`,
+  "INSERT INTO branches (id, tenant_id, name, code, phone, address, manager_name, is_main, status) VALUES ('branch-platform-admin', 'tenant-super-admin', 'إدارة المنصة', 'PLATFORM', '', '', '', 1, 'active');",
   "CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);",
   'DELETE FROM d1_migrations;',
   ...migrations.map((name, index) => `INSERT INTO d1_migrations (id, name) VALUES (${index + 1}, ${quote(name)});`),
