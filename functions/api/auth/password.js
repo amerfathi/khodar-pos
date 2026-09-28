@@ -1,12 +1,16 @@
 import { authenticateRequest } from '../../_lib/auth.js';
 import { hashPassword, verifyPassword } from '../../_lib/passwords.js';
 import { json, readJson, badRequest } from '../../_lib/http.js';
+import { changeOwnerCredentials } from './platform-owner.js';
 export async function onRequestPost({ request, env }) {
   const auth = await authenticateRequest(request, env);
   if (auth.error) return auth.error;
-  if (auth.principal.isSuperAdmin) return json({ success: false, error: 'Use Platform Owner security settings' }, 403);
   try {
     const { currentPassword, newPassword } = await readJson(request, 4096);
+    if (auth.principal.isSuperAdmin) return await changeOwnerCredentials(auth, env, {
+      currentPassword, newPassword, confirmPassword: newPassword
+    });
+    if (newPassword === currentPassword) return badRequest('New password must differ from current password');
     const table = auth.principal.type === 'tenant' ? 'tenants' : 'users';
     const row = await env.DB.prepare(`SELECT password_hash FROM ${table} WHERE id = ?`).bind(auth.principal.id).first();
     if (!(await verifyPassword(currentPassword, row.password_hash)).valid) return json({ success: false, error: 'Invalid current password' }, 403);

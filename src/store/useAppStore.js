@@ -2205,7 +2205,13 @@ export function useAppStore(options = {}) {
     return result;
   };
   const changePassword = async (newPassword, currentPassword) => {
-    await requestAccountChange('/api/auth/password', 'POST', { currentPassword, newPassword });
+    if (currentUser?.role === 'super_admin') {
+      await requestAccountChange('/api/auth/platform-owner', 'PATCH', {
+        currentPassword, newPassword, confirmPassword: newPassword
+      });
+    } else {
+      await requestAccountChange('/api/auth/password', 'POST', { currentPassword, newPassword });
+    }
     logout();
     return true;
   };

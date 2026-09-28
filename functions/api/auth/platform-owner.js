@@ -33,7 +33,16 @@ export async function onRequestPatch({ request, env }) {
   if (result.denied) return result.denied;
   const { auth } = result;
   try {
-    const body = await readJson(request, 4096);
+    return await changeOwnerCredentials(auth, env, await readJson(request, 4096));
+  } catch (error) {
+    if (/UNIQUE constraint failed/i.test(String(error?.message || error)))
+      return json({ success: false, error: 'Email is already in use' }, 409);
+    return badRequest(error?.message || 'Invalid platform owner credential change');
+  }
+}
+
+export async function changeOwnerCredentials(auth, env, body) {
+  if (!auth?.principal?.isSuperAdmin) return json({ success: false, error: 'Super administrator permission required' }, 403);
     const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : '';
     const newEmail = typeof body.newEmail === 'string' ? body.newEmail.trim().toLowerCase() : '';
     const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
@@ -42,6 +51,7 @@ export async function onRequestPatch({ request, env }) {
     if (!newEmail && !newPassword) return badRequest('Email or password change is required');
     if (newEmail && (newEmail.length > 254 || !emailPattern.test(newEmail))) return badRequest('A valid owner email is required');
     if (newPassword !== confirmPassword) return badRequest('New password confirmation does not match');
+    if (newPassword && newPassword === currentPassword) return badRequest('New password must differ from current password');
 
     const owner = await env.DB.prepare(
       "SELECT id,username,password_hash,role,status FROM tenants WHERE id=? AND role='super_admin' LIMIT 1"
@@ -71,11 +81,6 @@ export async function onRequestPatch({ request, env }) {
         .bind(eventId, auth.principal.tenantId, auth.principal.id, 'platform_owner_credentials_changed', JSON.stringify({ fields, allSessionsRevoked: true }))
     ]);
     return json({ success: true, signInRequired: true, changed: fields });
-  } catch (error) {
-    if (/UNIQUE constraint failed/i.test(String(error?.message || error)))
-      return json({ success: false, error: 'Email is already in use' }, 409);
-    return badRequest(error?.message || 'Invalid platform owner credential change');
-  }
 }
 
 function safeMetadata(value) {

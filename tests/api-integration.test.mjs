@@ -645,7 +645,8 @@ test('platform owner securely initializes and changes email/password with audit 
   assert.equal((await call('/api/auth/me','GET',undefined,platform)).status,401);
   assert.equal((await call('/api/auth/reset','POST',{resetToken:initialReset.token,newPassword:initialPassword})).status,400);
   platform=await login('PLATFORM','platform',initialPassword,'platform-owner-initial-login');
-  assert.equal((await call('/api/auth/password','POST',{currentPassword:initialPassword,newPassword:crypto.randomUUID()+'Aa!'},platform)).status,403);
+  assert.equal((await call('/api/auth/password','POST',{currentPassword:'wrong-password',newPassword:crypto.randomUUID()+'Aa!'},platform)).status,403);
+  assert.equal((await call('/api/auth/password','POST',{currentPassword:initialPassword,newPassword:initialPassword},platform)).status,400);
   assert.equal((await call('/api/tenants','PATCH',{id:'PLATFORM',username:'bypass@example.test'},platform)).status,403);
 
   const profileResponse=await call('/api/auth/platform-owner','GET',undefined,platform);
@@ -687,6 +688,20 @@ test('platform owner securely initializes and changes email/password with audit 
   assert.equal(credentialEvent.metadata.allSessionsRevoked,true);
   assert.equal(JSON.stringify(credentialEvent).includes(replacementPassword),false);
   assert.equal((await db.prepare("SELECT role FROM tenants WHERE id='PLATFORM'").first()).role,'super_admin');
+
+  const genericPassword=crypto.randomUUID()+'Generic!Aa';
+  const genericChange=await call('/api/auth/password','POST',{
+    currentPassword:replacementPassword,newPassword:genericPassword
+  },platform);
+  assert.equal(genericChange.status,200,await genericChange.text());
+  assert.equal((await call('/api/auth/me','GET',undefined,platform)).status,401);
+  assert.equal((await call('/api/tenants/lookup','POST',{
+    storeCode:'PLATFORM',username:'owner@example.test',password:replacementPassword
+  },undefined,'platform-owner-generic-old-login')).status,401);
+  platform=await login('PLATFORM','owner@example.test',genericPassword,'platform-owner-generic-new-login');
+  const afterGeneric=await call('/api/auth/platform-owner','GET',undefined,platform).then(response=>response.json());
+  assert.equal(afterGeneric.events.some(event=>event.type==='platform_owner_credentials_changed' &&
+    event.metadata.fields.length===1 && event.metadata.fields[0]==='password'),true);
 });
 test('plaintext records never authenticate', async () => {
   await db.prepare("UPDATE tenants SET password_hash=? WHERE id='B'").bind(pass).run();
