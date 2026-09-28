@@ -633,6 +633,61 @@ test('logout revokes token server-side', async () => {
   assert.equal((await call('/api/auth/logout','POST',{},a)).status,200);
   assert.equal((await call('/api/users?tenantId=A','GET',undefined,a)).status,401);
 });
+test('platform owner securely initializes and changes email/password with audit and session revocation', async () => {
+  assert.equal((await call('/api/auth/platform-owner','GET',undefined,b)).status,403);
+  assert.equal((await call('/api/auth/platform-owner','PATCH',{currentPassword:pass,newEmail:'blocked@example.test'},b)).status,403);
+
+  const initialReset=legacyReset.prepareLegacyReset({tenantId:'PLATFORM',principalType:'tenant',principalId:'PLATFORM'});
+  assert.equal(initialReset.sql.includes(initialReset.token),false);
+  assert.equal((await db.prepare(initialReset.sql).run()).meta.changes,1);
+  const initialPassword=crypto.randomUUID()+'Init!Aa';
+  assert.equal((await call('/api/auth/reset','POST',{resetToken:initialReset.token,newPassword:initialPassword})).status,200);
+  assert.equal((await call('/api/auth/me','GET',undefined,platform)).status,401);
+  assert.equal((await call('/api/auth/reset','POST',{resetToken:initialReset.token,newPassword:initialPassword})).status,400);
+  platform=await login('PLATFORM','platform',initialPassword);
+  assert.equal((await call('/api/auth/password','POST',{currentPassword:initialPassword,newPassword:crypto.randomUUID()+'Aa!'},platform)).status,403);
+  assert.equal((await call('/api/tenants','PATCH',{id:'PLATFORM',username:'bypass@example.test'},platform)).status,403);
+
+  const profileResponse=await call('/api/auth/platform-owner','GET',undefined,platform);
+  assert.equal(profileResponse.status,200);
+  const profile=await profileResponse.json();
+  assert.equal(profile.owner.email,'platform');
+  assert.equal(profile.events.some(event=>event.type==='platform_owner_password_initialized'),true);
+  assert.equal(JSON.stringify(profile.events).includes(initialPassword),false);
+
+  assert.equal((await call('/api/auth/platform-owner','PATCH',{
+    currentPassword:'incorrect-current-password',newEmail:'owner@example.test'
+  },platform)).status,403);
+  assert.equal((await call('/api/auth/platform-owner','PATCH',{
+    currentPassword:initialPassword,newPassword:'AnotherStrongPassword!24',confirmPassword:'mismatch'
+  },platform)).status,400);
+  assert.equal((await call('/api/auth/platform-owner','PATCH',{
+    currentPassword:initialPassword,newEmail:'ownera'
+  },platform)).status,400);
+  await db.prepare("INSERT INTO users(id,tenant_id,name,username,password_hash,role,status,permissions_json) VALUES('email-conflict','A','Conflict','taken@example.test',?,'cashier','active','{}')")
+    .bind(await hashPassword(crypto.randomUUID()+'Aa!')).run();
+  assert.equal((await call('/api/auth/platform-owner','PATCH',{
+    currentPassword:initialPassword,newEmail:'taken@example.test'
+  },platform)).status,409);
+
+  const replacementPassword=crypto.randomUUID()+'Next!Aa';
+  const changed=await call('/api/auth/platform-owner','PATCH',{
+    currentPassword:initialPassword,newEmail:'owner@example.test',
+    newPassword:replacementPassword,confirmPassword:replacementPassword
+  },platform);
+  assert.equal(changed.status,200,await changed.text());
+  assert.equal((await call('/api/auth/me','GET',undefined,platform)).status,401);
+  assert.equal((await call('/api/tenants/lookup','POST',{storeCode:'PLATFORM',username:'platform',password:initialPassword})).status,401);
+  platform=await login('PLATFORM','owner@example.test',replacementPassword);
+  const me=await call('/api/auth/me','GET',undefined,platform).then(response=>response.json());
+  assert.equal(me.user.role,'super_admin');
+  const events=await call('/api/auth/platform-owner','GET',undefined,platform).then(response=>response.json());
+  const credentialEvent=events.events.find(event=>event.type==='platform_owner_credentials_changed');
+  assert.deepEqual(credentialEvent.metadata.fields,['email','password']);
+  assert.equal(credentialEvent.metadata.allSessionsRevoked,true);
+  assert.equal(JSON.stringify(credentialEvent).includes(replacementPassword),false);
+  assert.equal((await db.prepare("SELECT role FROM tenants WHERE id='PLATFORM'").first()).role,'super_admin');
+});
 test('plaintext records never authenticate', async () => {
   await db.prepare("UPDATE tenants SET password_hash=? WHERE id='B'").bind(pass).run();
   assert.equal((await call('/api/tenants/lookup','POST',{storeCode:'B',username:'ownerB',password:pass})).status,401);

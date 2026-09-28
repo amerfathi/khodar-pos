@@ -28,19 +28,19 @@ const bootstrapSecret = crypto.randomBytes(48).toString('base64url');
 const passwordHash = bcrypt.hashSync(bootstrapSecret, 12);
 
 const dropOrder = [
-  'password_reset_tokens', 'sessions', 'request_limits', 'sync_conflict_heads',
+  'platform_security_events', 'password_reset_tokens', 'sessions', 'request_limits', 'sync_conflict_heads',
   'sync_commit_groups', 'sync_events_v2', 'sync_events', 'tenant_backups', 'users',
   'partner_drawings', 'partners', 'worker_transactions', 'workers', 'expenses',
   'purchases', 'invoice_items', 'invoices', 'supplier_payments', 'suppliers',
   'customer_payments', 'customers', 'branch_inventory', 'products', 'branches',
   'app_releases', 'trial_requests', 'tenants',
 ];
-const migrations = Array.from({ length: 12 }, (_, index) =>
+const migrations = Array.from({ length: 14 }, (_, index) =>
   `${String(index + 1).padStart(4, '0')}_${[
     'initial_schema', 'create_app_releases', 'security_and_runtime_schema',
     'session_revocation', 'sync_sequence', 'recovery_tokens', 'signed_releases',
     'sync_immutable_retry', 'sync_commit_groups', 'sync_group_registry',
-    'branch_limit', 'sync_conflict_heads',
+    'branch_limit', 'sync_conflict_heads', 'platform_security_audit', 'platform_owner_email_guards',
   ][index]}.sql`
 );
 

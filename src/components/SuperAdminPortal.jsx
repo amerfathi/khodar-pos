@@ -23,7 +23,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   } = store;
 
   // Navigation & Modal State
-  const [activeTab, setActiveTab] = useState('tenants'); // 'tenants' | 'releases' | 'trials'
+  const [activeTab, setActiveTab] = useState('tenants'); // 'tenants' | 'security' | 'releases' | 'trials'
   const [isSyncingTenants, setIsSyncingTenants] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -34,6 +34,10 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
   const [resettingTenant, setResettingTenant] = useState(null);
   const [newTenantPass, setNewTenantPass] = useState('');
   const [resetSuccessMsg, setResetSuccessMsg] = useState('');
+  const [ownerSecurity, setOwnerSecurity] = useState({ email: '', events: [] });
+  const [ownerSecurityForm, setOwnerSecurityForm] = useState({ currentPassword: '', newEmail: '', newPassword: '', confirmPassword: '' });
+  const [ownerSecurityError, setOwnerSecurityError] = useState('');
+  const [ownerSecurityLoading, setOwnerSecurityLoading] = useState(false);
 
   // Comprehensive Edit Tenant State (تعديل شامل لكافة بيانات المشترك)
   const [editingTenant, setEditingTenant] = useState(null);
@@ -103,6 +107,43 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
       fetchCloudTrials();
     }
   }, [isOpen, activeTab, fetchCloudTrials]);
+
+  const fetchOwnerSecurity = useCallback(async () => {
+    setOwnerSecurityLoading(true);
+    setOwnerSecurityError('');
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/platform-owner`);
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'تعذر تحميل إعدادات مالك المنصة');
+      setOwnerSecurity({ email: result.owner.email, events: result.events || [] });
+      setOwnerSecurityForm(form => ({ ...form, newEmail: result.owner.email }));
+    } catch (error) { setOwnerSecurityError(error.message); }
+    finally { setOwnerSecurityLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'security') void fetchOwnerSecurity();
+  }, [isOpen, activeTab, fetchOwnerSecurity]);
+
+  const handleOwnerCredentialChange = async (event) => {
+    event.preventDefault();
+    setOwnerSecurityError('');
+    if (ownerSecurityForm.newPassword !== ownerSecurityForm.confirmPassword) {
+      setOwnerSecurityError('كلمة المرور الجديدة وتأكيدها غير متطابقين');
+      return;
+    }
+    setOwnerSecurityLoading(true);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/platform-owner`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ownerSecurityForm)
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'تعذر تحديث بيانات المالك');
+      alert('تم تحديث بيانات مالك المنصة وإبطال جميع الجلسات. سجّل الدخول بالبيانات الجديدة.');
+      store.logout();
+    } catch (error) { setOwnerSecurityError(error.message); setOwnerSecurityLoading(false); }
+  };
 
   // Merge store local trial requests and cloud D1 requests seamlessly
   const combinedTrialRequests = useMemo(() => {
@@ -369,6 +410,16 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                   {combinedTrialRequests.length}
                 </span>
               )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('security')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'security' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Key size={13} />
+              أمان حساب المالك
             </button>
             <button
               type="button"
@@ -744,6 +795,58 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
             </div>
           </div>
             </>
+          )}
+
+          {activeTab === 'security' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <form onSubmit={handleOwnerCredentialChange} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">بيانات دخول مالك المنصة</h3>
+                  <p className="text-[11px] text-slate-500 mt-1">يتم حفظ البريد وكلمة المرور في D1 فقط. أي تغيير يبطل جميع الجلسات.</p>
+                </div>
+                {ownerSecurityError && <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl font-bold">{ownerSecurityError}</div>}
+                <label className="block font-bold text-slate-700">البريد الإلكتروني
+                  <input type="email" autoComplete="username" required value={ownerSecurityForm.newEmail}
+                    onChange={e => setOwnerSecurityForm(form => ({ ...form, newEmail: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-xl" dir="ltr" />
+                </label>
+                <label className="block font-bold text-slate-700">كلمة المرور الحالية للتأكيد
+                  <input type="password" autoComplete="current-password" required value={ownerSecurityForm.currentPassword}
+                    onChange={e => setOwnerSecurityForm(form => ({ ...form, currentPassword: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-xl" dir="ltr" />
+                </label>
+                <label className="block font-bold text-slate-700">كلمة المرور الجديدة (اتركها فارغة لتغيير البريد فقط)
+                  <input type="password" autoComplete="new-password" minLength={12} value={ownerSecurityForm.newPassword}
+                    onChange={e => setOwnerSecurityForm(form => ({ ...form, newPassword: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-xl" dir="ltr" />
+                </label>
+                <label className="block font-bold text-slate-700">تأكيد كلمة المرور الجديدة
+                  <input type="password" autoComplete="new-password" value={ownerSecurityForm.confirmPassword}
+                    onChange={e => setOwnerSecurityForm(form => ({ ...form, confirmPassword: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2.5 border border-slate-200 rounded-xl" dir="ltr" />
+                </label>
+                <button type="submit" disabled={ownerSecurityLoading}
+                  className="w-full py-2.5 bg-emerald-600 disabled:opacity-50 text-white rounded-xl font-black flex items-center justify-center gap-2">
+                  <ShieldCheck size={16} />{ownerSecurityLoading ? 'جارٍ التحقق والحفظ...' : 'حفظ آمن وإبطال الجلسات'}
+                </button>
+              </form>
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
+                <h3 className="text-sm font-black text-slate-900 mb-3">سجل أمان بيانات الدخول</h3>
+                <p className="text-[11px] text-slate-500 mb-4">لا يحتوي هذا السجل كلمات مرور أو رموزاً أو مفاتيح سرية.</p>
+                <div className="space-y-2">
+                  {ownerSecurity.events.length === 0 && <div className="text-slate-400 py-6 text-center">لا توجد تغييرات مسجلة بعد</div>}
+                  {ownerSecurity.events.map(item => (
+                    <div key={item.id} className="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-bold text-slate-800">{item.type === 'platform_owner_password_initialized' ? 'إعداد كلمة المرور الأولى' : 'تحديث بيانات دخول المالك'}</div>
+                        <div className="text-[10px] text-slate-500">الحقول: {(item.metadata?.fields || ['password']).join('، ')}</div>
+                      </div>
+                      <time className="font-mono text-[10px] text-slate-400" dir="ltr">{item.createdAt}</time>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Tab 2: Multi-Platform Release Management */}

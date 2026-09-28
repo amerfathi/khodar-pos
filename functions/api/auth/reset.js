@@ -23,7 +23,10 @@ export async function onRequestPost({ request, env }) {
       accountUpdate,
       env.DB.prepare("UPDATE sessions SET revoked_at=datetime('now') WHERE tenant_id=? AND principal_id=? AND principal_type=? AND revoked_at IS NULL")
         .bind(row.tenant_id,row.principal_id,row.principal_type),
-      env.DB.prepare("UPDATE password_reset_tokens SET used_at=datetime('now') WHERE token_hash=? AND used_at IS NULL").bind(tokenHash)
+      env.DB.prepare("UPDATE password_reset_tokens SET used_at=datetime('now') WHERE token_hash=? AND used_at IS NULL").bind(tokenHash),
+      env.DB.prepare(`INSERT INTO platform_security_events(id,tenant_id,actor_principal_id,event_type,metadata_json)
+        SELECT ?,?,?,?,? WHERE ?='tenant' AND EXISTS(SELECT 1 FROM tenants WHERE id=? AND role='super_admin')`)
+        .bind(crypto.randomUUID(),row.tenant_id,row.principal_id,'platform_owner_password_initialized',JSON.stringify({ allSessionsRevoked: true }),row.principal_type,row.principal_id)
     ]);
     return results[0].meta.changes ? json({success:true}) : badRequest('Invalid or consumed reset token');
   } catch { return badRequest('Invalid reset request'); }

@@ -1,4 +1,4 @@
--- EMPTY DATABASE BOOTSTRAP ONLY. Generated from migrations 0001 through 0011.
+-- EMPTY DATABASE BOOTSTRAP ONLY. Generated from migrations 0001 through 0014.
 -- Existing databases: use the D1 migration ledger; do not rerun this file.
 -- ====================================================================
 -- Cloudflare D1 SQL Schema for Khodar POS (سوق الخضار - كاشير ومحاسبة)
@@ -477,3 +477,33 @@ BEGIN
  SELECT NEW.tenant_id, expected.key, NEW.id FROM json_each(NEW.preconditions_json) expected WHERE 1
  ON CONFLICT(tenant_id, conflict_key) DO UPDATE SET last_event_id = excluded.last_event_id;
 END;
+
+CREATE TABLE platform_security_events (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  actor_principal_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_platform_security_events_tenant_created
+  ON platform_security_events(tenant_id, created_at DESC);
+
+CREATE TRIGGER platform_owner_email_unique_on_tenant_insert
+BEFORE INSERT ON tenants
+WHEN EXISTS (SELECT 1 FROM tenants owner WHERE owner.role='super_admin' AND LOWER(owner.username)=LOWER(NEW.username))
+  OR (NEW.role='super_admin' AND EXISTS (SELECT 1 FROM users WHERE LOWER(username)=LOWER(NEW.username)))
+BEGIN SELECT RAISE(ABORT, 'PLATFORM_OWNER_EMAIL_CONFLICT'); END;
+CREATE TRIGGER platform_owner_email_unique_on_tenant_update
+BEFORE UPDATE OF username,role ON tenants
+WHEN EXISTS (SELECT 1 FROM tenants owner WHERE owner.role='super_admin' AND owner.id<>NEW.id AND LOWER(owner.username)=LOWER(NEW.username))
+  OR (NEW.role='super_admin' AND EXISTS (SELECT 1 FROM users WHERE LOWER(username)=LOWER(NEW.username)))
+BEGIN SELECT RAISE(ABORT, 'PLATFORM_OWNER_EMAIL_CONFLICT'); END;
+CREATE TRIGGER platform_owner_email_unique_on_user_insert
+BEFORE INSERT ON users
+WHEN EXISTS (SELECT 1 FROM tenants owner WHERE owner.role='super_admin' AND LOWER(owner.username)=LOWER(NEW.username))
+BEGIN SELECT RAISE(ABORT, 'PLATFORM_OWNER_EMAIL_CONFLICT'); END;
+CREATE TRIGGER platform_owner_email_unique_on_user_update
+BEFORE UPDATE OF username ON users
+WHEN EXISTS (SELECT 1 FROM tenants owner WHERE owner.role='super_admin' AND LOWER(owner.username)=LOWER(NEW.username))
+BEGIN SELECT RAISE(ABORT, 'PLATFORM_OWNER_EMAIL_CONFLICT'); END;

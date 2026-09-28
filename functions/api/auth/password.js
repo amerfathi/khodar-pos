@@ -4,6 +4,7 @@ import { json, readJson, badRequest } from '../../_lib/http.js';
 export async function onRequestPost({ request, env }) {
   const auth = await authenticateRequest(request, env);
   if (auth.error) return auth.error;
+  if (auth.principal.isSuperAdmin) return json({ success: false, error: 'Use Platform Owner security settings' }, 403);
   try {
     const { currentPassword, newPassword } = await readJson(request, 4096);
     const table = auth.principal.type === 'tenant' ? 'tenants' : 'users';

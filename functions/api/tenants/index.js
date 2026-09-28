@@ -186,6 +186,13 @@ export async function onRequestPatch(context) {
       });
     }
 
+    const target = await env.DB.prepare('SELECT role FROM tenants WHERE id = ?').bind(id).first();
+    if (target?.role === 'super_admin') {
+      return new Response(JSON.stringify({ success: false, error: 'Use the authenticated Platform Owner security settings to change this account' }), {
+        status: 403, headers: CORS_HEADERS
+      });
+    }
+
     const updates = [];
     const bindings = [];
 

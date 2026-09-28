@@ -13,10 +13,12 @@ import * as password from '../functions/api/auth/password.js';
 import * as me from '../functions/api/auth/me.js';
 import * as reset from '../functions/api/auth/reset.js';
 import * as recovery from '../functions/api/auth/recovery-token.js';
+import * as platformOwner from '../functions/api/auth/platform-owner.js';
 import { onRequest } from '../functions/api/_middleware.js';
 const routes = { '/api/auth/me': me, '/api/auth/reset': reset, '/api/auth/recovery-token': recovery, '/api/tenants/lookup': login, '/api/users': users, '/api/tenants': tenants,
   '/api/sync/push': push, '/api/sync/pull': pull, '/api/branches': branches, '/api/backup': backup,
-  '/api/trial-requests': trials, '/api/releases': releases, '/api/auth/logout': logout, '/api/auth/password': password };
+  '/api/trial-requests': trials, '/api/releases': releases, '/api/auth/logout': logout, '/api/auth/password': password,
+  '/api/auth/platform-owner': platformOwner };
 export default {
   async fetch(request, env) {
     const handler = routes[new URL(request.url).pathname]?.['onRequest' + request.method[0] + request.method.slice(1).toLowerCase()];
