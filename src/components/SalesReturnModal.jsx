@@ -7,6 +7,7 @@ import { formatCurrency, formatWeight } from '../utils/formatters';
 
 export default function SalesReturnModal({ invoice, store, onClose, onSuccess }) {
   const { recordSalesReturn, settings, customers } = store;
+  const [isSaving, setIsSaving] = useState(false);
 
   // Find customer for this invoice if any
   const customer = (customers || []).find(c => c.id === invoice.customerId);
@@ -76,15 +77,17 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
 
   const roundedTotalRefund = Math.round(totalRefundAmount * 100) / 100;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
     if (itemsToReturn.length === 0 || roundedTotalRefund <= 0) {
       alert('يرجى تحديد وزن الصنف المراد إرجاعه أولاً');
       return;
     }
 
+    setIsSaving(true);
     try {
-      const newReturn = recordSalesReturn({
+      const newReturn = await recordSalesReturn({
         invoiceId: invoice.id,
         returnedItems: itemsToReturn.map(it => ({
           productId: it.productId,
@@ -104,7 +107,7 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
       onClose();
     } catch (err) {
       alert(`حدث خطأ أثناء حفظ المردود: ${err.message}`);
-    }
+    } finally { setIsSaving(false); }
   };
 
   return (
@@ -321,7 +324,7 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
 
             <button
               type="submit"
-              disabled={roundedTotalRefund <= 0}
+              disabled={isSaving || roundedTotalRefund <= 0}
               className={`px-5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-xs ${
                 roundedTotalRefund > 0 
                   ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer active:scale-95' 

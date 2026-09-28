@@ -4,6 +4,7 @@ import { Lock, KeyRound, Check, X, ShieldCheck, AlertCircle, Eye, EyeOff } from 
 export default function ChangePasswordModal({ isOpen, onClose, store }) {
   const { currentUser, changePassword } = store;
 
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -12,7 +13,7 @@ export default function ChangePasswordModal({ isOpen, onClose, store }) {
 
   if (!isOpen || !currentUser) return null;
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
@@ -22,8 +23,8 @@ export default function ChangePasswordModal({ isOpen, onClose, store }) {
       return;
     }
 
-    if (newPassword.length < 4) {
-      setErrorMessage('كلمة المرور يجب أن لا تقل عن 4 خانات');
+    if (newPassword.length < 12) {
+      setErrorMessage('كلمة المرور يجب أن لا تقل عن 12 خانة');
       return;
     }
 
@@ -32,7 +33,10 @@ export default function ChangePasswordModal({ isOpen, onClose, store }) {
       return;
     }
 
-    const success = changePassword(newPassword);
+    let success;
+    try { success = await changePassword(newPassword, currentPassword); }
+    catch (error) { setErrorMessage(error.message); return; }
+    setCurrentPassword('');
     if (success) {
       setSuccessMessage('تم تغيير كلمة المرور بنجاح!');
       setTimeout(() => {
@@ -97,6 +101,7 @@ export default function ChangePasswordModal({ isOpen, onClose, store }) {
             </div>
           )}
 
+          <label>كلمة المرور الحالية<input type="password" autoComplete="current-password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="w-full border rounded p-2" /></label>
           {/* New Password Input */}
           <div>
             <label className="block text-[11px] font-bold text-slate-700 mb-1">كلمة المرور الجديدة</label>

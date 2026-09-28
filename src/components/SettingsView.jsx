@@ -31,6 +31,7 @@ export default function SettingsView({
     importBackupJSON, 
     resetToSampleData,
     syncService,
+    backupStatus = { status: 'idle', error: null },
     users = [],
     addUser,
     updateUser,
@@ -115,25 +116,21 @@ export default function SettingsView({
     }
   }, [syncService]);
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     if (e) e.preventDefault();
-    updateSettings(form);
-    setSaveSuccess(true);
-    setTimeout(() => {
-      setSaveSuccess(false);
-    }, 2000);
+    try {
+      await updateSettings(form);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    } catch (error) { alert('تعذر حفظ الإعدادات: ' + error.message); }
   };
 
   const handleManualCloudSync = async () => {
     setIsCloudSyncing(true);
     setCloudSyncMessage(null);
     try {
-      if (syncService) {
-        await syncService.flushQueue();
-        if (currentUser?.tenantId) {
-          await syncService.pullUpdates(currentUser.tenantId);
-        }
-      }
+      const result = await store.syncNow();
+      if (!result.success) throw new Error(result.error || 'لم تكتمل المزامنة');
       setCloudSyncMessage({ type: 'success', text: 'تمت المزامنة السحابية بنجاح مع Cloudflare D1!' });
     } catch (err) {
       setCloudSyncMessage({ type: 'error', text: 'تعذرت المزامنة: ' + err.message });
@@ -148,11 +145,7 @@ export default function SettingsView({
     setCloudSyncMessage(null);
     try {
       if (syncService && exportBackupJSON) {
-        const fullBackup = {
-          settings: form,
-          exportedAt: new Date().toISOString(),
-          version: '2.5.0'
-        };
+        const fullBackup = store.getBackupSnapshot();
         const ok = await syncService.uploadBackupSnapshot(currentUser?.tenantId || 'tenant-demo', fullBackup);
         if (ok) {
           setCloudSyncMessage({ type: 'success', text: 'تم حفظ نسخة احتياطية سحابية آمنة في Cloudflare!' });
@@ -173,15 +166,14 @@ export default function SettingsView({
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const content = event.target?.result;
       if (typeof content === 'string') {
-        const res = importBackupJSON(content);
-        if (res.success) {
-          alert('تم استيراد البيانات والنسخة بنجاح!');
-        } else {
-          alert('خطأ في استيراد النسخة: ' + res.error);
-        }
+        try {
+          const res = await importBackupJSON(content);
+          if (res.success) alert('تم استيراد البيانات والنسخة بنجاح!');
+          else alert('خطأ في استيراد النسخة: ' + res.error);
+        } catch (error) { alert('تعذر استيراد النسخة: ' + error.message); }
       }
     };
     reader.readAsText(file);
@@ -251,7 +243,7 @@ export default function SettingsView({
     }));
   };
 
-  const handleSaveUser = (e) => {
+  const handleSaveUser = async (e) => {
     e.preventDefault();
     setUserError('');
     setUserSuccess('');
@@ -259,13 +251,13 @@ export default function SettingsView({
     try {
       if (!userForm.name.trim()) throw new Error('يرجى كتابة الاسم الكامل للمستخدم');
       if (!userForm.username.trim()) throw new Error('يرجى كتابة اسم المستخدم للدخول');
-      if (!userForm.password.trim()) throw new Error('يرجى تعيين كلمة المرور');
+      if (!editingUser && !userForm.password.trim()) throw new Error('يرجى تعيين كلمة المرور');
 
       if (editingUser) {
-        updateUser(editingUser.id, userForm);
+        await updateUser(editingUser.id, userForm);
         setUserSuccess('تم تحديث بيانات المستخدم والصلاحيات بنجاح!');
       } else {
-        addUser(userForm);
+        await addUser(userForm);
         setUserSuccess('تم إضافة المستخدم وتفعيل صلاحياته بنجاح!');
       }
 
@@ -278,14 +270,14 @@ export default function SettingsView({
     }
   };
 
-  const handleDeleteUserClick = (u) => {
+  const handleDeleteUserClick = async (u) => {
     if (u.id === currentUser?.id) {
       alert('لا يمكنك حذف الحساب المسجل به دخولك حالياً!');
       return;
     }
     if (window.confirm(`هل أنت متأكد من حذف المستخدم (${u.name}) نهائياً؟ لن يتمكن من تسجيل الدخول بعد الآن.`)) {
       try {
-        deleteUser(u.id);
+        await deleteUser(u.id);
       } catch (err) {
         alert(err.message);
       }
@@ -298,7 +290,7 @@ export default function SettingsView({
       return;
     }
     const newStatus = u.status === 'active' ? 'inactive' : 'active';
-    updateUser(u.id, { status: newStatus });
+    void updateUser(u.id, { status: newStatus }).catch(err => alert(err.message));
   };
 
   const subTabs = [
@@ -575,7 +567,7 @@ export default function SettingsView({
                       <label className="block text-xs font-bold text-slate-700 mb-1">الرقم الضريبي للمنشأة (15 رقماً)</label>
                       <input
                         type="text"
-                        maxLength="15"
+                        maxLength={15}
                         value={form.taxNumber || ''}
                         onChange={(e) => setForm(prev => ({ ...prev, taxNumber: e.target.value.replace(/\D/g, '') }))}
                         className="w-full px-3.5 py-2.5 bg-slate-50/70 border border-slate-200 rounded-xl font-mono text-navy-850 focus:bg-white focus:ring-2 focus:ring-primary-500 transition-all text-xs"
@@ -1495,6 +1487,21 @@ export default function SettingsView({
                     يمكنك تصدير نسخة كاملة من فواتيرك وحساباتك كملف آمن على جهازك واستيرادها في أي وقت.
                   </p>
 
+                  <div role="status" className={`p-3 rounded-xl text-xs border ${
+                    backupStatus.status === 'saved' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                    backupStatus.status === 'retrying' ? 'bg-rose-50 text-rose-800 border-rose-200' :
+                    'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}>
+                    <span className="font-bold">حالة النسخة السحابية التلقائية: </span>
+                    {{
+                      idle: 'البيانات محفوظة محليًا', pending: 'نسخة جديدة بانتظار الرفع',
+                      uploading: 'جارٍ رفع النسخة', saved: 'تم حفظ النسخة السحابية بنجاح',
+                      retrying: 'فشل الرفع وستتم إعادة المحاولة تلقائيًا'
+                    }[backupStatus.status] || 'حالة النسخ غير معروفة'}
+                    {backupStatus.status === 'retrying' && backupStatus.error ?
+                      <span className="block mt-1">{backupStatus.error}</span> : null}
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
                       type="button"
@@ -1520,9 +1527,10 @@ export default function SettingsView({
                   <div className="pt-3 border-t border-slate-100 text-center">
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         if (window.confirm('تحذير: هل أنت متأكد من رغبتك في استعادة البيانات التجريبية الأولية؟')) {
-                          resetToSampleData();
+                          try { await resetToSampleData(); }
+                          catch (error) { alert(error.message); }
                         }
                       }}
                       className="text-xs text-slate-400 hover:text-rose-600 font-medium underline transition-colors cursor-pointer"

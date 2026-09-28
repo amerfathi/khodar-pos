@@ -3,19 +3,17 @@
  * Cloudflare Pages Function for SuperAdmin Central Trial Requests
  */
 
-const CORS_HEADERS = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
+import { rateLimit } from '../../_lib/rateLimit.js';
+import { authenticateRequest, requireSuperAdmin } from '../../_lib/auth.js';
+import { CORS_HEADERS, json, options } from '../../_lib/http.js';
 
-export async function onRequestOptions() {
-  return new Response(null, { headers: CORS_HEADERS });
-}
+export async function onRequestOptions() { return options(); }
 
 export async function onRequestGet(context) {
-  const { env } = context;
+  const { env, request } = context;
+  const auth = await authenticateRequest(request, env);
+  const authError = requireSuperAdmin(auth);
+  if (authError) return authError;
 
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ success: true, requests: [] }), { headers: CORS_HEADERS });
@@ -61,19 +59,23 @@ export async function onRequestPost(context) {
   }
 
   try {
+    const limited = await rateLimit(request, env, 'trial');
+    if (limited) return limited;
     const body = await request.json();
-    const id = body.id || `trial-${Date.now()}`;
+    // Public signup creates only a pending lead. It can never choose status,
+    // tenant linkage, or arbitrary primary keys.
+    const id = crypto.randomUUID();
     const name = (body.name || '').trim();
     const shopName = (body.shopName || body.shop_name || '').trim();
     const phone = (body.phone || '').trim();
     const city = (body.city || '').trim();
     const notes = (body.notes || '').trim();
-    const status = body.status || 'pending';
-    const tenantUsername = body.tenantUsername || body.tenant_username || '';
-    const createdAt = body.createdAt || body.created_at || new Date().toISOString().split('T')[0];
-    const timestamp = body.timestamp || Date.now();
+    const status = 'pending';
+    const tenantUsername = '';
+    const createdAt = new Date().toISOString().split('T')[0];
+    const timestamp = Date.now();
 
-    if (!name || !shopName || !phone) {
+    if (!name || !shopName || !phone || name.length > 120 || shopName.length > 120 || phone.length > 40 || notes.length > 2000) {
       return new Response(JSON.stringify({ success: false, error: 'الاسم واسم المحل ورقم الهاتف مطلوبين' }), {
         status: 400,
         headers: CORS_HEADERS
@@ -81,7 +83,7 @@ export async function onRequestPost(context) {
     }
 
     await env.DB.prepare(
-      `INSERT OR REPLACE INTO trial_requests 
+      `INSERT INTO trial_requests
        (id, name, shop_name, phone, city, notes, status, tenant_username, created_at, timestamp)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(id, name, shopName, phone, city, notes, status, tenantUsername, createdAt, timestamp).run();
@@ -112,6 +114,9 @@ export async function onRequestPost(context) {
 
 export async function onRequestPatch(context) {
   const { request, env } = context;
+  const auth = await authenticateRequest(request, env);
+  const authError = requireSuperAdmin(auth);
+  if (authError) return authError;
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ success: false, error: 'Database not available' }), {
       status: 500,
@@ -130,9 +135,9 @@ export async function onRequestPatch(context) {
     }
 
     await env.DB.prepare(
-      `UPDATE trial_requests 
-       SET status = COALESCE(?, status), 
-           tenant_username = COALESCE(?, tenant_username) 
+      `UPDATE trial_requests
+       SET status = COALESCE(?, status),
+           tenant_username = COALESCE(?, tenant_username)
        WHERE id = ?`
     ).bind(status || null, tenantUsername || null, id).run();
 
@@ -149,6 +154,9 @@ export async function onRequestPatch(context) {
 
 export async function onRequestDelete(context) {
   const { request, env } = context;
+  const auth = await authenticateRequest(request, env);
+  const authError = requireSuperAdmin(auth);
+  if (authError) return authError;
   if (!env || !env.DB) {
     return new Response(JSON.stringify({ success: false, error: 'Database not available' }), {
       status: 500,

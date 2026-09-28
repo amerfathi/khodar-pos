@@ -89,50 +89,7 @@ export const INITIAL_SALES_RETURNS = [];
 
 export const INITIAL_PURCHASE_RETURNS = [];
 
-export const INITIAL_TENANTS = [
-  {
-    id: 'tenant-super-admin',
-    storeCode: 'BRK-000',
-    companyName: 'إدارة المنظومة (صانع ومالك المنصة)',
-    username: 'amerfathi123@gmail.com',
-    password: 'A20101993f',
-    role: 'super_admin',
-    status: 'active',
-    expiresAt: '2099-12-31',
-    allowedBranches: 999,
-    phone: '',
-    notes: 'حساب صانع ومالك المنصة الرئيسي المتحكم في المشتركين والفروع والاشتراكات',
-    createdAt: '2026-01-01'
-  },
-  {
-    id: 'tenant-super-admin-legacy',
-    storeCode: 'ADMIN',
-    companyName: 'إدارة المنصة الرئيسية (المالك)',
-    username: 'admin',
-    password: 'admin',
-    role: 'super_admin',
-    status: 'active',
-    expiresAt: '2099-12-31',
-    allowedBranches: 999,
-    phone: '',
-    notes: 'حساب مالك إضافي',
-    createdAt: '2026-01-01'
-  },
-  {
-    id: 'tenant-demo',
-    storeCode: 'BRK-101',
-    companyName: 'سوق ومحل الخضار والفواكه',
-    username: 'demo',
-    password: '123',
-    role: 'company_owner',
-    status: 'active',
-    expiresAt: '2028-12-31',
-    allowedBranches: 3,
-    phone: '0500000000',
-    notes: 'حساب عميل نموذج تجريبي',
-    createdAt: '2026-01-01'
-  }
-];
+export const INITIAL_TENANTS = [];
 
 export const INITIAL_BRANCHES = [
   {
@@ -248,45 +205,5 @@ export const ROLE_PERMISSIONS_PRESETS = {
   }
 };
 
-export const INITIAL_USERS = [
-  {
-    id: 'user-demo-admin',
-    tenantId: 'tenant-demo',
-    branchId: 'all',
-    name: 'أبو فهد (المالك والمدير العام)',
-    username: 'demo_owner',
-    password: '123',
-    role: 'admin',
-    status: 'active',
-    phone: '0500000000',
-    permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions },
-    createdAt: '2026-01-01'
-  },
-  {
-    id: 'user-demo-cashier1',
-    tenantId: 'tenant-demo',
-    branchId: 'branch-main',
-    name: 'أحمد السعيد (كاشير الفرع الرئيسي)',
-    username: 'cashier1',
-    password: '123',
-    role: 'cashier',
-    status: 'active',
-    phone: '0555555551',
-    permissions: { ...ROLE_PERMISSIONS_PRESETS.cashier.permissions },
-    createdAt: '2026-01-10'
-  },
-  {
-    id: 'user-demo-accountant',
-    tenantId: 'tenant-demo',
-    branchId: 'all',
-    name: 'سالم المحاسب (الإدارة المالية)',
-    username: 'accountant',
-    password: '123',
-    role: 'accountant',
-    status: 'active',
-    phone: '0555555552',
-    permissions: { ...ROLE_PERMISSIONS_PRESETS.accountant.permissions },
-    createdAt: '2026-01-15'
-  }
-];
+export const INITIAL_USERS = [];
 

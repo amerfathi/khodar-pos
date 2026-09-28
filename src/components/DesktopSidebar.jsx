@@ -106,7 +106,7 @@ export default function DesktopSidebar({
   onOpenSuperAdmin,
   onOpenSettings,
   onLogout,
-  settings = {},
+  settings = /** @type {{shopName?: string, subTitle?: string}} */ ({}),
   hasPermission
 }) {
   const checkPermission = (permKey) => {

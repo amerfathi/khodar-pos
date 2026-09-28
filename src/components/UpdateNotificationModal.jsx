@@ -30,7 +30,7 @@ export default function UpdateNotificationModal({
     }
 
     if (platform === 'web') {
-      window.location.reload(true);
+      window.location.reload();
     } else if (downloadUrl) {
       window.open(downloadUrl, '_blank');
     }

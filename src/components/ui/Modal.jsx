@@ -2,6 +2,11 @@ import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+/**
+ * @param {{isOpen: boolean, onClose?: () => void, title?: React.ReactNode,
+ *   subtitle?: React.ReactNode, children?: React.ReactNode, footer?: React.ReactNode,
+ *   maxWidth?: string, className?: string, showClose?: boolean}} props
+ */
 export default function Modal({
   isOpen,
   onClose,

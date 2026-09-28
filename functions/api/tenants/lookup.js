@@ -1,215 +1,64 @@
-/**
- * Store Code & Tenant Lookup API (/api/tenants/lookup)
- * Enables any client/cashier device to discover and verify a store code in real time
- */
+/** Authentication endpoint. Store/user discovery is intentionally not exposed. */
+import { badRequest, json, options, readJson } from '../../_lib/http.js';
+import { createSession } from '../../_lib/auth.js';
+import { verifyPassword } from '../../_lib/passwords.js';
 
-const CORS_HEADERS = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
+import { rateLimit } from '../../_lib/rateLimit.js';
 
-export async function onRequestOptions() {
-  return new Response(null, { headers: CORS_HEADERS });
-}
+export async function onRequestOptions() { return options(); }
+export async function onRequestGet() { return json({ success: false, error: 'Use POST to authenticate' }, 405); }
 
-export async function onRequestGet(context) {
-  const { request, env } = context;
-  const url = new URL(request.url);
-  const code = (url.searchParams.get('code') || '').trim().toUpperCase();
-  const username = (url.searchParams.get('username') || '').trim().toLowerCase();
-  const id = (url.searchParams.get('id') || '').trim();
-
-  if (!code && !username && !id) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'يرجى تقديم كود المتجر أو اسم المستخدم للاستعلام' 
-    }), { status: 400, headers: CORS_HEADERS });
-  }
-
-  if (!env || !env.DB) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'قاعدة البيانات السحابية غير متاحة' 
-    }), { status: 500, headers: CORS_HEADERS });
-  }
-
+export async function onRequestPost({ request, env }) {
+  if (!env?.DB || !env?.AUTH_SECRET) return json({ success: false, error: 'Authentication service is unavailable' }, 503);
   try {
-    let tenantRow = null;
+    const limited = await rateLimit(request, env, 'login');
+    if (limited) return limited;
+    const { storeCode, username, password } = await readJson(request, 4096);
+    const code = String(storeCode || '').trim().toUpperCase();
+    const user = String(username || '').trim().toLowerCase();
+    if (!code || !user || typeof password !== 'string') return badRequest('Store code, username and password are required');
 
-    if (code) {
-      tenantRow = await env.DB.prepare(
-        "SELECT * FROM tenants WHERE UPPER(store_code) = ? OR id = ? LIMIT 1"
-      ).bind(code, code.toLowerCase()).first();
-    } else if (id) {
-      tenantRow = await env.DB.prepare(
-        "SELECT * FROM tenants WHERE id = ? LIMIT 1"
-      ).bind(id).first();
-    } else if (username) {
-      tenantRow = await env.DB.prepare(
-        "SELECT * FROM tenants WHERE LOWER(username) = ? LIMIT 1"
-      ).bind(username).first();
+    const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE UPPER(store_code) = ? LIMIT 1').bind(code).first();
+    // One generic error prevents store, username, and staff enumeration.
+    if (!tenant || tenant.status !== 'active' || (tenant.expires_at && tenant.expires_at.slice(0,10) < new Date().toISOString().slice(0,10))) return json({ success: false, error: 'Invalid sign-in details' }, 401);
+
+    let principal = null;
+    if (tenant.username.toLowerCase() === user) {
+      const result = await verifyPassword(password, tenant.password_hash);
+      if (result.valid) {
+        const credentialVersion = Number(tenant.auth_version || 0) + (result.legacy ? 1 : 0);
+        principal = { id: tenant.id, tenantId: tenant.id, type: 'tenant', role: tenant.role, credentialVersion };
+      }
     }
-
-    if (!tenantRow) {
-      return new Response(JSON.stringify({ 
-        success: false, 
-        notFound: true,
-        error: `كود المتجر (${code || username || id}) غير مسجل في السحابة المركزية` 
-      }), { status: 404, headers: CORS_HEADERS });
-    }
-
-    // Fetch tenant's staff users if any exist in the cloud (sanitized - NO PASSWORDS)
-    const { results: staffResults } = await env.DB.prepare(
-      "SELECT id, tenant_id, branch_id, name, username, role, status, phone, permissions_json FROM users WHERE tenant_id = ?"
-    ).bind(tenantRow.id).all();
-
-    const staffUsers = (staffResults || []).map(u => {
-      let perms = {};
-      try { perms = JSON.parse(u.permissions_json); } catch (e) {}
-      return {
-        id: u.id,
-        tenantId: u.tenant_id,
-        branchId: u.branch_id || 'all',
-        name: u.name,
-        username: u.username,
-        role: u.role || 'cashier',
-        status: u.status || 'active',
-        phone: u.phone || '',
-        permissions: perms
-      };
-    });
-
-    const tenant = {
-      id: tenantRow.id,
-      storeCode: tenantRow.store_code || code,
-      companyName: tenantRow.company_name,
-      username: tenantRow.username,
-      role: tenantRow.role || 'company_owner',
-      status: tenantRow.status || 'active',
-      expiresAt: tenantRow.expires_at,
-      allowedBranches: tenantRow.allowed_branches || 1,
-      phone: tenantRow.phone || '',
-      notes: tenantRow.notes || '',
-      createdAt: tenantRow.created_at,
-      updatedAt: tenantRow.updated_at
-    };
-
-    return new Response(JSON.stringify({
-      success: true,
-      tenant,
-      users: staffUsers
-    }), { headers: CORS_HEADERS });
-
-  } catch (err) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: err.message 
-    }), { status: 500, headers: CORS_HEADERS });
-  }
-}
-
-// Secure Server-Side Authentication
-export async function onRequestPost(context) {
-  const { request, env } = context;
-  if (!env || !env.DB) {
-    return new Response(JSON.stringify({ success: false, error: 'Database unavailable' }), { status: 500, headers: CORS_HEADERS });
-  }
-
-  try {
-    const { storeCode, username, password } = await request.json();
-    const cleanStoreCode = (storeCode || '').trim().toUpperCase();
-    const cleanUser = (username || '').trim().toLowerCase();
-
-    if (!cleanUser || !password) {
-      return new Response(JSON.stringify({ success: false, error: 'بيانات الدخول غير مكتملة' }), { status: 400, headers: CORS_HEADERS });
-    }
-
-    let tenantRow = null;
-    if (cleanStoreCode) {
-      tenantRow = await env.DB.prepare(
-        "SELECT * FROM tenants WHERE UPPER(store_code) = ? OR id = ? LIMIT 1"
-      ).bind(cleanStoreCode, cleanStoreCode.toLowerCase()).first();
-    } else {
-      tenantRow = await env.DB.prepare(
-        "SELECT * FROM tenants WHERE LOWER(username) = ? LIMIT 1"
-      ).bind(cleanUser).first();
-    }
-
-    if (!tenantRow) {
-      return new Response(JSON.stringify({ success: false, error: 'كود المتجر أو المستخدم غير مسجل' }), { status: 404, headers: CORS_HEADERS });
-    }
-
-    // A) Check Owner
-    if (tenantRow.username.toLowerCase() === cleanUser && tenantRow.password_hash === password) {
-      return new Response(JSON.stringify({
-        success: true,
-        authenticated: true,
-        userType: 'owner',
-        user: {
-          id: tenantRow.id,
-          storeCode: tenantRow.store_code,
-          companyName: tenantRow.company_name,
-          username: tenantRow.username,
-          role: tenantRow.role || 'company_owner',
-          status: tenantRow.status || 'active',
-          expiresAt: tenantRow.expires_at,
-          allowedBranches: tenantRow.allowed_branches || 1
-        },
-        tenant: {
-          id: tenantRow.id,
-          storeCode: tenantRow.store_code,
-          companyName: tenantRow.company_name,
-          role: tenantRow.role || 'company_owner',
-          status: tenantRow.status || 'active',
-          expiresAt: tenantRow.expires_at,
-          allowedBranches: tenantRow.allowed_branches || 1
+    if (!principal) {
+      const staff = await env.DB.prepare('SELECT * FROM users WHERE tenant_id = ? AND LOWER(username) = ? LIMIT 1').bind(tenant.id, user).first();
+      if (staff?.status === 'active') {
+        const result = await verifyPassword(password, staff.password_hash);
+        if (result.valid) {
+          const credentialVersion = Number(staff.auth_version || 0) + (result.legacy ? 1 : 0);
+          principal = { id: staff.id, tenantId: tenant.id, type: 'user', role: staff.role, credentialVersion, staff };
         }
-      }), { headers: CORS_HEADERS });
+      }
     }
-
-    // B) Check Staff
-    const staffRow = await env.DB.prepare(
-      "SELECT * FROM users WHERE tenant_id = ? AND LOWER(username) = ? AND password_hash = ? LIMIT 1"
-    ).bind(tenantRow.id, cleanUser, password).first();
-
-    if (staffRow) {
-      let perms = {};
-      try { perms = JSON.parse(staffRow.permissions_json); } catch (e) {}
-      return new Response(JSON.stringify({
-        success: true,
-        authenticated: true,
-        userType: 'staff',
-        user: {
-          id: staffRow.id,
-          tenantId: staffRow.tenant_id,
-          branchId: staffRow.branch_id || 'all',
-          name: staffRow.name,
-          username: staffRow.username,
-          role: staffRow.role || 'cashier',
-          status: staffRow.status || 'active',
-          phone: staffRow.phone || '',
-          permissions: perms
-        },
-        tenant: {
-          id: tenantRow.id,
-          storeCode: tenantRow.store_code,
-          companyName: tenantRow.company_name,
-          role: tenantRow.role || 'company_owner',
-          status: tenantRow.status || 'active',
-          expiresAt: tenantRow.expires_at,
-          allowedBranches: tenantRow.allowed_branches || 1
-        }
-      }), { headers: CORS_HEADERS });
-    }
-
-    return new Response(JSON.stringify({
-      success: false,
-      error: 'كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى'
-    }), { status: 401, headers: CORS_HEADERS });
-
-  } catch (err) {
-    return new Response(JSON.stringify({ success: false, error: err.message }), { status: 500, headers: CORS_HEADERS });
+    if (!principal) return json({ success: false, error: 'Invalid sign-in details' }, 401);
+    const session = await createSession(env, principal);
+    const staff = principal.staff;
+    const { results: branchRows } = await env.DB.prepare('SELECT * FROM branches WHERE tenant_id = ? ORDER BY is_main DESC, created_at, id')
+      .bind(tenant.id).all();
+    const branches = branchRows.map(row => ({
+      id: row.id, tenantId: row.tenant_id, name: row.name, code: row.code || '',
+      phone: row.phone || '', address: row.address || '', managerName: row.manager_name || '',
+      isMain: Boolean(row.is_main), status: row.status, createdAt: row.created_at
+    }));
+    return json({ success: true, authenticated: true, userType: principal.type === 'tenant' ? 'owner' : 'staff', session, user: {
+      id: principal.id, tenantId: tenant.id, branchId: staff?.branch_id || 'all', username: user,
+      name: staff?.name || tenant.company_name, role: principal.role,
+      syncScopeVersion: principal.type === 'user' ? principal.credentialVersion : 0,
+      permissions: staff ? JSON.parse(staff.permissions_json || '{}') : {},
+      storeCode: tenant.store_code, companyName: tenant.company_name
+    }, tenant: { id: tenant.id, storeCode: tenant.store_code, companyName: tenant.company_name, status: tenant.status,
+      expiresAt: tenant.expires_at, allowedBranches: tenant.allowed_branches }, branches });
+  } catch {
+    return json({ success: false, error: 'Authentication failed' }, 500);
   }
 }

@@ -9,6 +9,7 @@ pages_build_output_dir = "./dist"
 binding = "DB"
 database_name = "khodar_pos_production"
 database_id = "bf2fbfa3-eb13-4687-ac97-b17740c300de"
+migrations_dir = "d1/migrations"
 
 # Cloudflare R2 Bucket Binding (for automated database dumps, invoices & receipts backup)
 # To create bucket: npx wrangler r2 bucket create khodar-pos-backups

@@ -7,6 +7,7 @@ import { formatCurrency, formatWeight } from '../utils/formatters';
 
 export default function PurchaseReturnModal({ purchase, store, onClose, onSuccess }) {
   const { recordPurchaseReturn, settings, suppliers } = store;
+  const [isSaving, setIsSaving] = useState(false);
 
   // Supplier info
   const supplier = (suppliers || []).find(s => s.id === purchase.supplierId);
@@ -33,11 +34,12 @@ export default function PurchaseReturnModal({ purchase, store, onClose, onSucces
   const calculatedRefund = Math.round(numReturnedKg * historicalCostPerKg * 100) / 100;
 
   const handleReturnAll = () => {
-    setReturnedKg(maxAvailableKg);
+    setReturnedKg(String(maxAvailableKg));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
     if (numReturnedKg <= 0) {
       alert('يرجى إدخال الوزن المراد إرجاعه للمورد بالكيلو');
       return;
@@ -47,8 +49,9 @@ export default function PurchaseReturnModal({ purchase, store, onClose, onSucces
       return;
     }
 
+    setIsSaving(true);
     try {
-      const newReturn = recordPurchaseReturn({
+      const newReturn = await recordPurchaseReturn({
         purchaseId: purchase.id,
         returnedKg: numReturnedKg,
         refundMethod,
@@ -61,7 +64,7 @@ export default function PurchaseReturnModal({ purchase, store, onClose, onSucces
       onClose();
     } catch (err) {
       alert(`حدث خطأ أثناء حفظ مردود المشتريات: ${err.message}`);
-    }
+    } finally { setIsSaving(false); }
   };
 
   return (
@@ -259,7 +262,7 @@ export default function PurchaseReturnModal({ purchase, store, onClose, onSucces
 
             <button
               type="submit"
-              disabled={calculatedRefund <= 0}
+              disabled={isSaving || calculatedRefund <= 0}
               className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-2xs ${
                 calculatedRefund > 0 
                   ? 'bg-primary-600 hover:bg-primary-700 text-white cursor-pointer active:scale-95' 

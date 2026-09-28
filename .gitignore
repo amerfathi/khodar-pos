@@ -5,6 +5,7 @@ node_modules/
 
 # Production build
 dist/
+dist-matrix/
 build/
 
 # Wrangler & Cloudflare
@@ -16,6 +17,11 @@ android/app/build/
 android/build/
 android/capacitor-cordova-android-plugins/build/
 android/local.properties
+android/keystore.properties
+android/app/*.keystore
+android/app/*.jks
+.env
+.env.*
 *.apk
 *.aab
 

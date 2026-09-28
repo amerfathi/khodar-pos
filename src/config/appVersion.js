@@ -48,11 +48,19 @@ export function compareSemver(v1, v2) {
  * Resolves Cloudflare Edge endpoint across Web, Electron Desktop (file://), and Android Capacitor (localhost).
  */
 export function getApiBaseUrl() {
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    const origin = window.location.origin;
-    if (origin.startsWith('http') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
-      return origin;
+  const configured = import.meta.env?.VITE_API_BASE_URL;
+  if (configured) {
+    const url = new URL(configured);
+    if (url.username || url.password || url.search || url.hash ||
+        (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) {
+      throw new Error('Invalid API origin configuration');
     }
+    return url.origin;
   }
+  if (typeof window !== 'undefined') {
+    const native = window.electronAPI?.isElectron || window.Capacitor?.isNativePlatform?.() || window.location?.protocol === 'capacitor:';
+    if (!native && /^https?:/.test(window.location?.origin || '')) return window.location.origin;
+  }
+  // Packaged native clients have no HTTP backend at their local asset origin.
   return 'https://khodar-pos.pages.dev';
 }

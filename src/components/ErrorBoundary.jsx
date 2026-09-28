@@ -20,12 +20,6 @@ export default class ErrorBoundary extends React.Component {
   handleReload = () => {
     this.setState({ isReloading: true });
     setTimeout(() => {
-      try {
-        if (window.electronAPI?.reload) {
-          window.electronAPI.reload();
-          return;
-        }
-      } catch (e) {}
       window.location.reload();
     }, 200);
   };
@@ -40,12 +34,6 @@ export default class ErrorBoundary extends React.Component {
       console.warn('Cache clear error:', e);
     }
     setTimeout(() => {
-      try {
-        if (window.electronAPI?.reload) {
-          window.electronAPI.reload();
-          return;
-        }
-      } catch (e) {}
       window.location.reload();
     }, 300);
   };
@@ -72,7 +60,7 @@ export default class ErrorBoundary extends React.Component {
               عذراً، حدث خطأ غير متوقع
             </h1>
             <p className="text-xs text-slate-500 mb-6 font-medium leading-relaxed">
-              واجه التطبيق مشكلة تقنية مؤقتة. بياناتك وفواتيرك محفوظة بأمان تام في النظام. يمكنك إعادة تحميل الصفحة للعودة فوراً.
+              واجه التطبيق مشكلة قد تمنع فتح بيانات هذا الحساب. لا تحذف بيانات المتصفح أو التطبيق؛ قد توجد حركات لم تكتمل مزامنتها. أعد الفتح، وإذا استمر الخطأ احتفظ بالبيانات لعملية الاسترداد.
             </p>
 
             {this.state.error && (
@@ -99,12 +87,12 @@ export default class ErrorBoundary extends React.Component {
                 className="w-full h-10 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
               >
                 <Trash2 size={14} />
-                <span>{this.state.isReloading ? 'جاري تفريغ الذاكرة...' : 'تفريغ الذاكرة المؤقتة وإعادة التحميل'}</span>
+                <span>{this.state.isReloading ? 'جاري إنهاء الجلسة...' : 'إنهاء الجلسة وإعادة التحميل'}</span>
               </button>
             </div>
 
             <div className="mt-6 pt-4 border-t border-slate-100 text-[10px] text-slate-400 font-medium">
-              منظومة براكه المحاسبية &bull; الإصدار المعتمد
+              منظومة براكه المحاسبية
             </div>
           </div>
         </div>

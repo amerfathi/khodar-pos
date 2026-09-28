@@ -35,6 +35,7 @@ export function TableBody({ children, className = '' }) {
   );
 }
 
+/** @param {React.HTMLAttributes<HTMLTableRowElement>} props */
 export function TableRow({ children, className = '', onClick }) {
   const isClickable = Boolean(onClick);
   return (

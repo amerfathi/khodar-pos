@@ -192,6 +192,7 @@ export default function MobileHomeHub({
     }
   };
 
+  /** @type {import('framer-motion').Variants} */
   const itemVariants = {
     hidden: { opacity: 0, y: 8, scale: 0.97 },
     show: { 

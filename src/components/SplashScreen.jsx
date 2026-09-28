@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { BRRAKA_LOGO } from '../assets/branding';
 import { APP_VERSION } from '../config/appVersion';
@@ -6,6 +6,8 @@ import { Sparkles, ShieldCheck, ArrowLeft } from 'lucide-react';
 
 export default function SplashScreen({ onFinish, duration = 5000 }) {
   const [timeLeft, setTimeLeft] = useState(Math.ceil(duration / 1000));
+  const finishRef = useRef(onFinish);
+  finishRef.current = onFinish;
 
   useEffect(() => {
     // Countdown timer for user feedback
@@ -21,14 +23,14 @@ export default function SplashScreen({ onFinish, duration = 5000 }) {
 
     // Transition trigger after exactly duration ms (5 seconds)
     const timer = setTimeout(() => {
-      if (onFinish) onFinish();
+      finishRef.current?.();
     }, duration);
 
     return () => {
       clearInterval(interval);
       clearTimeout(timer);
     };
-  }, [duration, onFinish]);
+  }, [duration]);
 
   return (
     <motion.div 

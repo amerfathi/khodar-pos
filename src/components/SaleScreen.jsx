@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Plus, Trash2, Edit3, Scale, User, UserPlus, 
   Receipt, Printer, Check, ShoppingBag, 
@@ -36,6 +36,7 @@ export default function SaleScreen({
   const [customerPhone, setCustomerPhone] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   
   // Current items in cart
   const [cartItems, setCartItems] = useState([]);
@@ -44,6 +45,7 @@ export default function SaleScreen({
   const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
   const [activeItem, setActiveItem] = useState({
+    id: '',
     productId: '',
     name: '',
     unit: 'صندوق',
@@ -51,6 +53,7 @@ export default function SaleScreen({
     tarePerUnit: 2.0,
     grossWeight: 0,
     pricePerKg: 0,
+    costPerKg: 0,
     weighings: [],
   });
 
@@ -96,6 +99,7 @@ export default function SaleScreen({
   // Quick select vegetable to start adding
   const handleSelectProduct = (prod) => {
     setActiveItem({
+      id: '',
       productId: prod.id,
       name: prod.name,
       unit: prod.defaultUnit || 'صندوق',
@@ -103,6 +107,7 @@ export default function SaleScreen({
       tarePerUnit: prod.defaultTareWeight || 2.0,
       grossWeight: 0,
       pricePerKg: prod.defaultPricePerKg || 0,
+      costPerKg: Number(prod.costPerKg) || 0,
       weighings: [],
     });
     setEditingItemIndex(null);
@@ -245,8 +250,8 @@ export default function SaleScreen({
   }
 
   // Handle invoice submission
-  const handleSaveInvoice = (printImmediately = false) => {
-    if (isSubmitting) return;
+  const handleSaveInvoice = async (printImmediately = false) => {
+    if (submittingRef.current) return;
     if (cartItems.length === 0) {
       alert('الفاتورة فارغة، يرجى إضافة أصناف أولاً');
       return;
@@ -286,6 +291,7 @@ export default function SaleScreen({
       return;
     }
 
+    submittingRef.current = true;
     setIsSubmitting(true);
     try {
       const invoiceData = {
@@ -317,10 +323,10 @@ export default function SaleScreen({
         notes,
       };
 
-      const saved = saveInvoice(invoiceData);
+      const saved = await saveInvoice(invoiceData);
 
       // Reset current form
-      handleResetInvoice();
+      handleResetInvoice(true);
 
       if (printImmediately) {
         if (onViewA4Invoice) {
@@ -333,11 +339,13 @@ export default function SaleScreen({
       console.error('Invoice save error:', err);
       alert('حدث خطأ أثناء حفظ الفاتورة: ' + (err.message || ''));
     } finally {
-      setTimeout(() => setIsSubmitting(false), 400);
+      submittingRef.current = false;
+      setIsSubmitting(false);
     }
   };
 
-  const handleResetInvoice = () => {
+  const handleResetInvoice = (afterCommit = false) => {
+    if (submittingRef.current && !afterCommit) return;
     setCartItems([]);
     setSelectedCustomerId('');
     setCustomerName('');
@@ -411,6 +419,7 @@ export default function SaleScreen({
                   type="button"
                   onClick={() => {
                     setActiveItem({
+                      id: '',
                       productId: '',
                       name: '',
                       unit: 'صندوق',
@@ -418,6 +427,7 @@ export default function SaleScreen({
                       tarePerUnit: 2.0,
                       grossWeight: 0,
                       pricePerKg: 0,
+                      costPerKg: 0,
                       weighings: [],
                     });
                     setEditingItemIndex(null);
@@ -1044,7 +1054,8 @@ export default function SaleScreen({
 
                 <button
                   type="button"
-                  onClick={handleResetInvoice}
+                  onClick={() => handleResetInvoice()}
+                  disabled={isSubmitting}
                   className="py-2 px-3 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
                 >
                   <RotateCcw size={14} />

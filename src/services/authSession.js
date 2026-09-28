@@ -1,0 +1,22 @@
+const TOKEN_KEY = 'khodar_pos_session_token';
+const USER_KEY = 'khodar_verified_session_user';
+export const getSessionToken = () => globalThis.sessionStorage?.getItem(TOKEN_KEY) || '';
+export function setSessionToken(token) {
+  if (token) sessionStorage.setItem(TOKEN_KEY, token);
+  else { sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(USER_KEY); }
+}
+export function getSessionUser() {
+  try {
+    const user = JSON.parse(sessionStorage.getItem(USER_KEY) || 'null');
+    return getSessionToken() && Date.parse(user?.sessionExpiresAt) > Date.now() ? user : null;
+  } catch { return null; }
+}
+export function setSessionUser(user) { sessionStorage.setItem(USER_KEY, JSON.stringify(user)); }
+export async function apiFetch(input, init = {}) {
+  const headers = new Headers(init.headers);
+  // Never send the password as bearer authentication, including legacy callers.
+  headers.delete('Authorization');
+  const token = getSessionToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return globalThis.fetch(input, { ...init, headers });
+}

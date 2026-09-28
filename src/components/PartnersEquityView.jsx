@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Users, UserPlus, DollarSign, PieChart, Plus, Trash2, Edit2, 
   ArrowUpRight, Printer, CheckCircle2, History, AlertCircle, X, Check,
-  Landmark, ArrowDownLeft, ShieldCheck, Scale, FileText
+  Landmark, ArrowDownLeft, ShieldCheck, Scale, FileText, Coins
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatCurrency, getCurrentDateFormatted, getCurrentTimeFormatted } from '../utils/formatters';
@@ -28,14 +28,15 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
 
   // Modals state
   const [isAddPartnerOpen, setIsAddPartnerOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editingPartner, setEditingPartner] = useState(null);
-  const [partnerForm, setPartnerForm] = useState({
+  const [partnerForm, setPartnerForm] = useState(/** @type {{name: string, phone: string, sharePercentage: string | number, initialCapital: string | number, notes: string}} */ ({
     name: '',
     phone: '',
     sharePercentage: 50,
     initialCapital: 0,
     notes: ''
-  });
+  }));
 
   const [isDrawingModalOpen, setIsDrawingModalOpen] = useState(false);
   const [drawingForm, setDrawingForm] = useState({
@@ -82,15 +83,18 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
   };
 
   // Handlers for Partner Create/Edit
-  const handleSavePartner = (e) => {
+  const handleSavePartner = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
     if (!partnerForm.name.trim()) {
       alert('يرجى كتابة اسم الشريك');
       return;
     }
 
+    setIsSaving(true);
+    try {
     if (editingPartner) {
-      updatePartner(editingPartner.id, {
+      await updatePartner(editingPartner.id, {
         name: partnerForm.name.trim(),
         phone: partnerForm.phone.trim(),
         sharePercentage: Number(partnerForm.sharePercentage) || 0,
@@ -99,7 +103,7 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
       });
       setEditingPartner(null);
     } else {
-      addPartner({
+      await addPartner({
         name: partnerForm.name.trim(),
         phone: partnerForm.phone.trim(),
         sharePercentage: Number(partnerForm.sharePercentage) || 0,
@@ -110,6 +114,8 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
 
     setPartnerForm({ name: '', phone: '', sharePercentage: 50, initialCapital: 0, notes: '' });
     setIsAddPartnerOpen(false);
+    } catch (error) { alert('تعذر حفظ الشريك: ' + error.message); }
+    finally { setIsSaving(false); }
   };
 
   const handleOpenEditPartner = (p) => {
@@ -125,8 +131,9 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
   };
 
   // Handler for Recording Drawing
-  const handleSaveDrawing = (e) => {
+  const handleSaveDrawing = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
     const partner = partners.find(p => p.id === drawingForm.partnerId);
     if (!partner) {
       alert('يرجى اختيار الشريك');
@@ -138,21 +145,24 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
       return;
     }
 
-    recordPartnerDrawing({
+    setIsSaving(true);
+    try { await recordPartnerDrawing({
       partnerId: partner.id,
       partnerName: partner.name,
       amount: amt,
       method: drawingForm.method,
       notes: drawingForm.notes.trim()
     });
-
-    setDrawingForm({ partnerId: '', amount: '', method: 'cash', notes: 'مسحوبات شخصية من الحساب' });
-    setIsDrawingModalOpen(false);
+      setDrawingForm({ partnerId: '', amount: '', method: 'cash', notes: 'مسحوبات شخصية من الحساب' });
+      setIsDrawingModalOpen(false);
+    } catch (error) { alert('تعذر حفظ مسحوبات الشريك: ' + error.message); }
+    finally { setIsSaving(false); }
   };
 
   // Handler for Distributing Profits
-  const handleConfirmDistribution = (e) => {
+  const handleConfirmDistribution = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
     const totalDistAmt = Number(distributeForm.totalAmount);
     if (!totalDistAmt || totalDistAmt <= 0) {
       alert('يرجى إدخال مبلغ أرباح صحيح للتوزيع');
@@ -183,7 +193,8 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
       };
     });
 
-    recordProfitDistribution({
+    setIsSaving(true);
+    try { await recordProfitDistribution({
       totalDistributedAmount: totalDistAmt,
       periodLabel: distributeForm.periodLabel.trim(),
       shares,
@@ -198,6 +209,8 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
       notes: ''
     });
     setIsDistributeModalOpen(false);
+    } catch (error) { alert('تعذر حفظ توزيع الأرباح: ' + error.message); }
+    finally { setIsSaving(false); }
   };
 
   return (
@@ -484,9 +497,10 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={async () => {
                             if (confirm(`هل أنت متأكد من حذف الشريك (${partner.name})؟ سيتم حذف مسحوباته أيضاً.`)) {
-                              deletePartner(partner.id);
+                              try { await deletePartner(partner.id); }
+                              catch (error) { alert('تعذر حذف الشريك: ' + error.message); }
                             }
                           }}
                           className="p-1.5 text-rose-400 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
@@ -560,9 +574,10 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
                       <td className="py-2.5 px-3 text-center">
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={async () => {
                             if (confirm(`هل أنت متأكد من حذف حركة سحب بمبلغ ${d.amount} للشريك ${d.partnerName}؟`)) {
-                              deletePartnerDrawing(d.id);
+                              try { await deletePartnerDrawing(d.id); }
+                              catch (error) { alert('تعذر حذف مسحوبات الشريك: ' + error.message); }
                             }
                           }}
                           className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
@@ -619,9 +634,10 @@ export default function PartnersEquityView({ store, onOpenPartnerStatement }) {
                       </div>
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           if (confirm('هل أنت متأكد من حذف جلسة توزيع الأرباح هذه؟')) {
-                            deleteProfitDistribution(dist.id);
+                            try { await deleteProfitDistribution(dist.id); }
+                            catch (error) { alert('تعذر حذف توزيع الأرباح: ' + error.message); }
                           }
                         }}
                         className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"

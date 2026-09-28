@@ -1,3 +1,5 @@
+-- EMPTY DATABASE BOOTSTRAP ONLY. Generated from migrations 0001 through 0011.
+-- Existing databases: use the D1 migration ledger; do not rerun this file.
 -- ====================================================================
 -- Cloudflare D1 SQL Schema for Khodar POS (سوق الخضار - كاشير ومحاسبة)
 -- Architecture: High-Performance Multi-Tenant Relational Schema (SQLite/D1)
@@ -38,6 +40,13 @@ CREATE TABLE IF NOT EXISTS branches (
     FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_branches_tenant ON branches(tenant_id);
+CREATE TRIGGER branches_limit_before_insert
+BEFORE INSERT ON branches
+WHEN (SELECT COUNT(*) FROM branches WHERE tenant_id = NEW.tenant_id) >=
+     (SELECT COALESCE(allowed_branches, 1) FROM tenants WHERE id = NEW.tenant_id)
+BEGIN
+  SELECT RAISE(ABORT, 'BRANCH_LIMIT_EXCEEDED');
+END;
 
 -- 3. Products (أصناف الخضار والفواكه)
 CREATE TABLE IF NOT EXISTS products (
@@ -317,3 +326,154 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE(tenant_id, username)
 );
 CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
+
+-- Migration 0002: App Releases & Multi-Platform Update Management
+CREATE TABLE IF NOT EXISTS app_releases (
+    id TEXT PRIMARY KEY,
+    platform TEXT NOT NULL,          -- 'web', 'windows', 'android', 'ios'
+    version TEXT NOT NULL,           -- '2.4.0'
+    minimum_version TEXT NOT NULL,   -- '2.2.0'
+    status TEXT NOT NULL DEFAULT 'published', -- 'published', 'draft', 'deprecated'
+    update_type TEXT NOT NULL DEFAULT 'recommended', -- 'optional', 'recommended', 'required'
+    release_notes TEXT NOT NULL,     -- JSON array of strings
+    download_url TEXT,
+    file_size_bytes INTEGER DEFAULT 0,
+    sha256 TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    published_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_releases_platform ON app_releases(platform, published_at DESC);
+
+-- Releases are intentionally not seeded. A production release must be created
+-- only after its artifact and signed manifest have been verified.
+
+-- Security/runtime baseline. Apply once after 0001 and 0002 on every environment.
+ALTER TABLE tenants ADD COLUMN store_code TEXT;
+ALTER TABLE tenants ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_store_code ON tenants(store_code);
+ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  tenant_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  principal_type TEXT NOT NULL CHECK(principal_type IN ('tenant', 'user')),
+  credential_version INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
+CREATE INDEX IF NOT EXISTS idx_sessions_principal ON sessions(principal_id, revoked_at);
+
+CREATE TABLE IF NOT EXISTS trial_requests (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  shop_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  city TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  tenant_username TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  timestamp INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trial_requests_timestamp ON trial_requests(timestamp DESC);
+
+-- Release integrity data. sha256 is mandatory for Windows packages published after this migration.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_release_platform_version ON app_releases(platform, version);
+
+CREATE TABLE IF NOT EXISTS request_limits (key TEXT PRIMARY KEY, bucket INTEGER NOT NULL, count INTEGER NOT NULL);
+CREATE TRIGGER IF NOT EXISTS revoke_user_sessions AFTER UPDATE OF password_hash, role, status, tenant_id, branch_id, permissions_json ON users
+BEGIN
+  UPDATE sessions SET revoked_at = datetime('now') WHERE principal_id = NEW.id AND principal_type = 'user';
+END;
+CREATE TRIGGER IF NOT EXISTS revoke_tenant_sessions AFTER UPDATE OF password_hash, role, status, expires_at ON tenants
+BEGIN
+  UPDATE sessions SET revoked_at = datetime('now') WHERE tenant_id = NEW.id;
+END;
+
+-- Integer server sequence avoids timestamp collisions and clock-based cursor loss.
+CREATE TABLE sync_events_v2 (
+ sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+ id TEXT NOT NULL,
+ tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+ branch_id TEXT,
+ entity_type TEXT NOT NULL,
+ entity_id TEXT NOT NULL,
+ action TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ client_timestamp INTEGER NOT NULL,
+ server_timestamp INTEGER NOT NULL,
+ UNIQUE(tenant_id, id)
+);
+INSERT INTO sync_events_v2 (id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp)
+ SELECT id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp FROM sync_events ORDER BY server_timestamp,id;
+CREATE INDEX idx_sync_v2_tenant_sequence ON sync_events_v2(tenant_id, sequence);
+ALTER TABLE sync_events_v2 ADD COLUMN group_id TEXT;
+CREATE INDEX idx_sync_v2_tenant_group ON sync_events_v2(tenant_id, group_id);
+CREATE TABLE sync_commit_groups (
+ tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+ group_id TEXT NOT NULL,
+ event_count INTEGER NOT NULL CHECK(event_count BETWEEN 1 AND 100),
+ PRIMARY KEY (tenant_id, group_id)
+);
+INSERT INTO sync_commit_groups (tenant_id, group_id, event_count)
+ SELECT tenant_id, group_id, COUNT(*) FROM sync_events_v2 WHERE group_id IS NOT NULL GROUP BY tenant_id, group_id;
+
+CREATE TABLE password_reset_tokens (
+ token_hash TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+ principal_id TEXT NOT NULL, principal_type TEXT NOT NULL CHECK(principal_type IN ('user','tenant')),
+ expires_at TEXT NOT NULL, used_at TEXT, created_by TEXT NOT NULL
+);
+
+ALTER TABLE app_releases ADD COLUMN signed_manifest TEXT;
+
+-- Enforce retry equality inside the same write transaction, including two
+-- conflicting events in one batch and concurrent requests.
+CREATE TRIGGER sync_v2_reject_changed_retry
+BEFORE INSERT ON sync_events_v2
+WHEN EXISTS (
+ SELECT 1 FROM sync_events_v2 old
+ WHERE old.tenant_id = NEW.tenant_id AND old.id = NEW.id
+ AND (old.branch_id IS NOT NEW.branch_id
+   OR old.entity_type IS NOT NEW.entity_type
+   OR old.entity_id IS NOT NEW.entity_id
+   OR old.action IS NOT NEW.action
+   OR old.payload_json IS NOT NEW.payload_json)
+)
+BEGIN
+ SELECT RAISE(ABORT, 'SYNC_IDEMPOTENCY_CONFLICT');
+END;
+ALTER TABLE sync_events_v2 ADD COLUMN conflict_policy_version INTEGER;
+ALTER TABLE sync_events_v2 ADD COLUMN preconditions_json TEXT;
+CREATE TABLE sync_conflict_heads (
+ tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+ conflict_key TEXT NOT NULL,
+ last_event_id TEXT NOT NULL,
+ PRIMARY KEY (tenant_id, conflict_key)
+);
+CREATE TRIGGER sync_v2_check_conflict_heads
+BEFORE INSERT ON sync_events_v2
+WHEN NEW.conflict_policy_version = 1
+AND NOT EXISTS (SELECT 1 FROM sync_events_v2 old WHERE old.tenant_id=NEW.tenant_id AND old.id=NEW.id)
+AND EXISTS (
+ SELECT 1 FROM json_each(NEW.preconditions_json) expected
+ LEFT JOIN sync_conflict_heads head
+   ON head.tenant_id = NEW.tenant_id AND head.conflict_key = expected.key
+ WHERE head.last_event_id IS NOT expected.value
+)
+BEGIN
+ SELECT RAISE(ABORT, 'SYNC_CAUSAL_CONFLICT');
+END;
+CREATE TRIGGER sync_v2_advance_conflict_heads
+AFTER INSERT ON sync_events_v2
+WHEN NEW.conflict_policy_version = 1
+BEGIN
+ INSERT INTO sync_conflict_heads (tenant_id, conflict_key, last_event_id)
+ SELECT NEW.tenant_id, expected.key, NEW.id FROM json_each(NEW.preconditions_json) expected WHERE 1
+ ON CONFLICT(tenant_id, conflict_key) DO UPDATE SET last_event_id = excluded.last_event_id;
+END;

@@ -1,5 +1,6 @@
 import React from 'react';
 
+/** @param {React.HTMLAttributes<HTMLDivElement>} props */
 export default function Card({ children, className = '', ...props }) {
   return (
     <div

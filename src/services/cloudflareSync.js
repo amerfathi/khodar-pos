@@ -1,28 +1,47 @@
 /**
  * Cloudflare Edge Synchronization Service
  * ----------------------------------------------------
- * High-performance real-time background sync between Local POS (IndexedDB/LocalStorage)
+ * Background sync between the local POS aggregate and Cloudflare Edge.
  * and Cloudflare Edge (Workers & D1 Database).
  * 
  * Key Principles:
- * 1. Zero UI blocking: Cashier operations execute locally in <5ms.
- * 2. Real-time parity: Rapid delta polling (4s) + instant on-focus triggers.
- * 3. Offline-First: If network drops, mutations queue safely in LocalStorage.
- * 4. Automatic Recovery: Instant flush and pull once connectivity returns.
+ * 1. A server push is acknowledged locally only after the aggregate queue commit.
+ * 2. Rapid delta polling (4s) + instant on-focus triggers.
+ * 3. Pending mutations remain in the aggregate across retryable network failures.
+ * 4. Flush and pull resume once connectivity returns.
  * 5. Multi-Tenant isolation: Per-tenant sync cursor and state partitioning.
  */
 
-import { getApiBaseUrl } from '../config/appVersion';
+import { getApiBaseUrl } from '../config/appVersion.js';
 
 const QUEUE_STORAGE_KEY = 'khodar_offline_sync_queue';
-const getTenantSyncKey = (tenantId) => `khodar_last_sync_timestamp_${tenantId || 'default'}`;
+const getTenantSyncKey = (tenantId) => `braka_sync_cursor_v2_${tenantId}_${getSessionUser()?.id || 'none'}`;
+import { getSessionToken, getSessionUser } from './authSession.js';
+const authHeaders = () => {
+  const token = getSessionToken();
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
 
-class CloudflareSyncService {
+export function selectSyncBatch(queue) {
+  let count = Math.min(queue.length, 100);
+  if (count < queue.length && queue[count - 1].groupId && queue[count - 1].groupId === queue[count].groupId) {
+    const splitGroup = queue[count].groupId;
+    while (count > 0 && queue[count - 1].groupId === splitGroup) count--;
+  }
+  if (count === 0) throw new Error('Sync group exceeds server batch limit');
+  return queue.slice(0, count);
+}
+
+export class CloudflareSyncService {
   constructor() {
     this.isSyncing = false;
+    this.isPulling = false;
+    this.generation = 0;
+    this.lastError = null;
     this.syncIntervalId = null;
     this.isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
     this.listeners = new Set();
+    this.repository = null;
     this.updateHandler = null;
     this.currentTenantId = null;
     this.focusListenerAttached = false;
@@ -31,10 +50,7 @@ class CloudflareSyncService {
       window.addEventListener('online', () => {
         this.isOnline = true;
         this.notifyListeners('online');
-        this.flushQueue();
-        if (this.currentTenantId) {
-          this.pullUpdates(this.currentTenantId, this.updateHandler);
-        }
+        this.flushQueue().then(clear=>{ if (clear && this.currentTenantId) this.pullUpdates(this.currentTenantId, this.updateHandler); });
       });
 
       window.addEventListener('offline', () => {
@@ -51,8 +67,7 @@ class CloudflareSyncService {
 
     const onWindowActive = () => {
       if (this.isOnline && this.currentTenantId && !this.isSyncing) {
-        this.flushQueue();
-        this.pullUpdates(this.currentTenantId, this.updateHandler);
+        this.flushQueue().then(clear=>{ if(clear) this.pullUpdates(this.currentTenantId, this.updateHandler); });
       }
     };
 
@@ -69,7 +84,7 @@ class CloudflareSyncService {
   // Subscribe to sync status changes (for UI indicators)
   subscribe(callback) {
     this.listeners.add(callback);
-    return () => this.listeners.delete(callback);
+    return () => { this.listeners.delete(callback); };
   }
 
   notifyListeners(status, details = {}) {
@@ -89,35 +104,33 @@ class CloudflareSyncService {
   }
 
   getQueue() {
-    try {
-      const data = localStorage.getItem(QUEUE_STORAGE_KEY);
-      return data ? JSON.parse(data) : [];
-    } catch {
-      return [];
+    if (this.repository) return this.repository.current.outbox;
+    const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
+    const queue = raw === null ? [] : JSON.parse(raw);
+    if (!Array.isArray(queue) || queue.some(event => !event || typeof event.id !== 'string')) {
+      throw new Error('Invalid sync queue; original storage has been preserved for recovery');
     }
+    return queue;
   }
 
   getQueueLength() {
-    return this.getQueue().length;
+    return this.getQueue().filter(event => event.tenantId === getSessionUser()?.tenantId).length;
   }
 
   saveQueue(queue) {
-    try {
-      localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue));
-    } catch (e) {
-      console.warn('Failed to persist sync queue to localStorage:', e);
-    }
+    // Quota/corruption must never be mistaken for an empty, successfully saved queue.
+    localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue));
   }
 
   // Record an action to sync (e.g. new invoice, expense, product, customer, stock change)
   recordMutation(tenantId, branchId, entityType, entityId, action, payload) {
-    const queue = this.getQueue();
+    const queue = [...this.getQueue()];
     const eventId = payload?.idempotencyKey 
       ? `evt_${tenantId}_${entityType}_${payload.idempotencyKey}_${action}`
-      : `evt_${tenantId}_${entityType}_${entityId}_${action}`;
+      : `evt_${crypto.randomUUID()}`;
 
     // Prevent duplicate entries in local sync queue
-    if (queue.some(e => e.id === eventId)) {
+    if (!this.repository && queue.some(e => e.id === eventId)) {
       return;
     }
 
@@ -133,6 +146,11 @@ class CloudflareSyncService {
     };
 
     queue.push(event);
+    if (this.repository) {
+      // Do not flush uncommitted draft state. The periodic sync sees only the commit.
+      this.repository.enqueue(event);
+      return;
+    }
     this.saveQueue(queue);
     this.notifyListeners('queued', { event });
 
@@ -143,35 +161,47 @@ class CloudflareSyncService {
   }
 
   // Flush queued mutations to Cloudflare
-  async flushQueue() {
-    if (this.isSyncing || !this.isOnline) return;
+  async flushQueue({ pullAfterFlush = true } = {}) {
+    if (this.isSyncing || !this.isOnline || !getSessionToken() || !this.currentTenantId) return false;
 
-    const queue = this.getQueue();
-    if (queue.length === 0) return;
+    const queue = this.getQueue().filter(event => event.tenantId === this.currentTenantId);
+    if (queue.length === 0) return true;
 
+    const token = getSessionToken();
+    const generation = this.generation;
     this.isSyncing = true;
     this.notifyListeners('syncing');
 
     try {
       const tenantId = queue[0].tenantId;
-      const branchId = queue[0].branchId;
-      const batch = queue.slice(0, 100); // Process in batches of 100
+      // Preserve commit order across branch and tenant-level events. Never split
+      // a local aggregate transaction across two server transactions.
+      const batch = selectSyncBatch(queue);
 
       const baseUrl = getApiBaseUrl();
       const response = await fetch(`${baseUrl}/api/sync/push`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           tenantId,
-          branchId,
           events: batch
         })
       });
 
+      if (token !== getSessionToken() || generation !== this.generation) return;
       if (response.ok) {
         // Remove processed events from queue
-        const remainingQueue = this.getQueue().slice(batch.length);
-        this.saveQueue(remainingQueue);
+        const result = await response.json();
+        if (!result.success || !Array.isArray(result.acceptedIds)) throw new Error('Server did not acknowledge mutations');
+        const accepted = new Set(result.acceptedIds);
+        if (accepted.size !== batch.length || result.acceptedIds.length !== batch.length ||
+            batch.some(event => !accepted.has(event.id)))
+          throw new Error('Server returned incomplete or unrelated mutation acknowledgement');
+        const remainingQueue = this.getQueue().filter(event => !accepted.has(event.id));
+        if (this.repository?.durable) await this.repository.acknowledgeDurable(accepted);
+        else if (this.repository) this.repository.acknowledge(accepted);
+        else this.saveQueue(remainingQueue);
+        this.lastError = null;
         this.notifyListeners('synced_batch', { count: batch.length });
 
         // If more items remain, flush next batch
@@ -179,70 +209,68 @@ class CloudflareSyncService {
           setTimeout(() => this.flushQueue(), 100);
         } else {
           // Immediately pull to stay completely in lockstep with cloud
-          if (tenantId) {
+          if (tenantId && pullAfterFlush) {
             this.pullUpdates(tenantId, this.updateHandler);
           }
         }
+        return remainingQueue.length === 0;
       } else {
-        console.warn('Cloudflare sync returned non-200 status:', response.status);
+        const details=await response.json().catch(()=>null);
+        throw new Error(response.status===409
+          ? 'تعارض بين جهازين: لم تُرفع الحركة المحلية. زامن وراجع الحركة قبل إعادة المحاولة'
+          : details?.error || `Sync push failed: HTTP ${response.status}`);
       }
     } catch (err) {
-      // Network error or offline
+      this.lastError = err.message;
+      this.notifyListeners('error', { error: err.message });
       console.warn('Cloudflare sync failed (will retry automatically):', err.message);
+      return false;
     } finally {
       this.isSyncing = false;
-      this.notifyListeners('idle');
+      if (!this.lastError) this.notifyListeners('idle');
     }
   }
 
   // Pull latest updates from Cloudflare edge
   async pullUpdates(tenantId, onUpdatesReceived = null, forceSince = null) {
-    if (!this.isOnline || !tenantId) return 0;
+    if (!this.isOnline || !tenantId || !getSessionToken() || this.isPulling) return 0;
+    if (this.repository?.current.outbox.some(event=>event.tenantId===tenantId)) return 0;
+    const token = getSessionToken();
+    const generation = this.generation;
+    this.isPulling = true;
 
     const syncKey = getTenantSyncKey(tenantId);
-    const lastSync = forceSince !== null ? forceSince : parseInt(localStorage.getItem(syncKey) || '0', 10);
+    const lastSync = forceSince !== null ? forceSince : this.repository ? this.repository.current.cursor : parseInt(localStorage.getItem(syncKey) || '0', 10);
     const callback = onUpdatesReceived || this.updateHandler;
 
     try {
       const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/api/sync/pull?tenantId=${encodeURIComponent(tenantId)}&since=${lastSync}`);
-      if (!res.ok) return 0;
+      const res = await fetch(`${baseUrl}/api/sync/pull?tenantId=${encodeURIComponent(tenantId)}&cursor=${lastSync}`, { headers: authHeaders() });
+      if (!res.ok) throw new Error(`Sync pull failed: HTTP ${res.status}`);
+      if (token !== getSessionToken() || generation !== this.generation) return 0;
 
       const data = await res.json();
-      if (data.success && Array.isArray(data.events) && data.events.length > 0) {
+      if (token !== getSessionToken() || generation !== this.generation) return 0;
+      if (data.success && Array.isArray(data.events)) {
         // CRITICAL FIX: only advance cursor using the real server_timestamp from D1.
         // NEVER use Date.now() fallback — it jumps the cursor into the future and
         // causes any events pushed from Desktop/Mobile to be permanently skipped.
-        if (data.latestTimestamp && data.latestTimestamp > 0) {
-          localStorage.setItem(syncKey, String(data.latestTimestamp));
-        }
-        if (typeof callback === 'function') {
-          callback(data.events);
-        }
+        if (typeof callback !== 'function') throw new Error('No durable sync receiver');
+        await callback(data.events, data.nextCursor, data.conflictHeads);
+        if (token !== getSessionToken() || generation !== this.generation) return 0;
+        if (!this.repository && Number.isSafeInteger(data.nextCursor)) localStorage.setItem(syncKey, String(data.nextCursor));
         this.notifyListeners('synced_inbound', { count: data.events.length });
         return data.events.length;
       }
 
-      // When 0 events returned: use serverMaxTimestamp (returned by server)
-      // to detect and repair a corrupted cursor.
-      // If our cursor is HIGHER than the server's true max, we walked past all
-      // real data — walk the cursor back to (serverMaxTimestamp - 1) so next
-      // poll will catch any newly arriving events.
-      if (forceSince === null && data.serverMaxTimestamp && data.serverMaxTimestamp > 0) {
-        const currentCursor = parseInt(localStorage.getItem(syncKey) || '0', 10);
-        if (currentCursor > data.serverMaxTimestamp) {
-          const repairedCursor = Math.max(0, data.serverMaxTimestamp - 1);
-          console.warn(
-            `[Sync] Cursor repair: ${currentCursor} → ${repairedCursor} ` +
-            `(server max: ${data.serverMaxTimestamp})`
-          );
-          localStorage.setItem(syncKey, String(repairedCursor));
-        }
-      }
-      return 0;
+      throw new Error('Invalid sync response');
     } catch (err) {
+      this.lastError = err.message;
+      this.notifyListeners('error', { error: err.message });
       console.warn('Cloudflare pull error:', err.message);
       return 0;
+    } finally {
+      this.isPulling = false;
     }
   }
 
@@ -252,7 +280,7 @@ class CloudflareSyncService {
 
     try {
       const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/api/backup?tenantId=${encodeURIComponent(tenantId)}&latest=true`);
+      const res = await fetch(`${baseUrl}/api/backup?tenantId=${encodeURIComponent(tenantId)}&latest=true`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.backup?.snapshot) {
@@ -274,11 +302,11 @@ class CloudflareSyncService {
       const baseUrl = getApiBaseUrl();
       const res = await fetch(`${baseUrl}/api/backup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           tenantId,
           snapshot: fullSnapshotData,
-          version: '2.6.1'
+          version: '2.6.4'
         })
       });
 
@@ -298,11 +326,18 @@ class CloudflareSyncService {
     const targetTenant = tenantId || this.currentTenantId;
     if (!targetTenant) return { success: false, error: 'No active tenant' };
 
+    if (!this.isOnline || !getSessionToken()) return { success: false, error: 'Offline or unauthenticated' };
+    if (this.isSyncing || this.isPulling) return { success: false, error: 'Sync already in progress' };
+    this.lastError = null;
     this.notifyListeners('syncing');
-    await this.flushQueue();
-    const pulled = await this.pullUpdates(targetTenant, onUpdatesReceived || this.updateHandler);
-    this.notifyListeners('idle', { pulledCount: pulled });
-    return { success: true, pulledCount: pulled };
+    const clear = await this.flushQueue({ pullAfterFlush: false });
+    if (!clear && !this.lastError) {
+      this.lastError = 'لم تكتمل مزامنة العمليات المعلقة؛ أعد المحاولة';
+      this.notifyListeners('error', { error: this.lastError });
+    }
+    const pulled = clear ? await this.pullUpdates(targetTenant, onUpdatesReceived || this.updateHandler) : 0;
+    if (!this.lastError) this.notifyListeners('idle', { pulledCount: pulled });
+    return { success: clear && !this.lastError, pulledCount: pulled, ...(this.lastError ? { error: this.lastError } : {}) };
   }
 
   // Set handler for applying inbound synced events to local store
@@ -318,37 +353,20 @@ class CloudflareSyncService {
     }
     this.stopAutoSync();
 
-    // ─── Cursor Sanity Check ─────────────────────────────────────────────────
-    // If the stored cursor is in the future (caused by the Date.now() fallback
-    // bug that was shipped in earlier versions), reset it to 0 so we re-pull
-    // all events and nothing is permanently skipped.
-    if (tenantId && typeof localStorage !== 'undefined') {
-      const syncKey = getTenantSyncKey(tenantId);
-      const storedCursor = parseInt(localStorage.getItem(syncKey) || '0', 10);
-      const nowMs = Date.now();
-      if (storedCursor > nowMs + 5000) {
-        // Cursor is more than 5 seconds in the future — clearly corrupted.
-        console.warn(`[Sync] Resetting corrupted future cursor for ${tenantId}: ${storedCursor} → 0`);
-        localStorage.removeItem(syncKey);
-      }
-    }
-    // ─────────────────────────────────────────────────────────────────────────
-
     // Immediate initial sync (do not wait for first timer tick!)
     if (tenantId && this.isOnline) {
-      this.flushQueue();
-      this.pullUpdates(tenantId, this.updateHandler);
+      this.flushQueue().then(clear=>{ if(clear) this.pullUpdates(tenantId, this.updateHandler); });
     }
 
     this.syncIntervalId = setInterval(() => {
       if (this.isOnline && this.currentTenantId) {
-        this.flushQueue();
-        this.pullUpdates(this.currentTenantId, this.updateHandler);
+        this.flushQueue().then(clear=>{ if(clear) this.pullUpdates(this.currentTenantId, this.updateHandler); });
       }
     }, intervalMs);
   }
 
   stopAutoSync() {
+    this.generation++;
     if (this.syncIntervalId) {
       clearInterval(this.syncIntervalId);
       this.syncIntervalId = null;

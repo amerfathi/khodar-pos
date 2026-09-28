@@ -16,13 +16,15 @@ export default function SettingsModal({ isOpen, onClose, store, onOpenChangePass
 
   if (!isOpen) return null;
 
-  const handleSave = () => {
-    updateSettings(form);
-    setSaveSuccess(true);
-    setTimeout(() => {
-      setSaveSuccess(false);
-      onClose();
-    }, 800);
+  const handleSave = async () => {
+    try {
+      await updateSettings(form);
+      setSaveSuccess(true);
+      setTimeout(() => {
+        setSaveSuccess(false);
+        onClose();
+      }, 800);
+    } catch (error) { alert('تعذر حفظ الإعدادات: ' + error.message); }
   };
 
   const handleFileUpload = (e) => {
@@ -30,16 +32,14 @@ export default function SettingsModal({ isOpen, onClose, store, onOpenChangePass
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const content = event.target?.result;
       if (typeof content === 'string') {
-        const res = importBackupJSON(content);
-        if (res.success) {
-          alert('تم استيراد البيانات بنجاح!');
-          onClose();
-        } else {
-          alert('خطأ في قراءة ملف النسخة الاحتياطية: ' + res.error);
-        }
+        try {
+          const res = await importBackupJSON(content);
+          if (res.success) { alert('تم استيراد البيانات بنجاح!'); onClose(); }
+          else alert('خطأ في قراءة ملف النسخة الاحتياطية: ' + res.error);
+        } catch (error) { alert('تعذر استيراد النسخة: ' + error.message); }
       }
     };
     reader.readAsText(file);
@@ -385,10 +385,10 @@ export default function SettingsModal({ isOpen, onClose, store, onOpenChangePass
             <div className="pt-2 text-center">
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   if (window.confirm('هل أنت متأكد من استعادة البيانات النموذجية الأولية؟')) {
-                    resetToSampleData();
-                    onClose();
+                    try { await resetToSampleData(); onClose(); }
+                    catch (error) { alert(error.message); }
                   }
                 }}
                 className="text-[11px] text-slate-400 hover:text-slate-600 underline"

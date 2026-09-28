@@ -5,7 +5,7 @@ const ARTIFACT_DIR = 'C:\\Users\\IMDAD\\.gemini\\antigravity\\brain\\e7dac5c2-d3
 (async () => {
   const browser = await puppeteer.launch({
     executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    headless: 'new',
+    headless: true,
     args: ['--no-sandbox', '--disable-web-security', '--allow-file-access-from-files']
   });
   const page = await browser.newPage();

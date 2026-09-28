@@ -20,6 +20,7 @@ const DOT_COLORS = {
   info: 'bg-sky-500',
 };
 
+/** @param {{children?: React.ReactNode, variant?: string, size?: string, dot?: boolean, className?: string, icon?: React.ElementType}} props */
 export default function Badge({
   children,
   variant = 'neutral',

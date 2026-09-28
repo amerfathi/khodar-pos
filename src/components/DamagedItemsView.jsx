@@ -30,24 +30,27 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
         productId: prod.id,
         productName: prod.name,
         unit: prod.defaultUnit || 'صندوق',
-        costPerKg: prod.costPricePerKg || (prod.defaultPricePerKg * 0.75).toFixed(2), // default cost ~ 75% of price
+        costPerKg: prod.costPerKg ?? prod.costPricePerKg ?? '',
       }));
     } else {
       setForm(prev => ({ ...prev, productId: '', productName: '', costPerKg: '' }));
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.productName || !form.quantityKg || Number(form.quantityKg) <= 0) {
       alert('يرجى اختيار الصنف وتحديد كمية الوزن التالف بالكيلو');
       return;
     }
 
-    addDamagedItem({
+    try { await addDamagedItem({
       ...form,
       date: getCurrentDateFormatted(),
       time: getCurrentTimeFormatted(),
-    });
+    }); } catch (error) {
+      alert('تعذر حفظ سجل الإتلاف: ' + error.message);
+      return;
+    }
 
     setForm({
       productId: '',
@@ -63,9 +66,10 @@ export default function DamagedItemsView({ store, onOpenA4Report }) {
     setIsAddModalOpen(false);
   };
 
-  const handleDelete = (id, name) => {
+  const handleDelete = async (id, name) => {
     if (window.confirm(`هل أنت متأكد من حذف سجل إتلاف (${name})؟`)) {
-      deleteDamagedItem(id);
+      try { await deleteDamagedItem(id); }
+      catch (error) { alert('تعذر حذف سجل الإتلاف: ' + error.message); }
     }
   };
 

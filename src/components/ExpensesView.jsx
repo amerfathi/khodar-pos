@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   DollarSign, TrendingDown, Wallet, Plus, Trash2, Calendar, 
   ArrowDownLeft, Filter, Tag, FileText, CheckCircle2, Clock, User
@@ -22,6 +22,8 @@ export default function ExpensesView({ store }) {
   } = store;
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const savingRef = useRef(false);
   const [filterCategory, setFilterCategory] = useState('all');
   const [isCustomCategoryMode, setIsCustomCategoryMode] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
@@ -69,14 +71,14 @@ export default function ExpensesView({ store }) {
     return e.category === filterCategory;
   });
 
-  const handleAddExpense = () => {
+  const handleAddExpense = async () => {
+    if (savingRef.current) return;
     let finalAmount = Number(expenseForm.amount) || 0;
 
     // Determine category
     let finalCategory = expenseForm.category;
     if (isCustomCategoryMode && newCategoryInput.trim()) {
       finalCategory = newCategoryInput.trim();
-      addExpenseCategory(finalCategory);
     }
 
     // If calculated by hourly rate
@@ -93,34 +95,37 @@ export default function ExpensesView({ store }) {
       ? `${expenseForm.title} (${expenseForm.recipientName})`
       : expenseForm.title;
 
-    addExpense({
-      title: titleWithDetails,
-      category: finalCategory,
-      amount: finalAmount,
-      recipientName: expenseForm.recipientName || '',
-      date: todayStr,
-      time: getCurrentTimeFormatted(),
-      notes: expenseForm.notes || (expenseForm.hoursWorked ? `${expenseForm.hoursWorked} ساعة × ${expenseForm.hourlyRate} ${settings.currency}` : '')
-    });
-
-    setExpenseForm({
-      title: '',
-      category: finalCategory,
-      amount: '',
-      recipientType: 'daily_worker',
-      recipientName: '',
-      hourlyRate: '',
-      hoursWorked: '',
-      notes: '',
-    });
-    setIsCustomCategoryMode(false);
-    setNewCategoryInput('');
-    setIsAddModalOpen(false);
+    savingRef.current = true;
+    setIsSaving(true);
+    try {
+      await addExpense({
+        title: titleWithDetails,
+        category: finalCategory,
+        amount: finalAmount,
+        recipientName: expenseForm.recipientName || '',
+        date: todayStr,
+        time: getCurrentTimeFormatted(),
+        notes: expenseForm.notes || (expenseForm.hoursWorked ? `${expenseForm.hoursWorked} ساعة × ${expenseForm.hourlyRate} ${settings.currency}` : '')
+      });
+      setExpenseForm({
+        title: '', category: finalCategory, amount: '', recipientType: 'daily_worker',
+        recipientName: '', hourlyRate: '', hoursWorked: '', notes: ''
+      });
+      setIsCustomCategoryMode(false);
+      setNewCategoryInput('');
+      setIsAddModalOpen(false);
+    } catch (error) {
+      alert('تعذر حفظ المصروف: ' + error.message);
+    } finally {
+      savingRef.current = false;
+      setIsSaving(false);
+    }
   };
 
-  const handleDeleteExpense = (id, title) => {
+  const handleDeleteExpense = async (id, title) => {
     if (window.confirm(`هل أنت متأكد من حذف المصروف: "${title}"؟`)) {
-      deleteExpense(id);
+      try { await deleteExpense(id); }
+      catch (error) { alert('تعذر حذف المصروف: ' + error.message); }
     }
   };
 
@@ -337,7 +342,7 @@ export default function ExpensesView({ store }) {
       {/* Add Expense Modal */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => { if (!savingRef.current) setIsAddModalOpen(false); }}
         title="تسجيل مصروف جديد / يومية عمالة"
         subtitle="قيد وتوثيق المصروفات النثرية مع خصمها من نقدية الخزينة"
         maxWidth="max-w-md"
@@ -347,7 +352,8 @@ export default function ExpensesView({ store }) {
               variant="outline"
               size="md"
               className="flex-1"
-              onClick={() => setIsAddModalOpen(false)}
+              disabled={isSaving}
+              onClick={() => { if (!savingRef.current) setIsAddModalOpen(false); }}
             >
               إلغاء
             </Button>
@@ -355,6 +361,7 @@ export default function ExpensesView({ store }) {
               variant="primary"
               size="md"
               className="flex-1"
+              disabled={isSaving}
               onClick={handleAddExpense}
               icon={CheckCircle2}
             >
@@ -415,12 +422,14 @@ export default function ExpensesView({ store }) {
                   <Button
                     variant="primary"
                     size="sm"
-                    onClick={() => {
+                    onClick={async () => {
                       if (newCategoryInput.trim()) {
                         const trimmed = newCategoryInput.trim();
-                        addExpenseCategory(trimmed);
-                        setExpenseForm(prev => ({ ...prev, category: trimmed }));
-                        setIsCustomCategoryMode(false);
+                        try {
+                          await addExpenseCategory(trimmed);
+                          setExpenseForm(prev => ({ ...prev, category: trimmed }));
+                          setIsCustomCategoryMode(false);
+                        } catch (error) { alert('تعذر حفظ بند المصروف: ' + error.message); }
                       }
                     }}
                   >

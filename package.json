@@ -9,13 +9,29 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:start": "electron .",
-    "electron:build": "vite build && electron-builder --win"
+    "electron:build": "node scripts/verify-release-public-key.cjs && vite build && electron-builder --win",
+    "release:sign-windows": "node scripts/sign-windows-release.cjs",
+    "legacy:prepare-reset": "node scripts/prepare-legacy-reset.cjs",
+    "d1:prepare-clean-state": "node scripts/prepare-precommercial-cleanup.cjs",
+    "test:security": "node tests/security_regression.cjs",
+    "test:browser-atomic": "node tests/browser-atomic.test.mjs",
+    "test:browser-crash": "node tests/browser-atomic.test.mjs --crash",
+    "test:browser-idb-probe": "node tests/browser-atomic.test.mjs --idb-probe",
+    "test:browser-idb-engine": "node tests/browser-atomic.test.mjs --idb-engine",
+    "test:browser-idb-migrate": "node tests/browser-atomic.test.mjs --idb-migrate",
+    "test:browser-app-durable": "node tests/browser-app-durable.test.mjs",
+    "test:accounting": "node tests/accounting_audit_test.cjs && node tests/comprehensive_qa_suite.cjs",
+    "test": "npm run test:security && npm run test:integration && npm run test:accounting",
+    "lint": "eslint src functions electron tests",
+    "typecheck:core": "tsc --project tsconfig.core.json --pretty false",
+    "typecheck": "tsc --project tsconfig.json --pretty false",
+    "test:integration": "node --test tests/api-integration.test.mjs tests/storage.test.mjs tests/update-security.test.cjs tests/store-sync.test.mjs tests/store-business.test.mjs tests/store-durable.test.mjs tests/worker-atomic.test.mjs tests/atomic-store.test.mjs tests/backup-scheduler.test.mjs tests/backup-validation.test.mjs tests/sync-durable.test.mjs tests/financial-ui-await.test.mjs tests/desktop-update-ui.test.mjs tests/accounting-reconciliation.test.mjs tests/precommercial-cleanup.test.cjs"
   },
   "build": {
     "appId": "com.brraka.pos",
     "productName": "براكه",
     "directories": {
-      "output": "C:/Users/IMDAD/AppData/Local/Temp/khodar-release"
+      "output": "dist-electron"
     },
     "electronDist": "node_modules/electron/dist",
     "files": [
@@ -33,12 +49,12 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false,
-      "include": "build/installer.nsh",
+      "include": "electron/installer.nsh",
       "installerIcon": "electron/icon.ico",
       "uninstallerIcon": "electron/icon.ico",
-      "installerSidebar": "build/installerSidebar.bmp",
-      "uninstallerSidebar": "build/installerSidebar.bmp",
-      "installerHeader": "build/installerHeader.bmp",
+      "installerSidebar": "electron/installerSidebar.bmp",
+      "uninstallerSidebar": "electron/installerSidebar.bmp",
+      "installerHeader": "electron/installerHeader.bmp",
       "installerLanguages": [
         "ar_SA",
         "en_US"
@@ -52,6 +68,7 @@
     "@capacitor/app": "^8.1.1",
     "@capacitor/cli": "^8.5.2",
     "@capacitor/core": "^8.5.2",
+    "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "framer-motion": "^13.2.0",
     "lucide-react": "^0.475.0",
@@ -60,13 +77,27 @@
     "tailwind-merge": "^3.0.1"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260921.1",
+    "@eslint/js": "^10.0.1",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "electron": "^44.3.0",
     "electron-builder": "^26.15.3",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "miniflare": "^5.20260921.0-alpha",
     "postcss": "^8.5.1",
     "puppeteer-core": "^25.11.0",
+    "react-test-renderer": "^18.3.1",
     "tailwindcss": "^3.4.17",
+    "typescript": "^7.0.2",
     "vite": "^6.1.0"
+  },
+  "overrides": {
+    "xcode": {
+      "uuid": "^11.1.1"
+    }
   }
 }

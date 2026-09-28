@@ -1,6 +1,11 @@
 import React from 'react';
 import Button from './Button';
 
+/**
+ * @param {{icon?: React.ElementType, title: React.ReactNode, description?: React.ReactNode,
+ *   actionLabel?: string, onAction?: React.MouseEventHandler<HTMLButtonElement>,
+ *   actionIcon?: React.ElementType, className?: string}} props
+ */
 export default function EmptyState({
   icon: Icon,
   title,

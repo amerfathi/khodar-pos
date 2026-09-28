@@ -1,3 +1,4 @@
+import { apiFetch as fetch } from '../services/authSession.js';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { OFFICIAL_RELEASES } from '../services/releaseService';
 import { APP_VERSION, getApiBaseUrl } from '../config/appVersion';
@@ -36,7 +37,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
   // Comprehensive Edit Tenant State (تعديل شامل لكافة بيانات المشترك)
   const [editingTenant, setEditingTenant] = useState(null);
-  const [editForm, setEditForm] = useState({
+  const [editForm, setEditForm] = useState(/** @type {{companyName: string, storeCode: string, username: string, password: string, status: string, expiresAt: string, allowedBranches: string | number, phone: string, notes: string}} */ ({
     companyName: '',
     storeCode: '',
     username: '',
@@ -46,7 +47,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     allowedBranches: 1,
     phone: '',
     notes: ''
-  });
+  }));
   const [editError, setEditError] = useState('');
   const [editSuccess, setEditSuccess] = useState('');
 
@@ -185,12 +186,12 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     setIsAddModalOpen(true);
   };
 
-  const handleCreateTenant = (e) => {
+  const handleCreateTenant = async (e) => {
     e.preventDefault();
     setFormError('');
 
     try {
-      const newTenant = createTenantAccount({
+      const newTenant = await createTenantAccount({
         companyName,
         storeCode: storeCode.trim().toUpperCase(),
         username,
@@ -203,20 +204,23 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
       // Mark trial request as activated if this was initiated from a trial request
       if (activatingTrialId) {
-        if (updateTrialRequest) {
-          updateTrialRequest(activatingTrialId, { status: 'activated', tenantUsername: newTenant.username });
+        try {
+          const baseUrl = getApiBaseUrl();
+          const response = await fetch(`${baseUrl}/api/trial-requests`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: activatingTrialId, status: 'activated', tenantUsername: newTenant.username })
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          if (updateTrialRequest) await updateTrialRequest(activatingTrialId, { status: 'activated', tenantUsername: newTenant.username });
+          setActivatingTrialId(null);
+        } catch (error) {
+          alert('تم إنشاء الحساب، لكن تعذر تحديث طلب التجربة: ' + error.message);
         }
-        const baseUrl = getApiBaseUrl();
-        fetch(`${baseUrl}/api/trial-requests`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: activatingTrialId, status: 'activated', tenantUsername: newTenant.username })
-        }).catch(console.warn);
-        setActivatingTrialId(null);
       }
 
       // Prepare welcome WhatsApp message
-      const welcomeText = `مرحباً بكم في منظومة براكه لإدارة نقاط البيع والمحاسبة! 🥬✨\n\nتم تفعيل اشتراككم بنجاح:\n🏬 المنشأة: ${newTenant.companyName}\n🏷️ كود المتجر للربط السريع: ${newTenant.storeCode}\n👤 اسم المستخدم المالك: ${newTenant.username}\n🔑 كلمة المرور المبدئية: ${newTenant.password}\n📅 تاريخ انتهاء الصلاحية: ${newTenant.expiresAt}\n🌐 رابط الدخول المباشر: https://khodar-pos.pages.dev/?login=true\n\n💡 ملاحظة هامة:\nيمكن لجميع موظفي المحل تسجيل الدخول من أي جهاز (كمبيوتر / جوال / متصفح) بإدخال كود المتجر (${newTenant.storeCode}) ثم اسم المستخدم الخاص بهم.`;
+      const welcomeText = `مرحباً بكم في منظومة براكه لإدارة نقاط البيع والمحاسبة! 🥬✨\n\nتم تفعيل اشتراككم بنجاح:\n🏬 المنشأة: ${newTenant.companyName}\n🏷️ كود المتجر للربط السريع: ${newTenant.storeCode}\n👤 اسم المستخدم المالك: ${newTenant.username}\n🔑 كلمة المرور المبدئية: تم تعيينها عند إنشاء الحساب\n📅 تاريخ انتهاء الصلاحية: ${newTenant.expiresAt}\n🌐 رابط الدخول المباشر: https://khodar-pos.pages.dev/?login=true\n\n💡 ملاحظة هامة:\nيمكن لجميع موظفي المحل تسجيل الدخول من أي جهاز (كمبيوتر / جوال / متصفح) بإدخال كود المتجر (${newTenant.storeCode}) ثم اسم المستخدم الخاص بهم.`;
       
       setCreatedWelcomeMsg({
         text: welcomeText,
@@ -254,13 +258,13 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
     setEditSuccess('');
   };
 
-  const handleSaveEditTenant = (e) => {
+  const handleSaveEditTenant = async (e) => {
     e.preventDefault();
     setEditError('');
     setEditSuccess('');
 
     try {
-      updateTenantAccount(editingTenant.id, editForm);
+      await updateTenantAccount(editingTenant.id, editForm);
       setEditSuccess('تم حفظ كافة تعديلات المشترك بنجاح!');
       setTimeout(() => {
         setEditingTenant(null);
@@ -272,13 +276,14 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
   const handleDeleteTrial = async (reqId, reqName) => {
     if (window.confirm(`هل أنت متأكد من حذف طلب التجربة للتاجر "${reqName || ''}"؟`)) {
-      if (deleteTrialRequest) deleteTrialRequest(reqId);
-      setCloudTrialRequests(prev => prev.filter(r => r.id !== reqId));
       const baseUrl = getApiBaseUrl();
       try {
-        await fetch(`${baseUrl}/api/trial-requests?id=${reqId}`, { method: 'DELETE' });
+        const response = await fetch(`${baseUrl}/api/trial-requests?id=${reqId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (deleteTrialRequest) await deleteTrialRequest(reqId);
+        setCloudTrialRequests(prev => prev.filter(r => r.id !== reqId));
       } catch (e) {
-        console.warn(e);
+        alert('تعذر إكمال حذف طلب التجربة: ' + e.message);
       }
     }
   };
@@ -291,15 +296,16 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
   const handleToggleStatus = (tenant) => {
     const newStatus = tenant.status === 'active' ? 'suspended' : 'active';
-    updateTenantAccount(tenant.id, { status: newStatus });
+    void updateTenantAccount(tenant.id, { status: newStatus }).catch(err => alert(err.message));
   };
 
-  const handleExtendSubscription = (tenant, months) => {
+  const handleExtendSubscription = async (tenant, months) => {
     const currentExp = new Date(tenant.expiresAt || new Date());
     const base = currentExp < new Date() ? new Date() : currentExp;
     base.setMonth(base.getMonth() + months);
     const newDate = base.toISOString().split('T')[0];
-    updateTenantAccount(tenant.id, { expiresAt: newDate, status: 'active' });
+    try { await updateTenantAccount(tenant.id, { expiresAt: newDate, status: 'active' }); }
+    catch (err) { alert(err.message); return; }
     alert(`تم تمديد اشتراك (${tenant.companyName}) حتى ${newDate}`);
   };
 
@@ -547,7 +553,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                   {filteredTenants.map(tenant => {
                     const isSuper = tenant.role === 'super_admin';
                     const isExpired = tenant.expiresAt && tenant.expiresAt < new Date().toISOString().split('T')[0];
-                    const welcomeMsg = `بيانات الدخول لحسابكم في نظام نقاط البيع:\n🏬 المتجر: ${tenant.companyName}\n🏷️ كود المتجر: ${tenant.storeCode || '—'}\n👤 اسم المستخدم: ${tenant.username}\n🔑 كلمة المرور: ${tenant.password}\n📅 تاريخ الصلاحية: ${tenant.expiresAt}`;
+                    const welcomeMsg = `بيانات الدخول لحسابكم في نظام نقاط البيع:\n🏬 المتجر: ${tenant.companyName}\n🏷️ كود المتجر: ${tenant.storeCode || '—'}\n👤 اسم المستخدم: ${tenant.username}\n🔑 كلمة المرور: غير قابلة للاسترجاع\n📅 تاريخ الصلاحية: ${tenant.expiresAt}`;
 
                     return (
                       <tr key={tenant.id} className="hover:bg-slate-50/70 transition-colors">
@@ -584,7 +590,7 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
 
                         <td className="p-3.5 font-mono text-slate-700">
                           <span className="bg-slate-50 px-2 py-0.5 rounded border border-slate-200 text-[11px]">
-                            {tenant.password}
+                            {'غير مخزنة في الجهاز'}
                           </span>
                         </td>
 
@@ -716,9 +722,10 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                             {!isSuper && (
                               <button
                                 type="button"
-                                onClick={() => {
+                                onClick={async () => {
                                   if (window.confirm(`هل أنت متأكد من حذف حساب المشترك (${tenant.companyName}) نهائياً؟`)) {
-                                    deleteTenantAccount(tenant.id);
+                                    try { await deleteTenantAccount(tenant.id); }
+                                    catch (error) { alert(error.message); }
                                   }
                                 }}
                                 title="حذف الحساب"
@@ -1526,10 +1533,12 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
                   {editingTenant.role !== 'super_admin' && (
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         if (window.confirm(`هل أنت متأكد من حذف حساب المشترك (${editingTenant.companyName}) نهائياً؟`)) {
-                          deleteTenantAccount(editingTenant.id);
-                          setEditingTenant(null);
+                          try {
+                            await deleteTenantAccount(editingTenant.id);
+                            setEditingTenant(null);
+                          } catch (error) { alert(error.message); }
                         }
                       }}
                       className="px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -1631,10 +1640,12 @@ export default function SuperAdminPortal({ isOpen, onClose, store, onSwitchToSto
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   const count = Math.max(1, parseInt(editBranchesCount, 10) || 1);
-                  updateTenantAccount(editingBranchTenant.id, { allowedBranches: count });
-                  setEditingBranchTenant(null);
+                  try {
+                    await updateTenantAccount(editingBranchTenant.id, { allowedBranches: count });
+                    setEditingBranchTenant(null);
+                  } catch (error) { alert(error.message); }
                 }}
                 className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
               >

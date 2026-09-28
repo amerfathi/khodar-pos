@@ -1,6 +1,8 @@
 import React, { forwardRef } from 'react';
 
-const Input = forwardRef(function Input({
+/** @typedef {React.InputHTMLAttributes<HTMLInputElement> & {label?: string, error?: string, helperText?: string, prefixIcon?: React.ElementType, suffixIcon?: React.ElementType}} InputProps */
+/** @param {InputProps} props @param {React.ForwardedRef<HTMLInputElement>} ref */
+function InputField({
   label,
   required = false,
   error,
@@ -67,6 +69,8 @@ const Input = forwardRef(function Input({
       )}
     </div>
   );
-});
+}
+
+const Input = forwardRef(InputField);
 
 export default Input;

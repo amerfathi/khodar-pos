@@ -1,89 +1,45 @@
-// Cloudflare Pages Function: Pull Synchronization (Multi-Tenant)
-// Retrieves updates since the last known sync timestamp for a tenant
+import { authenticateRequest, requireTenant } from '../../_lib/auth.js';
+import { json, options } from '../../_lib/http.js';
+import { canSync, SYNC_TYPES } from '../../_lib/syncPolicy.js';
 
-export async function onRequestGet(context) {
-  const { request, env } = context;
+export const onRequestOptions = options;
+export async function onRequestGet({ request, env }) {
+  const auth = await authenticateRequest(request, env);
+  if (auth.error) return auth.error;
   const url = new URL(request.url);
-  const tenantId = url.searchParams.get('tenantId');
-  const since = parseInt(url.searchParams.get('since') || '0', 10);
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '500', 10), 1000);
-
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Content-Type': 'application/json'
-  };
-
-  if (!tenantId) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: 'tenantId مطلوب للاستعلام عن التحديثات'
-    }), { status: 400, headers: corsHeaders });
+  const accessError = requireTenant(auth, url.searchParams.get('tenantId'));
+  if (accessError) return accessError;
+  const since = Number(url.searchParams.get('cursor') || 0);
+  const limit = Math.min(Math.max(1, Number.parseInt(url.searchParams.get('limit') || '500', 10) || 500), 1000);
+  if (!Number.isSafeInteger(since) || since < 0) return json({ success: false, error: 'Invalid cursor' }, 400);
+  const maxRows = limit + 100;
+  const { results } = await env.DB.prepare('SELECT * FROM sync_events_v2 WHERE tenant_id = ? AND sequence > ? ORDER BY sequence LIMIT ?')
+    .bind(auth.principal.tenantId, since, maxRows).all();
+  let count = Math.min(limit, results.length);
+  while (count < results.length && results[count - 1]?.group_id && results[count - 1].group_id === results[count].group_id) count++;
+  // An authoritative restore is a synchronization barrier. Deliver all older
+  // events and the restore together, then leave newer events for the next pull.
+  const restoreIndex = results.slice(0, count).findIndex(row => row.entity_type === 'restore_snapshot');
+  if (restoreIndex >= 0) count = restoreIndex + 1;
+  const page = results.slice(0, count);
+  const visible = page.filter(row => canSync(auth.principal, row.entity_type) &&
+    (auth.principal.branchId === 'all' || row.branch_id === auth.principal.branchId));
+  const events = visible.map(row => ({
+    id: row.id, tenantId: row.tenant_id, branchId: row.branch_id, sequence: row.sequence, groupId: row.group_id,
+    entityType: row.entity_type, entityId: row.entity_id, action: row.action,
+    payload: JSON.parse(row.payload_json), conflictPolicyVersion: row.conflict_policy_version,
+    preconditions: row.preconditions_json ? JSON.parse(row.preconditions_json) : null,
+    clientTimestamp: row.client_timestamp, serverTimestamp: row.server_timestamp
+  }));
+  const fullTenantVisibility = auth.principal.branchId === 'all' &&
+    SYNC_TYPES.every(type => canSync(auth.principal, type));
+  const hasMore = results.length > count || results.length === maxRows;
+  let conflictHeads;
+  if (!hasMore) {
+    const heads=await env.DB.prepare('SELECT conflict_key,last_event_id FROM sync_conflict_heads WHERE tenant_id = ? ORDER BY conflict_key')
+      .bind(auth.principal.tenantId).all();
+    conflictHeads=Object.fromEntries(heads.results.map(row=>[row.conflict_key,row.last_event_id]));
   }
-
-  if (!env.DB) {
-    return new Response(JSON.stringify({
-      success: true,
-      events: [],
-      latestTimestamp: Date.now(),
-      mode: 'preview_without_d1'
-    }), { status: 200, headers: corsHeaders });
-  }
-
-  try {
-    const query = `
-      SELECT id, tenant_id, branch_id, entity_type, entity_id, action, payload_json, client_timestamp, server_timestamp
-      FROM sync_events
-      WHERE tenant_id = ? AND server_timestamp > ?
-      ORDER BY server_timestamp ASC
-      LIMIT ?
-    `;
-
-    const result = await env.DB.prepare(query).bind(tenantId, since, limit).all();
-
-    const events = (result.results || []).map(row => ({
-      id: row.id,
-      tenantId: row.tenant_id,
-      branchId: row.branch_id,
-      entityType: row.entity_type,
-      entityId: row.entity_id,
-      action: row.action,
-      payload: (() => {
-        try { return JSON.parse(row.payload_json); } catch { return row.payload_json; }
-      })(),
-      clientTimestamp: row.client_timestamp,
-      serverTimestamp: row.server_timestamp
-    }));
-
-    const latestTimestamp = events.length > 0
-      ? events[events.length - 1].serverTimestamp
-      : since; // keep caller's cursor unchanged when nothing new arrived
-
-    // Also return the absolute max server_timestamp for this tenant in D1.
-    // This helps clients with corrupted (too-high) cursors to re-anchor correctly.
-    let serverMaxTimestamp = latestTimestamp;
-    if (events.length === 0 && since > 0) {
-      try {
-        const maxResult = await env.DB.prepare(
-          'SELECT MAX(server_timestamp) as max_ts FROM sync_events WHERE tenant_id = ?'
-        ).bind(tenantId).first();
-        if (maxResult && maxResult.max_ts) {
-          serverMaxTimestamp = maxResult.max_ts;
-        }
-      } catch (e) { /* non-critical */ }
-    }
-
-    return new Response(JSON.stringify({
-      success: true,
-      events,
-      count: events.length,
-      latestTimestamp,
-      serverMaxTimestamp
-    }), { status: 200, headers: corsHeaders });
-
-  } catch (error) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: error.message || 'فشل جلب التحديثات من قاعدة بيانات كلاودفلير'
-    }), { status: 500, headers: corsHeaders });
-  }
+  return json({ success: true, events, count: events.length, nextCursor: page.at(-1)?.sequence || since,
+    hasMore, fullTenantVisibility, ...(conflictHeads ? {conflictHeads} : {}) });
 }

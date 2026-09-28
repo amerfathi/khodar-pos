@@ -19,10 +19,14 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
     city: '',
     notes: ''
   });
+  const [trialError, setTrialError] = useState('');
+  const [trialSending, setTrialSending] = useState(false);
   const [trialSubmitted, setTrialSubmitted] = useState(false);
 
   const handleTrialSubmit = async (e) => {
     e.preventDefault();
+    if (trialSending) return;
+    setTrialError('');
     if (!trialForm.name || !trialForm.phone || !trialForm.shopName) return;
 
     const payload = {
@@ -37,35 +41,18 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
       timestamp: Date.now()
     };
 
-    // 1. Send directly to Central Cloud API (Cloudflare D1) so it reaches the platform owner's SuperAdmin portal
-    const baseUrl = getApiBaseUrl();
-
+    setTrialSending(true);
     try {
-      await fetch(`${baseUrl}/api/trial-requests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      const response = await fetch(`${getApiBaseUrl()}/api/trial-requests`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload), signal: AbortSignal.timeout(15000)
       });
-    } catch (apiErr) {
-      console.warn('Could not post to cloud trial-requests API:', apiErr);
-    }
-
-    // 2. Record lead into Central Platform Store
-    if (store && store.addTrialRequest) {
-      try {
-        store.addTrialRequest(payload);
-      } catch (err) {
-        console.warn('Could not add to store:', err);
-      }
-    }
-
-    // 3. Also save to localStorage fallback queue
-    try {
-      const leads = JSON.parse(localStorage.getItem('khodar_trial_leads_v1') || localStorage.getItem('khodar_trial_leads') || '[]');
-      leads.unshift(payload);
-      localStorage.setItem('khodar_trial_leads_v1', JSON.stringify(leads));
-      localStorage.setItem('khodar_trial_leads', JSON.stringify(leads));
-    } catch (_) {}
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'لم يؤكد الخادم حفظ الطلب');
+    } catch (error) {
+      setTrialError(error.message || 'تعذر حفظ الطلب. لم يتم تأكيد إرساله.');
+      return;
+    } finally { setTrialSending(false); }
 
     // 4. Build WhatsApp notification
     const message = encodeURIComponent(
@@ -762,6 +749,7 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
               </div>
             ) : (
               <form onSubmit={handleTrialSubmit} className="space-y-3.5">
+                {trialError && <p role="alert" className="text-red-700">{trialError}</p>}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     الاسم الكامل <span className="text-rose-500">*</span>
@@ -842,6 +830,7 @@ export default function MarketingLandingPage({ onOpenLogin, store }) {
                   </button>
                   <button
                     type="submit"
+                    disabled={trialSending}
                     className="py-2 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm cursor-pointer"
                   >
                     تأكيد وإرسال طلب التجربة

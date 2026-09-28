@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import http from 'http';
 import fs from 'fs';
 
+if (!process.env.BRAKA_TEST_PASSWORD || !process.env.BRAKA_TEST_USERNAME) throw new Error('Configure isolated test account credentials in the environment; never use a production account');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.join(__dirname, '..');
@@ -168,8 +170,8 @@ async function runProductionBreakerAudit() {
       await storeCodeInput.type('BRK-101');
     }
 
-    await page.type('input[placeholder*="اسم المستخدم أو البريد"]', 'amerfathi123@gmail.com');
-    await page.type('input[type="password"]', 'A20101993f');
+    await page.type('input[placeholder*="اسم المستخدم أو البريد"]', process.env.BRAKA_TEST_USERNAME);
+    await page.type('input[type="password"]', process.env.BRAKA_TEST_PASSWORD);
 
     await page.evaluate(() => {
       const loginBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('تسجيل الدخول إلى النظام'));

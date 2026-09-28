@@ -8,7 +8,7 @@ import { APP_VERSION, getClientPlatform } from '../config/appVersion';
 import { BRRAKA_LOGO } from '../assets/branding';
 import ForgotPasswordModal from './ForgotPasswordModal';
 
-export default function LoginView({ store, onClose }) {
+export default function LoginView({ store, onClose = null }) {
   const { login } = store;
 
   // Remember storeCode across sessions for multi-tenancy

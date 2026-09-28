@@ -3,6 +3,9 @@
  * Manages Multi-Tenant store accounts across all platforms
  */
 
+import { authenticateRequest, requireSuperAdmin } from '../../_lib/auth.js';
+import { hashPassword } from '../../_lib/passwords.js';
+
 const CORS_HEADERS = {
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': '*',
@@ -11,32 +14,8 @@ const CORS_HEADERS = {
 };
 
 async function isAuthorizedSuperAdmin(request, env) {
-  const authHeader = request.headers.get('Authorization') || '';
-  const adminSecret = request.headers.get('x-super-admin-key') || '';
-  
-  let token = '';
-  if (authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else if (adminSecret) {
-    token = adminSecret.trim();
-  }
-
-  if (!token) return false;
-
-  if (env?.SUPER_ADMIN_SECRET && token === env.SUPER_ADMIN_SECRET) {
-    return true;
-  }
-
-  if (env?.DB) {
-    try {
-      const adminUser = await env.DB.prepare(
-        "SELECT id FROM tenants WHERE role = 'super_admin' AND (password_hash = ? OR ? = 'A20101993f') LIMIT 1"
-      ).bind(token, token).first();
-      if (adminUser) return true;
-    } catch (e) {}
-  }
-
-  return token === 'A20101993f' || token === 'admin';
+  const auth = await authenticateRequest(request, env);
+  return !requireSuperAdmin(auth);
 }
 
 export async function onRequestOptions() {
@@ -50,9 +29,9 @@ export async function onRequestGet(context) {
   }
 
   if (!(await isAuthorizedSuperAdmin(request, env))) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'غير مصرح: هذا الإجراء يتطلب صلاحيات مالك المنصة الرئيسي (Super Admin)' 
+    return new Response(JSON.stringify({
+      success: false,
+      error: 'غير مصرح: هذا الإجراء يتطلب صلاحيات مالك المنصة الرئيسي (Super Admin)'
     }), { status: 401, headers: CORS_HEADERS });
   }
 
@@ -97,9 +76,9 @@ export async function onRequestPost(context) {
   }
 
   if (!(await isAuthorizedSuperAdmin(request, env))) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'غير مصرح: إضافة المشتركين تتطلب صلاحيات مالك المنصة الرئيسي (Super Admin)' 
+    return new Response(JSON.stringify({
+      success: false,
+      error: 'غير مصرح: إضافة المشتركين تتطلب صلاحيات مالك المنصة الرئيسي (Super Admin)'
     }), { status: 401, headers: CORS_HEADERS });
   }
 
@@ -109,17 +88,23 @@ export async function onRequestPost(context) {
     const storeCode = (body.storeCode || '').trim().toUpperCase();
     const companyName = (body.companyName || '').trim();
     const username = (body.username || '').trim().toLowerCase();
-    const password = body.password || '123456';
-    const role = body.role || 'company_owner';
+    const password = body.password;
+    const role = 'company_owner';
     const status = body.status || 'active';
     const expiresAt = body.expiresAt || '2099-12-31';
-    const allowedBranches = Number(body.allowedBranches) || 1;
+    const allowedBranches = body.allowedBranches == null ? 1 : Number(body.allowedBranches);
     const phone = (body.phone || '').trim();
     const notes = (body.notes || '').trim();
     const now = new Date().toISOString();
+    const mainBranch = {
+      id: `branch-${crypto.randomUUID()}`, tenantId: id, name: 'الفرع الرئيسي',
+      code: 'BR-01', phone: '', address: '', managerName: '',
+      isMain: true, status: 'active', createdAt: now
+    };
 
-    if (!username || !storeCode) {
-      return new Response(JSON.stringify({ success: false, error: 'اسم المستخدم وكود المتجر مطلوبان' }), {
+    if (!username || !storeCode || typeof password !== 'string' || password.length < 12 ||
+        !Number.isSafeInteger(allowedBranches) || allowedBranches < 1) {
+      return new Response(JSON.stringify({ success: false, error: 'اسم المستخدم وكود المتجر وكلمة مرور قوية مطلوبة' }), {
         status: 400,
         headers: CORS_HEADERS
       });
@@ -137,20 +122,23 @@ export async function onRequestPost(context) {
       });
     }
 
-    await env.DB.prepare(
-      `INSERT OR REPLACE INTO tenants 
+    await env.DB.batch([env.DB.prepare(
+      `INSERT INTO tenants
        (id, store_code, company_name, username, password_hash, role, status, expires_at, allowed_branches, phone, notes, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM tenants WHERE id = ?), ?), ?)`
     ).bind(
-      id, storeCode, companyName, username, password, role, status, expiresAt, allowedBranches, phone, notes, id, now, now
-    ).run();
+      id, storeCode, companyName, username, await hashPassword(password), role, status, expiresAt, allowedBranches, phone, notes, id, now, now
+    ), env.DB.prepare(`INSERT INTO branches
+      (id, tenant_id, name, code, phone, address, manager_name, is_main, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(mainBranch.id, id, mainBranch.name, mainBranch.code, mainBranch.phone,
+        mainBranch.address, mainBranch.managerName, 1, mainBranch.status, now, now)]);
 
     const createdTenant = {
       id,
       storeCode,
       companyName,
       username,
-      password,
       role,
       status,
       expiresAt,
@@ -161,7 +149,7 @@ export async function onRequestPost(context) {
       updatedAt: now
     };
 
-    return new Response(JSON.stringify({ success: true, tenant: createdTenant }), {
+    return new Response(JSON.stringify({ success: true, tenant: createdTenant, mainBranch }), {
       headers: CORS_HEADERS
     });
   } catch (err) {
@@ -182,9 +170,9 @@ export async function onRequestPatch(context) {
   }
 
   if (!(await isAuthorizedSuperAdmin(request, env))) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'غير مصرح: تعديل بيانات المشتركين تتطلب صلاحيات مالك المنصة الرئيسي (Super Admin)' 
+    return new Response(JSON.stringify({
+      success: false,
+      error: 'غير مصرح: تعديل بيانات المشتركين تتطلب صلاحيات مالك المنصة الرئيسي (Super Admin)'
     }), { status: 401, headers: CORS_HEADERS });
   }
 
@@ -215,7 +203,8 @@ export async function onRequestPatch(context) {
     }
     if (body.password !== undefined) {
       updates.push("password_hash = ?");
-      bindings.push(body.password);
+      bindings.push(await hashPassword(body.password));
+      updates.push("auth_version = COALESCE(auth_version, 0) + 1");
     }
     if (body.status !== undefined) {
       updates.push("status = ?");
@@ -246,7 +235,7 @@ export async function onRequestPatch(context) {
     const sql = `UPDATE tenants SET ${updates.join(', ')} WHERE id = ?`;
     await env.DB.prepare(sql).bind(...bindings).run();
 
-    return new Response(JSON.stringify({ success: true, id, updates: body }), {
+    return new Response(JSON.stringify({ success: true, id }), {
       headers: CORS_HEADERS
     });
   } catch (err) {
@@ -267,9 +256,9 @@ export async function onRequestDelete(context) {
   }
 
   if (!(await isAuthorizedSuperAdmin(request, env))) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'غير مصرح: حذف المشتركين يتطلب صلاحيات مالك المنصة الرئيسي (Super Admin)' 
+    return new Response(JSON.stringify({
+      success: false,
+      error: 'غير مصرح: حذف المشتركين يتطلب صلاحيات مالك المنصة الرئيسي (Super Admin)'
     }), { status: 401, headers: CORS_HEADERS });
   }
 
@@ -283,6 +272,8 @@ export async function onRequestDelete(context) {
       });
     }
 
+    const target = await env.DB.prepare('SELECT role FROM tenants WHERE id = ?').bind(id).first();
+    if (target?.role === 'super_admin') return new Response(JSON.stringify({ success: false, error: 'Cannot delete platform administrator' }), { status: 403, headers: CORS_HEADERS });
     await env.DB.prepare("DELETE FROM tenants WHERE id = ?").bind(id).run();
 
     return new Response(JSON.stringify({ success: true, id }), {

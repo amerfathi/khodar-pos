@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import http from 'http';
 import fs from 'fs';
 
+if (!process.env.BRAKA_TEST_PASSWORD || !process.env.BRAKA_TEST_USERNAME) throw new Error('Configure isolated test account credentials in the environment; never use a production account');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -100,8 +102,9 @@ async function runMasterAudit() {
 
     const pageErrors = [];
     page.on('pageerror', (err) => {
-      pageErrors.push(err.message);
-      console.warn('Page Error:', err.message);
+      const message = err instanceof Error ? err.message : String(err);
+      pageErrors.push(message);
+      console.warn('Page Error:', message);
     });
 
     // -----------------------------------------------------------------
@@ -210,7 +213,11 @@ async function runMasterAudit() {
         minimize: () => {},
         maximize: () => {},
         close: () => {},
-        isMaximized: async () => false
+        isMaximized: async () => false,
+        downloadUpdate: async () => ({success:false,error:'Audit mock'}),
+        cancelDownloadUpdate: () => {},
+        installUpdate: async () => ({success:false,error:'Audit mock'}),
+        onDownloadProgress: () => () => {}
       };
     });
 
@@ -240,8 +247,8 @@ async function runMasterAudit() {
       assert('Store Code (BRK-101) Accepted in Login Screen', true);
     }
 
-    await page.type('input[placeholder*="اسم المستخدم أو البريد"]', 'amerfathi123@gmail.com');
-    await page.type('input[type="password"]', 'A20101993f');
+    await page.type('input[placeholder*="اسم المستخدم أو البريد"]', process.env.BRAKA_TEST_USERNAME);
+    await page.type('input[type="password"]', process.env.BRAKA_TEST_PASSWORD);
     
     await page.evaluate(() => {
       const submitBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('تسجيل الدخول إلى النظام'));
@@ -268,16 +275,16 @@ async function runMasterAudit() {
       if (searchInput) {
         await searchInput.focus();
         await page.keyboard.type('طماطم');
-        let searchVal = await page.evaluate(() => document.querySelector('input[placeholder*="بحث"]')?.value);
+        let searchVal = await page.evaluate(() => /** @type {HTMLInputElement | null} */ (document.querySelector('input[placeholder*="بحث"]'))?.value);
         assert('Arabic Typing Functional in Search Input', searchVal === 'طماطم', `Got: ${searchVal}`);
 
         await page.keyboard.press('Backspace');
         await page.keyboard.press('Backspace');
-        searchVal = await page.evaluate(() => document.querySelector('input[placeholder*="بحث"]')?.value);
+        searchVal = await page.evaluate(() => /** @type {HTMLInputElement | null} */ (document.querySelector('input[placeholder*="بحث"]'))?.value);
         assert('Backspace Functional in Search Input', searchVal === 'طما', `Got: ${searchVal}`);
 
         await page.evaluate(() => {
-          const el = document.querySelector('input[placeholder*="بحث"]');
+          const el = /** @type {HTMLInputElement | null} */ (document.querySelector('input[placeholder*="بحث"]'));
           if (el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
         });
       }
@@ -378,7 +385,7 @@ async function runMasterAudit() {
       });
 
       await page.evaluate(() => {
-        const el = document.querySelector('input[placeholder*="بحث"]');
+        const el = /** @type {HTMLInputElement | null} */ (document.querySelector('input[placeholder*="بحث"]'));
         if (el) {
           el.value = '<script>alert("XSS")</script>';
           el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -388,7 +395,7 @@ async function runMasterAudit() {
       assert('XSS Script Tag Injection Safely Neutralized', !xssExecuted);
 
       await page.evaluate(() => {
-        const el = document.querySelector('input[placeholder*="بحث"]');
+        const el = /** @type {HTMLInputElement | null} */ (document.querySelector('input[placeholder*="بحث"]'));
         if (el) {
           el.value = "' OR '1'='1' --";
           el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -398,7 +405,7 @@ async function runMasterAudit() {
       assert('SQL Injection String Safely Handled in Search', true);
 
       await page.evaluate(() => {
-        const el = document.querySelector('input[placeholder*="بحث"]');
+        const el = /** @type {HTMLInputElement | null} */ (document.querySelector('input[placeholder*="بحث"]'));
         if (el) {
           el.value = '';
           el.dispatchEvent(new Event('input', { bubbles: true }));

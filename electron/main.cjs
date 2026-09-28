@@ -19,12 +19,15 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
+      webSecurity: true,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.cjs')
     }
   });
 
   const indexPath = path.join(__dirname, '../dist/index.html');
+  mainWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  mainWindow.webContents.on('will-attach-webview', event => event.preventDefault());
   mainWindow.loadFile(indexPath);
 
   mainWindow.once('ready-to-show', () => {
@@ -33,12 +36,12 @@ function createWindow() {
   });
 
   // Window control IPC events from custom titlebar
-  ipcMain.on('window-minimize', () => {
-    if (mainWindow) mainWindow.minimize();
+  ipcMain.on('window-minimize', event => {
+    if (trustedSender(event)) mainWindow.minimize();
   });
 
-  ipcMain.on('window-maximize', () => {
-    if (!mainWindow) return;
+  ipcMain.on('window-maximize', event => {
+    if (!trustedSender(event)) return;
     if (mainWindow.isMaximized()) {
       mainWindow.unmaximize();
     } else {
@@ -46,12 +49,12 @@ function createWindow() {
     }
   });
 
-  ipcMain.on('window-close', () => {
-    if (mainWindow) mainWindow.close();
+  ipcMain.on('window-close', event => {
+    if (trustedSender(event)) mainWindow.close();
   });
 
-  ipcMain.handle('window-is-maximized', () => {
-    return mainWindow ? mainWindow.isMaximized() : false;
+  ipcMain.handle('window-is-maximized', event => {
+    return trustedSender(event) ? mainWindow.isMaximized() : false;
   });
 
   // Keyboard shortcuts
@@ -77,7 +80,7 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith('file://')) {
       event.preventDefault();
-      shell.openExternal(url);
+      if (/^(https?:|mailto:|tel:)/.test(url)) void shell.openExternal(url);
     }
   });
 
@@ -89,163 +92,80 @@ function createWindow() {
 // -------------------------------------------------------------
 // In-App Desktop Auto-Update Engine (Direct Download & Install)
 // -------------------------------------------------------------
-const fs = require('fs');
-const https = require('https');
-const http = require('http');
-const { spawn } = require('child_process');
-
-let activeDownloadRequest = null;
-let downloadedInstallerPath = null;
-
-function downloadFileWithRedirects(url, destPath, onProgress, onDone, onError) {
-  const protocol = url.startsWith('https') ? https : http;
-  
-  const req = protocol.get(url, { headers: { 'User-Agent': 'KhodarPOS-Desktop-Updater' } }, (res) => {
-    // Handle HTTP Redirects (e.g. 301, 302, 307 from GitHub Releases to S3)
-    if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-      return downloadFileWithRedirects(res.headers.location, destPath, onProgress, onDone, onError);
-    }
-
-    if (res.statusCode !== 200) {
-      return onError(new Error(`Download failed with HTTP status: ${res.statusCode}`));
-    }
-
-    const totalBytes = parseInt(res.headers['content-length'] || '0', 10);
-    let receivedBytes = 0;
-    let startTime = Date.now();
-    let lastEmitTime = 0;
-
-    const fileStream = fs.createWriteStream(destPath);
-
-    res.on('data', (chunk) => {
-      receivedBytes += chunk.length;
-      const now = Date.now();
-      // Throttle IPC emissions to every 100ms
-      if (now - lastEmitTime > 100 || receivedBytes === totalBytes) {
-        lastEmitTime = now;
-        const elapsedSec = Math.max((now - startTime) / 1000, 0.1);
-        const speedBytesPerSec = Math.round(receivedBytes / elapsedSec);
-        const percent = totalBytes > 0 ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100)) : 0;
-        onProgress({
-          receivedBytes,
-          totalBytes,
-          percent,
-          speedBytesPerSec
-        });
-      }
-    });
-
-    res.pipe(fileStream);
-
-    fileStream.on('finish', () => {
-      fileStream.close(() => onDone(destPath));
-    });
-
-    fileStream.on('error', (err) => {
-      fs.unlink(destPath, () => {});
-      onError(err);
-    });
-  });
-
-  req.on('error', (err) => {
-    fs.unlink(destPath, () => {});
-    onError(err);
-  });
-
-  activeDownloadRequest = req;
+const fs = require('node:fs');
+const https = require('node:https');
+const { spawn } = require('node:child_process');
+const { pipeline } = require('node:stream/promises');
+const { Transform } = require('node:stream');
+const { validateDownloadUrl, verifyManifest, verifyFile } = require('./update-security.cjs');
+let activeAbort = null;
+let verifiedUpdate = null;
+function trustedSender(event) {
+  return mainWindow && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame;
 }
-
-ipcMain.handle('download-update', async (event, downloadUrl) => {
-  if (!downloadUrl) return { success: false, error: 'رابط التحميل غير متوفر' };
-
-  try {
-    const tempDir = app.getPath('temp');
-    const destFile = path.join(tempDir, `KhodarPOS-Update-${Date.now()}.exe`);
-
-    return new Promise((resolve) => {
-      downloadFileWithRedirects(
-        downloadUrl,
-        destFile,
-        (progress) => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('download-progress', progress);
-          }
-        },
-        (savedPath) => {
-          activeDownloadRequest = null;
-          downloadedInstallerPath = savedPath;
-          resolve({ success: true, filePath: savedPath });
-        },
-        (err) => {
-          activeDownloadRequest = null;
-          resolve({ success: false, error: err.message });
-        }
-      );
+function download(url, signal, redirects = 0) {
+  validateDownloadUrl(url, redirects > 0);
+  if (redirects > 5) throw new Error('Too many redirects');
+  return new Promise((resolve,reject) => {
+    const req=https.get(url,{signal,timeout:30000},res=>{
+      if ([301,302,303,307,308].includes(res.statusCode)) {
+        res.resume();
+        try { resolve(download(new URL(res.headers.location,url).href,signal,redirects+1)); } catch(error) { reject(error); }
+      } else if(res.statusCode===200) resolve(res);
+      else { res.resume();reject(new Error('Update download failed')); }
     });
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.on('cancel-download-update', () => {
-  if (activeDownloadRequest) {
-    activeDownloadRequest.abort();
-    activeDownloadRequest = null;
-  }
-});
-
-ipcMain.handle('install-update', async (event, installerPath) => {
-  const targetPath = installerPath || downloadedInstallerPath;
-  if (!targetPath || !fs.existsSync(targetPath)) {
-    return { success: false, error: 'ملف التحديث غير موجود' };
-  }
-
+    req.on('timeout',()=>req.destroy(new Error('Update download timed out')));
+    req.on('error',reject);
+  });
+}
+ipcMain.handle('download-update', async (event) => {
+  if (!trustedSender(event) || activeAbort) return {success:false,error:'Update request denied'};
+  let partial;
   try {
-    const tempDir = app.getPath('temp');
-
-    // Clean any previous updater bat files
-    try {
-      const existingBats = fs.readdirSync(tempDir).filter(f => f.startsWith('khodar-updater-') && f.endsWith('.bat'));
-      existingBats.forEach(f => {
-        try { fs.unlinkSync(path.join(tempDir, f)); } catch (e) {}
-      });
-    } catch (e) {}
-
-    const updaterBat = path.join(tempDir, `khodar-updater-${Date.now()}.bat`);
-
-    // FIX: Wait 3 seconds for Electron to fully exit and release all file locks
-    // before launching the installer. This eliminates the "cannot close" NSIS dialog.
-    const batContent = `@echo off
-chcp 65001 >nul
-rem Wait for Electron to fully exit and release all file locks (app.exit called before this)
-timeout /t 3 /nobreak >nul
-rem Belt-and-suspenders: kill any remaining process by name
-taskkill /F /IM "براكه.exe" >nul 2>&1
-taskkill /F /IM "KhodarPOS.exe" >nul 2>&1
-taskkill /F /IM "electron.exe" >nul 2>&1
-timeout /t 1 /nobreak >nul
-rem Launch the installer — app is guaranteed dead by now
-start "" "${targetPath.replace(/\\/g, '\\\\')}"
-exit /b 0
-`;
-    fs.writeFileSync(updaterBat, batContent, 'utf-8');
-
-    // FIX 1: windowsHide:true → CMD window is completely invisible to the user
-    const child = spawn('cmd.exe', ['/c', updaterBat], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true  // ← THE KEY FIX: no CMD window ever appears
-    });
+    activeAbort = new AbortController();
+    const response = await fetch('https://khodar-pos.pages.dev/api/releases/latest?platform=windows&current='+app.getVersion(), {signal:AbortSignal.timeout(15000),redirect:'error'});
+    if(!response.ok) throw new Error('Release service unavailable');
+    const text = await response.text();
+    if(text.length>65536) throw new Error('Manifest too large');
+    const data=JSON.parse(text);
+    // The pinned public key is supplied by the release owner. Missing key fails closed.
+    const publicKey=await fs.promises.readFile(path.join(__dirname,'release-public-key.pem'),'utf8');
+    const manifest=verifyManifest(data.signedManifest,publicKey,app.getVersion());
+    const dir=await fs.promises.mkdtemp(path.join(app.getPath('temp'),'braka-update-'));
+    partial=path.join(dir,'installer.partial');
+    const stream=await download(manifest.url,activeAbort.signal);
+    let count=0;
+    const meter=new Transform({transform(chunk,encoding,callback){
+      count+=chunk.length;
+      if(count>manifest.size) return callback(new Error('Update exceeds signed size'));
+      if(mainWindow) mainWindow.webContents.send('download-progress',{receivedBytes:count,totalBytes:manifest.size,percent:Math.floor(count*100/manifest.size)});
+      callback(null,chunk);
+    }});
+    await pipeline(stream,meter,fs.createWriteStream(partial,{flags:'wx'}),{signal:activeAbort.signal});
+    await verifyFile(partial,manifest);
+    const installer=path.join(dir,'KhodarPOS-Setup.exe');
+    await fs.promises.rename(partial,installer);
+    verifiedUpdate={installer,manifest};
+    return {success:true,filePath:installer};
+  } catch(error) {
+    if(partial) await fs.promises.unlink(partial).catch(()=>{});
+    return {success:false,error:error.message};
+  } finally {activeAbort=null;}
+});
+ipcMain.on('cancel-download-update',event=>{
+  if(trustedSender(event)) activeAbort?.abort();
+});
+ipcMain.handle('install-update', async event=>{
+  if(!trustedSender(event) || !verifiedUpdate) return {success:false,error:'No verified update'};
+  try {
+    await verifyFile(verifiedUpdate.installer,verifiedUpdate.manifest);
+    // No renderer-controlled path, shell, batch file, or process-name termination.
+    const child=spawn(verifiedUpdate.installer,[],{detached:true,stdio:'ignore',windowsHide:true});
+    await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
     child.unref();
-
-    // FIX 2: Exit app IMMEDIATELY (no setTimeout delay) so Electron releases
-    // all file locks BEFORE the BAT's 3-second wait expires and installer starts.
-    app.exit(0);
-
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
+    app.quit();
+    return {success:true};
+  } catch(error) {return {success:false,error:error.message};}
 });
 
 app.whenReady().then(() => {

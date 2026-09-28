@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // In-App Desktop Auto-Update
   downloadUpdate: (url) => ipcRenderer.invoke('download-update', url),
   cancelDownloadUpdate: () => ipcRenderer.send('cancel-download-update'),
-  installUpdate: (filePath) => ipcRenderer.invoke('install-update', filePath),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
   onDownloadProgress: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('download-progress', handler);

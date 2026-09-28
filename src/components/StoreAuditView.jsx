@@ -8,7 +8,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatCurrency, getCurrentDateFormatted } from '../utils/formatters';
 
-export default function StoreAuditView({ store, onOpenA4Report, onNavigate }) {
+export default function StoreAuditView({ store, onOpenA4Report }) {
   const { 
     invoices, 
     customers, 

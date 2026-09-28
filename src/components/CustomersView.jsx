@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   Users, UserPlus, Phone, MapPin, DollarSign, ArrowDownLeft, 
   Search, Plus, Edit2, Trash2, CheckCircle2, History, FileText,
@@ -15,6 +15,8 @@ export default function CustomersView({ store, onSelectCustomerForInvoice, onOpe
 
   // Payment modal state
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const savingPaymentRef = useRef(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentNote, setPaymentNote] = useState('سداد دفعة نقدية');
@@ -29,6 +31,7 @@ export default function CustomersView({ store, onSelectCustomerForInvoice, onOpe
     notes: '',
     initialBalance: 0
   });
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false);
 
   // Edit customer modal state
   const [editingCustomer, setEditingCustomer] = useState(null);
@@ -56,26 +59,41 @@ export default function CustomersView({ store, onSelectCustomerForInvoice, onOpe
     setIsPaymentModalOpen(true);
   };
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment = async () => {
+    if (savingPaymentRef.current) return;
     if (!selectedCustomer || !paymentAmount || Number(paymentAmount) <= 0) {
       alert('يرجى كتابة مبلغ سداد صحيح');
       return;
     }
 
-    recordCustomerPayment(selectedCustomer.id, paymentAmount, paymentNote, paymentMethod);
-    setIsPaymentModalOpen(false);
-    setSelectedCustomer(null);
+    savingPaymentRef.current = true;
+    setIsSavingPayment(true);
+    try {
+      await recordCustomerPayment(selectedCustomer.id, paymentAmount, paymentNote, paymentMethod);
+      setIsPaymentModalOpen(false);
+      setSelectedCustomer(null);
+    } catch (error) {
+      alert('تعذر حفظ سداد العميل: ' + error.message);
+    } finally {
+      savingPaymentRef.current = false;
+      setIsSavingPayment(false);
+    }
   };
 
-  const handleCreateCustomer = () => {
+  const handleCreateCustomer = async () => {
+    if (isSavingCustomer) return;
     if (!customerForm.name.trim()) {
       alert('يرجى كتابة اسم العميل');
       return;
     }
 
-    addCustomer(customerForm);
-    setCustomerForm({ name: '', phone: '', address: '', initialBalance: 0, notes: '' });
-    setIsNewCustomerModalOpen(false);
+    setIsSavingCustomer(true);
+    try {
+      await addCustomer(customerForm);
+      setCustomerForm({ name: '', phone: '', address: '', initialBalance: 0, notes: '' });
+      setIsNewCustomerModalOpen(false);
+    } catch (error) { alert('تعذر حفظ العميل: ' + error.message); }
+    finally { setIsSavingCustomer(false); }
   };
 
   // Open Edit Customer Modal
@@ -91,21 +109,24 @@ export default function CustomersView({ store, onSelectCustomerForInvoice, onOpe
   };
 
   // Save Customer Edits
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
+    if (isSavingCustomer) return;
     if (!editForm.name.trim()) {
       alert('يرجى كتابة اسم العميل');
       return;
     }
 
-    updateCustomer(editingCustomer.id, {
+    setIsSavingCustomer(true);
+    try { await updateCustomer(editingCustomer.id, {
       name: editForm.name.trim(),
       phone: editForm.phone.trim(),
       address: editForm.address.trim(),
       notes: editForm.notes.trim(),
       balance: Number(editForm.balance) || 0
     });
-
-    setEditingCustomer(null);
+      setEditingCustomer(null);
+    } catch (error) { alert('تعذر تحديث العميل: ' + error.message); }
+    finally { setIsSavingCustomer(false); }
   };
 
   return (
@@ -521,7 +542,7 @@ export default function CustomersView({ store, onSelectCustomerForInvoice, onOpe
       {/* Payment Modal */}
       <Modal
         isOpen={isPaymentModalOpen && !!selectedCustomer}
-        onClose={() => setIsPaymentModalOpen(false)}
+        onClose={() => { if (!savingPaymentRef.current) setIsPaymentModalOpen(false); }}
         title="سداد دفعة من الحساب"
         subtitle={selectedCustomer ? `العميل: ${selectedCustomer.name}` : ''}
         maxWidth="max-w-md"
@@ -531,7 +552,8 @@ export default function CustomersView({ store, onSelectCustomerForInvoice, onOpe
               variant="outline"
               size="md"
               className="flex-1"
-              onClick={() => setIsPaymentModalOpen(false)}
+              onClick={() => { if (!savingPaymentRef.current) setIsPaymentModalOpen(false); }}
+              disabled={isSavingPayment}
             >
               إلغاء
             </Button>
@@ -540,9 +562,10 @@ export default function CustomersView({ store, onSelectCustomerForInvoice, onOpe
               size="md"
               className="flex-1"
               onClick={handleConfirmPayment}
+              disabled={isSavingPayment}
               icon={CheckCircle2}
             >
-              تأكيد السداد وتخفيض الدين
+              {isSavingPayment ? 'جارٍ حفظ السداد...' : 'تأكيد السداد وتخفيض الدين'}
             </Button>
           </div>
         }

@@ -994,7 +994,7 @@ async function generatePDF() {
   });
 
   const page = await browser.newPage();
-  await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+  await page.setContent(htmlContent, { waitUntil: 'load' });
 
   console.log('Rendering PDF to:', OUTPUT_PDF);
   await page.pdf({

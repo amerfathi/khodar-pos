@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   TrendingUp, TrendingDown, DollarSign, Wallet, 
   Plus, Trash2, Calendar, PieChart, ArrowUpRight, ArrowDownRight, FileSpreadsheet, ShieldAlert
@@ -9,6 +9,8 @@ export default function ExpensesAndReports({ store }) {
   const { invoices, expenses, settings, addExpense, deleteExpense, customers, customerPayments } = store;
 
   const [isAddExpenseModalOpen, setIsAddExpenseModalOpen] = useState(false);
+  const [isSavingExpense, setIsSavingExpense] = useState(false);
+  const savingExpenseRef = useRef(false);
   const [expenseForm, setExpenseForm] = useState({
     title: '',
     category: 'عمالة',
@@ -50,25 +52,35 @@ export default function ExpensesAndReports({ store }) {
   const allTimeExpenses = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
   const totalMarketDebt = customers.reduce((sum, c) => sum + (c.balance > 0 ? c.balance : 0), 0);
 
-  const handleCreateExpense = () => {
+  const handleCreateExpense = async () => {
+    if (savingExpenseRef.current) return;
     if (!expenseForm.title || !expenseForm.amount || Number(expenseForm.amount) <= 0) {
       alert('يرجى كتابة بيان المصروف والمبلغ بشكل صحيح');
       return;
     }
 
-    addExpense({
+    savingExpenseRef.current = true;
+    setIsSavingExpense(true);
+    try { await addExpense({
       ...expenseForm,
       date: todayStr,
       time: getCurrentTimeFormatted(),
-    });
+    }); } catch (error) {
+      alert('تعذر حفظ المصروف: ' + error.message);
+      return;
+    } finally {
+      savingExpenseRef.current = false;
+      setIsSavingExpense(false);
+    }
 
     setExpenseForm({ title: '', category: 'عمالة', amount: '', notes: '' });
     setIsAddExpenseModalOpen(false);
   };
 
-  const handleDeleteExpense = (id) => {
+  const handleDeleteExpense = async (id) => {
     if (window.confirm('هل أنت متأكد من حذف هذا المصروف؟')) {
-      deleteExpense(id);
+      try { await deleteExpense(id); }
+      catch (error) { alert('تعذر حذف المصروف: ' + error.message); }
     }
   };
 
@@ -282,7 +294,8 @@ export default function ExpensesAndReports({ store }) {
             <div className="flex gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setIsAddExpenseModalOpen(false)}
+                onClick={() => { if (!savingExpenseRef.current) setIsAddExpenseModalOpen(false); }}
+                disabled={isSavingExpense}
                 className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl"
               >
                 إلغاء
@@ -290,9 +303,10 @@ export default function ExpensesAndReports({ store }) {
               <button
                 type="button"
                 onClick={handleCreateExpense}
+                disabled={isSavingExpense}
                 className="flex-2 py-2.5 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-xl shadow-md shadow-red-600/20"
               >
-                تسجيل المصروف
+                {isSavingExpense ? 'جارٍ حفظ المصروف...' : 'تسجيل المصروف'}
               </button>
             </div>
           </div>

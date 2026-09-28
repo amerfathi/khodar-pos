@@ -1,138 +1,40 @@
-// Cloudflare Pages Function: Automated Cloud Backups
-// Stores compressed/JSON state snapshots per tenant
+import { validateTenantPayload } from '../_lib/syncPolicy.js';
+import { authenticateRequest, requireAdmin, requireTenant } from '../_lib/auth.js';
+import { badRequest, json, options } from '../_lib/http.js';
 
-export async function onRequestPost(context) {
-  const { request, env } = context;
+const MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;
+export async function onRequestOptions() { return options(); }
 
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json'
-  };
-
+export async function onRequestPost({ request, env }) {
+  const auth = await authenticateRequest(request, env);
+  const adminError = requireAdmin(auth);
+  if (adminError) return adminError;
   try {
-    const { tenantId, snapshot, version = '2.5.0' } = await request.json();
-
-    if (!tenantId || !snapshot) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'بيانات غير مكتملة: tenantId و snapshot مطلوبة'
-      }), { status: 400, headers: corsHeaders });
-    }
-
-    const snapshotString = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot);
-    const backupId = `bkp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const sizeBytes = new TextEncoder().encode(snapshotString).length;
-
-    if (!env.DB) {
-      return new Response(JSON.stringify({
-        success: true,
-        backupId,
-        sizeBytes,
-        mode: 'preview_without_d1',
-        message: 'تم استقبال النسخة الاحتياطية بنجاح'
-      }), { status: 200, headers: corsHeaders });
-    }
-
-    await env.DB.prepare(`
-      INSERT INTO tenant_backups (id, tenant_id, snapshot_json, size_bytes, version, created_at)
-      VALUES (?, ?, ?, ?, ?, datetime('now'))
-    `).bind(backupId, tenantId, snapshotString, sizeBytes, version).run();
-
-    return new Response(JSON.stringify({
-      success: true,
-      backupId,
-      sizeBytes,
-      timestamp: new Date().toISOString()
-    }), { status: 200, headers: corsHeaders });
-
-  } catch (error) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: error.message || 'فشل حفظ النسخة الاحتياطية'
-    }), { status: 500, headers: corsHeaders });
-  }
+    const { tenantId, snapshot, version = 'unknown' } = await request.json();
+    const accessError = requireTenant(auth, tenantId);
+    if (accessError) return accessError;
+    validateTenantPayload(snapshot, auth.principal.tenantId);
+    const serialized = JSON.stringify(snapshot);
+    const sizeBytes = new TextEncoder().encode(serialized).length;
+    if (!snapshot || sizeBytes > MAX_SNAPSHOT_BYTES) return badRequest('Invalid or oversized backup');
+    const id = crypto.randomUUID();
+    await env.DB.prepare('INSERT INTO tenant_backups (id, tenant_id, snapshot_json, size_bytes, version, created_at) VALUES (?, ?, ?, ?, ?, datetime(\'now\'))')
+      .bind(id, auth.principal.tenantId, serialized, sizeBytes, String(version).slice(0, 32)).run();
+    return json({ success: true, backupId: id, sizeBytes });
+  } catch { return badRequest('Invalid backup request'); }
 }
 
-export async function onRequestGet(context) {
-  const { request, env } = context;
-  const url = new URL(request.url);
-  const tenantId = url.searchParams.get('tenantId');
-
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Content-Type': 'application/json'
-  };
-
-  if (!tenantId) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: 'tenantId مطلوب لعرض النسخ الاحتياطية'
-    }), { status: 400, headers: corsHeaders });
-  }
-
-  if (!env.DB) {
-    return new Response(JSON.stringify({
-      success: true,
-      backups: []
-    }), { status: 200, headers: corsHeaders });
-  }
-
-  try {
-    const latestOnly = url.searchParams.get('latest') === 'true';
-    if (latestOnly) {
-      const latest = await env.DB.prepare(`
-        SELECT id, tenant_id, snapshot_json, size_bytes, version, created_at
-        FROM tenant_backups
-        WHERE tenant_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-      `).bind(tenantId).first();
-
-      let parsedSnapshot = null;
-      if (latest && latest.snapshot_json) {
-        try {
-          parsedSnapshot = JSON.parse(latest.snapshot_json);
-        } catch (e) {
-          parsedSnapshot = latest.snapshot_json;
-        }
-      }
-
-      return new Response(JSON.stringify({
-        success: true,
-        backup: latest ? { ...latest, snapshot: parsedSnapshot } : null
-      }), { status: 200, headers: corsHeaders });
-    }
-
-    const list = await env.DB.prepare(`
-      SELECT id, tenant_id, size_bytes, version, created_at
-      FROM tenant_backups
-      WHERE tenant_id = ?
-      ORDER BY created_at DESC
-      LIMIT 10
-    `).bind(tenantId).all();
-
-    return new Response(JSON.stringify({
-      success: true,
-      backups: list.results || []
-    }), { status: 200, headers: corsHeaders });
-
-  } catch (error) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: error.message || 'فشل استرجاع قائمة النسخ الاحتياطية'
-    }), { status: 500, headers: corsHeaders });
-  }
-}
-
-export async function onRequestOptions() {
-  return new Response(null, {
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '86400'
-    }
-  });
+export async function onRequestGet({ request, env }) {
+  const auth = await authenticateRequest(request, env);
+  const adminError = requireAdmin(auth);
+  if (adminError) return adminError;
+  const tenantId = new URL(request.url).searchParams.get('tenantId');
+  const accessError = requireTenant(auth, tenantId);
+  if (accessError) return accessError;
+  const latest = await env.DB.prepare('SELECT id, tenant_id, snapshot_json, size_bytes, version, created_at FROM tenant_backups WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1')
+    .bind(auth.principal.tenantId).first();
+  if (!latest) return json({ success: true, backup: null });
+  try { latest.snapshot = JSON.parse(latest.snapshot_json); } catch { return json({ success: false, error: 'Backup is corrupt' }, 500); }
+  delete latest.snapshot_json;
+  return json({ success: true, backup: latest });
 }

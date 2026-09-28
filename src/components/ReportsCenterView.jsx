@@ -8,8 +8,9 @@ import {
   FileSpreadsheet, Receipt, Wallet, Coins, Landmark, BarChart3, HelpCircle
 } from 'lucide-react';
 import { formatCurrency, formatWeight, getCurrentDateFormatted } from '../utils/formatters';
+import { buildReportSnapshot, buildReceivableAging } from '../services/reportRegistry';
 
-export default function ReportsCenterView({ store, initialReportType = 'executive' }) {
+export default function ReportsCenterView({ store, initialReportType = 'executive', initialPartnerId = '' }) {
   const { 
     invoices, customers, expenses, damagedItems, 
     workers, workerTransactions, settings, products, 
@@ -29,7 +30,7 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
   // Supplier selection for supplier statement
   const [selectedSupplierId, setSelectedSupplierId] = useState(suppliers[0]?.id || '');
   // Partner selection for partner statement
-  const [selectedPartnerId, setSelectedPartnerId] = useState(partners[0]?.id || '');
+  const [selectedPartnerId, setSelectedPartnerId] = useState(initialPartnerId || partners[0]?.id || '');
   // Cashier actual count for shift reconciliation
   const [cashierActualCash, setCashierActualCash] = useState('');
   // Toggle grid cards visibility
@@ -38,32 +39,22 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
   const [copiedWhatsapp, setCopiedWhatsapp] = useState(false);
 
   const todayStr = getCurrentDateFormatted();
+  const reportStartDate = (() => {
+    if (dateFilter === 'all') return null;
+    const date = new Date(`${todayStr}T12:00:00`);
+    if (dateFilter === 'yesterday') date.setDate(date.getDate() - 1);
+    if (dateFilter === 'week') date.setDate(date.getDate() - 6);
+    if (dateFilter === 'month') date.setDate(1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  })();
 
   // Helper date filtering
   const filterByDate = (dateStr) => {
     if (!dateStr) return true;
     if (dateFilter === 'all') return true;
-    if (dateFilter === 'today') return dateStr === todayStr;
-    
-    const d = new Date(dateStr);
-    const now = new Date();
-    
-    if (dateFilter === 'yesterday') {
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      return dateStr === yesterday.toISOString().split('T')[0];
-    }
-    if (dateFilter === 'week') {
-      const weekAgo = new Date(now);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      return d >= weekAgo;
-    }
-    if (dateFilter === 'month') {
-      const monthAgo = new Date(now);
-      monthAgo.setMonth(monthAgo.getMonth() - 1);
-      return d >= monthAgo;
-    }
-    return true;
+    const day = String(dateStr).slice(0, 10);
+    if (dateFilter === 'yesterday') return day === reportStartDate;
+    return day >= reportStartDate && day <= todayStr;
   };
 
   // Filtered collections
@@ -74,33 +65,39 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
   const filteredPurchases = (purchases || []).filter(pur => filterByDate(pur.date));
   const filteredSalesReturns = (salesReturns || []).filter(ret => filterByDate(ret.date));
   const filteredPurchaseReturns = (purchaseReturns || []).filter(ret => filterByDate(ret.date));
+  const salesReturnLines = filteredSalesReturns.flatMap(ret =>
+    (ret.items || ret.returnedItems || [ret]).map((item, index) => ({ ret, item, index })));
   const filteredCustPayments = (customerPayments || []).filter(p => filterByDate(p.date));
   const filteredSupPayments = (supplierPayments || []).filter(p => filterByDate(p.date));
+  const reportSnapshot = buildReportSnapshot(store, { dateFilter, asOfDate: todayStr });
 
   // 1. Sales Totals
   const totalGrossSales = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.finalTotal) || 0), 0);
   const totalSalesReturnsAmount = filteredSalesReturns.reduce((sum, r) => sum + (Number(r.totalRefundAmount) || 0), 0);
-  const totalNetSales = Math.max(0, totalGrossSales - totalSalesReturnsAmount);
+  const totalNetSales = reportSnapshot.netSales;
   const totalSalesRevenue = totalNetSales;
 
-  const totalCashCollected = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.paidAmount) || 0), 0);
-  const totalDebtRepaid = filteredCustPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const totalImmediatePaid = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.paidAmount) || 0), 0);
+  const totalCashCollected = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.cashAmount ?? (inv.paymentMethod === 'cash' ? inv.paidAmount : 0)) || 0), 0);
+  const totalDebtRepaid = filteredCustPayments.filter(p => p.method !== 'bank').reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const totalBankDebtRepaid = filteredCustPayments.filter(p => p.method === 'bank').reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const totalCashFromCustomers = totalCashCollected + totalDebtRepaid;
-  const totalCreditSales = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.remainingDebt) || 0), 0);
-  const totalGrossNetKgSold = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.totalNetWeight) || 0), 0);
-  const totalSalesReturnsKg = filteredSalesReturns.reduce((sum, r) => sum + (Number(r.returnedNetWeight) || 0), 0);
-  const totalNetKgSold = Math.max(0, totalGrossNetKgSold - totalSalesReturnsKg);
-  const totalPackagesSold = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.totalPackages) || 0), 0);
+  const totalCreditSales = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.remainingDebt) || 0), 0)
+    - filteredSalesReturns.filter(ret => ret.refundMethod === 'credit_deduction').reduce((sum, ret) => sum + (Number(ret.totalRefundAmount) || 0), 0);
+  const totalGrossNetKgSold = filteredInvoices.reduce((sum, inv) => sum + (inv.items || []).reduce((itemSum, item) => itemSum + (Number(item.netWeight) || 0), 0), 0);
+  const totalSalesReturnsKg = filteredSalesReturns.reduce((sum, ret) => sum + (ret.items || ret.returnedItems || []).reduce((itemSum, item) => itemSum + (Number(item.returnedWeight) || 0), 0), 0);
+  const totalNetKgSold = totalGrossNetKgSold - totalSalesReturnsKg;
+  const totalPackagesSold = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.totalPackages) || (inv.items || []).reduce((itemSum, item) => itemSum + (Number(item.packageCount) || 0), 0)), 0);
 
   // 2. Purchases Totals (المشتريات والتوريد من الموردين)
   const totalGrossPurchasesCost = filteredPurchases.reduce((sum, p) => sum + (Number(p.totalCost) || 0), 0);
   const totalPurchaseReturnsAmount = filteredPurchaseReturns.reduce((sum, r) => sum + (Number(r.totalRefundAmount) || 0), 0);
-  const totalNetPurchasesCost = Math.max(0, totalGrossPurchasesCost - totalPurchaseReturnsAmount);
+  const totalNetPurchasesCost = reportSnapshot.netPurchases;
   const totalPurchasesCost = totalNetPurchasesCost;
 
   const totalGrossPurchasesKg = filteredPurchases.reduce((sum, p) => sum + (Number(p.quantityKg) || 0), 0);
   const totalPurchaseReturnsKg = filteredPurchaseReturns.reduce((sum, r) => sum + (Number(r.returnedKg) || 0), 0);
-  const totalNetPurchasesKg = Math.max(0, totalGrossPurchasesKg - totalPurchaseReturnsKg);
+  const totalNetPurchasesKg = totalGrossPurchasesKg - totalPurchaseReturnsKg;
   const totalPurchasesKg = totalNetPurchasesKg;
   const totalPurchasesPackages = filteredPurchases.reduce((sum, p) => sum + (Number(p.packagesCount) || 0), 0);
 
@@ -113,19 +110,27 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
   const totalAdvancesGiven = filteredWorkerTxs.filter(t => t.type === 'advance').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
   // 4. P&L Net Profit
-  const grossTradeProfit = totalNetSales - totalNetPurchasesCost;
-  const netEstimatedProfit = totalNetSales - totalNetPurchasesCost - generalExpensesAmount - totalSalariesPaid - totalDamagedLoss;
+  const grossTradeProfit = reportSnapshot.grossProfit;
+  const netEstimatedProfit = reportSnapshot.netProfit;
 
   // 5. Drawer Cash Reconciliation for shift
-  const shiftCashExpenses = filteredExpenses.filter(e => !e.isSupplierPayment && !e.isWorkerPayment && e.paymentMethod !== 'bank').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-  const shiftCashPurchases = filteredPurchases.filter(p => p.paymentMethod === 'cash').reduce((sum, p) => sum + (Number(p.totalCost) - (Number(p.creditAmount) || 0)), 0);
-  const shiftSupplierCashPayments = filteredSupPayments.filter(p => p.paymentMethod !== 'bank').reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const shiftPartnerCashDrawings = partnerDrawings.filter(d => filterByDate(d.date) && d.method !== 'bank' && d.source !== 'bank').reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  const shiftWorkerCashSalaries = filteredWorkerTxs.filter(t => t.type === 'salary_payment' && t.paymentMethod !== 'bank').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-  const shiftWorkerCashAdvances = filteredWorkerTxs.filter(t => t.type === 'advance' && t.paymentMethod !== 'bank').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  const shiftInvoices = invoices.filter(inv => inv.status !== 'voided');
+  const shiftOpeningCash = Number(settings.openingCashDrawerFloat) || 0;
+  const shiftCashCollected = shiftInvoices.reduce((sum, inv) => sum + (Number(inv.cashAmount ?? (inv.paymentMethod === 'cash' ? inv.paidAmount : 0)) || 0), 0);
+  const shiftCustomerCashPayments = (customerPayments || []).filter(p => p.method !== 'bank').reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const shiftPurchaseCashRefunds = (purchaseReturns || []).filter(ret => ret.refundMethod === 'cash').reduce((sum, ret) => sum + (Number(ret.totalRefundAmount) || 0), 0);
+  const shiftCashInflow = shiftCashCollected + shiftCustomerCashPayments + shiftPurchaseCashRefunds;
+  const shiftCashExpenses = expenses.filter(e => !e.isSupplierPayment && !e.isWorkerPayment && e.paymentMethod !== 'bank').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  const shiftCashPurchases = (purchases || []).reduce((sum, p) => sum + (Number(p.paidCashAmount ?? p.cashAmount ?? (p.paymentMethod === 'cash' ? Number(p.totalCost) - Number(p.creditAmount || 0) : 0)) || 0), 0);
+  const shiftSupplierCashPayments = (supplierPayments || []).filter(p => p.paymentMethod !== 'bank').reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const shiftPartnerCashDrawings = partnerDrawings.filter(d => d.method !== 'bank' && d.source !== 'bank').reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  const shiftWorkerCashSalaries = workerTransactions.filter(t => t.type === 'salary_payment' && t.paymentMethod !== 'bank').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  const shiftWorkerCashAdvances = workerTransactions.filter(t => t.type === 'advance' && t.paymentMethod !== 'bank').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  const shiftSalesCashRefunds = (salesReturns || []).filter(ret => ret.refundMethod === 'cash').reduce((sum, ret) => sum + (Number(ret.totalRefundAmount) || 0), 0);
+  const shiftPartnerCashDistributions = profitDistributions.reduce((sum, row) => sum + (row.shares || []).filter(share => share.method !== 'bank').reduce((shareSum, share) => shareSum + (Number(share.netPayout) || 0), 0), 0);
 
-  const shiftCashOutflow = shiftCashExpenses + shiftCashPurchases + shiftSupplierCashPayments + shiftPartnerCashDrawings + shiftWorkerCashSalaries + shiftWorkerCashAdvances;
-  const expectedDrawerCash = totalCashFromCustomers - shiftCashOutflow;
+  const shiftCashOutflow = shiftCashExpenses + shiftCashPurchases + shiftSupplierCashPayments + shiftPartnerCashDrawings + shiftWorkerCashSalaries + shiftWorkerCashAdvances + shiftSalesCashRefunds + shiftPartnerCashDistributions;
+  const expectedDrawerCash = buildReportSnapshot(store, { dateFilter: 'all' }).cash;
   const actualCounted = cashierActualCash === '' ? expectedDrawerCash : Number(cashierActualCash);
   const cashDiff = actualCounted - expectedDrawerCash;
 
@@ -135,22 +140,30 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
     let packagesCount = 0;
     let totalRevenue = 0;
 
+    let totalCOGS = 0;
     filteredInvoices.forEach(inv => {
       (inv.items || []).forEach(item => {
-        if (item.productId === prod.id || item.name?.includes(prod.name.split(' ')[0])) {
+        if (item.productId === prod.id) {
           soldKg += Number(item.netWeight) || 0;
           packagesCount += Number(item.packageCount) || 0;
           totalRevenue += Number(item.total) || 0;
+          totalCOGS += (Number(item.netWeight) || 0) * (Number(item.costPerKg) || 0);
         }
       });
     });
-
-    const relatedPurchases = (purchases || []).filter(p => p.productId === prod.id || (p.productName && p.productName.includes(prod.name.split(' ')[0])));
-    const avgCostPerKg = relatedPurchases.length > 0
-      ? relatedPurchases.reduce((s, p) => s + (Number(p.costPerKg) || 0), 0) / relatedPurchases.length
-      : (Number(prod.costPrice) || (Number(prod.defaultPricePerKg) * 0.75));
-
-    const totalCOGS = soldKg * avgCostPerKg;
+    filteredSalesReturns.forEach(ret => {
+      const original = invoices.find(inv => inv.id === ret.invoiceId);
+      (ret.items || ret.returnedItems || []).forEach(item => {
+        if (item.productId !== prod.id) return;
+        const weight = Number(item.returnedWeight || item.quantityKg) || 0;
+        const sourceLine = Number.isInteger(item.sourceLineIndex) ? original?.items?.[item.sourceLineIndex]
+          : original?.items?.find(line => line.productId === item.productId);
+        soldKg -= weight;
+        totalRevenue -= Number(item.subtotal) || weight * (Number(item.originalPricePerKg) || 0);
+        totalCOGS -= weight * (Number(sourceLine?.costPerKg) || 0);
+      });
+    });
+    const avgCostPerKg = soldKg > 0 ? totalCOGS / soldKg : 0;
     const grossProfit = totalRevenue - totalCOGS;
     const marginPercent = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
     const avgSellingPricePerKg = soldKg > 0 ? (totalRevenue / soldKg) : prod.defaultPricePerKg;
@@ -172,58 +185,21 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
   }).filter(p => p.soldKg > 0 || dateFilter === 'all').sort((a, b) => b.grossProfit - a.grossProfit);
 
   // 7. Customer Debt Aging
-  const customerDebtAging = customers
-    .filter(c => (Number(c.balance) || 0) > 0)
-    .map(cust => {
-      const custInvoices = invoices.filter(i => i.customerId === cust.id && i.status !== 'voided');
-      const lastInvoice = custInvoices.length > 0 ? custInvoices[custInvoices.length - 1] : null;
-      const lastDateStr = lastInvoice?.date || cust.createdAt?.split('T')[0] || todayStr;
-      
-      const lastDate = new Date(lastDateStr);
-      const today = new Date(todayStr);
-      const diffDays = Math.max(0, Math.floor((today - lastDate) / (1000 * 60 * 60 * 24)));
-      
-      let bucket = '1-7';
-      let bucketLabel = '1 - 7 أيام (حديث)';
-      let severity = 'low';
-      
-      if (diffDays > 30) {
-        bucket = '>30';
-        bucketLabel = 'أكثر من 30 يوماً (راكد / حرج)';
-        severity = 'critical';
-      } else if (diffDays > 15) {
-        bucket = '16-30';
-        bucketLabel = '16 - 30 يوماً (متأخر)';
-        severity = 'high';
-      } else if (diffDays > 7) {
-        bucket = '8-15';
-        bucketLabel = '8 - 15 يوماً (متوسط)';
-        severity = 'medium';
-      }
-
-      return {
-        id: cust.id,
-        name: cust.name,
-        phone: cust.phone || '—',
-        balance: Number(cust.balance) || 0,
-        lastInvoiceDate: lastDateStr,
-        diffDays,
-        bucket,
-        bucketLabel,
-        severity
-      };
-    }).sort((a, b) => b.diffDays - a.diffDays);
+  const customerDebtAging = buildReceivableAging(store, { asOfDate: todayStr });
 
   const totalDebtAgingSum = customerDebtAging.reduce((sum, c) => sum + c.balance, 0);
   const debtBucket7 = customerDebtAging.filter(c => c.bucket === '1-7').reduce((sum, c) => sum + c.balance, 0);
   const debtBucket15 = customerDebtAging.filter(c => c.bucket === '8-15').reduce((sum, c) => sum + c.balance, 0);
   const debtBucket30 = customerDebtAging.filter(c => c.bucket === '16-30').reduce((sum, c) => sum + c.balance, 0);
   const debtBucketOver30 = customerDebtAging.filter(c => c.bucket === '>30').reduce((sum, c) => sum + c.balance, 0);
+  const debtBucketUnknown = customerDebtAging.filter(c => c.bucket === 'unknown').reduce((sum, c) => sum + c.balance, 0);
 
   // 8. Supplier Statement Data (الموردين)
   const targetSupplier = suppliers.find(s => s.id === selectedSupplierId) || suppliers[0];
   const supplierPurchasesList = (purchases || []).filter(p => targetSupplier && (p.supplierId === targetSupplier.id || p.supplierName === targetSupplier.name));
   const targetSupplierPayments = (store.supplierPayments || []).filter(p => targetSupplier && p.supplierId === targetSupplier.id);
+  const targetPurchaseReturns = (purchaseReturns || []).filter(ret => targetSupplier &&
+    (ret.supplierId === targetSupplier.id || purchases.find(p => p.id === ret.purchaseId)?.supplierId === targetSupplier.id));
 
   const supplierLedger = [
     ...supplierPurchasesList.map(p => {
@@ -244,6 +220,19 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
         netEffect: cred
       };
     }),
+    ...targetPurchaseReturns.map(ret => ({
+      id: ret.id,
+      date: ret.date,
+      time: ret.time || '',
+      type: 'return',
+      docName: `مردود توريد #${ret.purchaseId}`,
+      description: `مردود ${ret.productName || 'بضاعة'} (${ret.returnedKg || 0} كجم)`,
+      totalCost: 0,
+      paidImmediate: 0,
+      creditAdded: 0,
+      paymentMade: ret.refundMethod === 'supplier_debt_deduction' ? Number(ret.totalRefundAmount) || 0 : 0,
+      netEffect: ret.refundMethod === 'supplier_debt_deduction' ? -(Number(ret.totalRefundAmount) || 0) : 0
+    })),
     ...targetSupplierPayments.map(pay => ({
       id: pay.id,
       date: pay.date,
@@ -257,10 +246,17 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
       paymentMade: Number(pay.amount) || 0,
       netEffect: -(Number(pay.amount) || 0)
     }))
-  ].sort((a, b) => a.date.localeCompare(b.date));
+  ].sort((a, b) => `${a.date || ''} ${a.time || ''}`.localeCompare(`${b.date || ''} ${b.time || ''}`));
 
-  let supRunningBal = Number(targetSupplier?.initialBalance) || 0;
-  const supplierLedgerWithBalance = supplierLedger.map(item => {
+  const supplierBaseBalance = Number.isFinite(Number(targetSupplier?.initialBalance))
+    ? Number(targetSupplier.initialBalance)
+    : (Number(targetSupplier?.balance) || 0) - supplierLedger.reduce((sum, item) => sum + item.netEffect, 0);
+  const supplierOpeningBalance = supplierBaseBalance + supplierLedger
+    .filter(item => reportStartDate && item.date && item.date < reportStartDate)
+    .reduce((sum, item) => sum + item.netEffect, 0);
+  const visibleSupplierLedger = supplierLedger.filter(item => filterByDate(item.date));
+  let supRunningBal = supplierOpeningBalance;
+  const supplierLedgerWithBalance = visibleSupplierLedger.map(item => {
     supRunningBal += item.netEffect;
     return {
       ...item,
@@ -272,6 +268,8 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
   const targetCustomer = customers.find(c => c.id === selectedCustomerId) || customers[0];
   const customerInvoices = invoices.filter(i => i.customerId === targetCustomer?.id && i.status !== 'voided');
   const targetCustomerPayments = (store.customerPayments || []).filter(p => p.customerId === targetCustomer?.id);
+  const targetSalesReturns = (salesReturns || []).filter(ret => targetCustomer &&
+    (ret.customerId === targetCustomer.id || invoices.find(inv => inv.id === ret.invoiceId)?.customerId === targetCustomer.id));
 
   const customerLedger = [
     ...customerInvoices.map(inv => ({
@@ -288,6 +286,20 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
       creditPaid: 0,
       netEffect: inv.remainingDebt
     })),
+    ...targetSalesReturns.map(ret => ({
+      id: ret.id,
+      date: ret.date,
+      time: ret.time,
+      type: 'return',
+      docName: `مردود بيع #${ret.invoiceId}`,
+      description: `مردود من فاتورة #${ret.invoiceId}`,
+      netWeight: ret.returnedNetWeight,
+      debit: 0,
+      paidImmediate: 0,
+      debtAdded: 0,
+      creditPaid: ret.refundMethod === 'credit_deduction' ? Number(ret.totalRefundAmount) || 0 : 0,
+      netEffect: ret.refundMethod === 'credit_deduction' ? -(Number(ret.totalRefundAmount) || 0) : 0
+    })),
     ...targetCustomerPayments.map(pay => ({
       id: pay.id,
       date: pay.date,
@@ -302,10 +314,17 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
       creditPaid: pay.amount,
       netEffect: -pay.amount
     }))
-  ].sort((a, b) => a.date.localeCompare(b.date));
+  ].sort((a, b) => `${a.date || ''} ${a.time || ''}`.localeCompare(`${b.date || ''} ${b.time || ''}`));
 
-  let runningBal = 0;
-  const ledgerWithBalance = customerLedger.map(item => {
+  const customerBaseBalance = Number.isFinite(Number(targetCustomer?.initialBalance))
+    ? Number(targetCustomer.initialBalance)
+    : (Number(targetCustomer?.balance) || 0) - customerLedger.reduce((sum, item) => sum + item.netEffect, 0);
+  const customerOpeningBalance = customerBaseBalance + customerLedger
+    .filter(item => reportStartDate && item.date && item.date < reportStartDate)
+    .reduce((sum, item) => sum + item.netEffect, 0);
+  const visibleCustomerLedger = customerLedger.filter(item => filterByDate(item.date));
+  let runningBal = customerOpeningBalance;
+  const ledgerWithBalance = visibleCustomerLedger.map(item => {
     runningBal += item.netEffect;
     return {
       ...item,
@@ -315,23 +334,29 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
 
   // 10. Weight Shrinkage & Loss Rate
   const productShrinkage = products.map(prod => {
-    const purKg = filteredPurchases
-      .filter(p => p.productId === prod.id || (p.productName && p.productName.includes(prod.name.split(' ')[0])))
+    const purchasedKg = filteredPurchases
+      .filter(p => p.productId === prod.id)
       .reduce((sum, p) => sum + (Number(p.quantityKg) || 0), 0);
+    const purchaseReturnedKg = filteredPurchaseReturns
+      .filter(ret => ret.productId === prod.id)
+      .reduce((sum, ret) => sum + (Number(ret.returnedKg) || 0), 0);
+    const purKg = purchasedKg - purchaseReturnedKg;
 
-    const soldKg = filteredInvoices.reduce((sum, inv) => {
-      const item = (inv.items || []).find(i => i.productId === prod.id || i.name?.includes(prod.name.split(' ')[0]));
-      return sum + (item ? (Number(item.netWeight) || 0) : 0);
-    }, 0);
+    const grossSoldKg = filteredInvoices.reduce((sum, inv) => sum + (inv.items || [])
+      .filter(item => item.productId === prod.id)
+      .reduce((itemSum, item) => itemSum + (Number(item.netWeight) || 0), 0), 0);
+    const salesReturnedKg = filteredSalesReturns.reduce((sum, ret) => sum + (ret.items || ret.returnedItems || [])
+      .filter(item => item.productId === prod.id)
+      .reduce((itemSum, item) => itemSum + (Number(item.returnedWeight) || 0), 0), 0);
+    const soldKg = grossSoldKg - salesReturnedKg;
 
     const damagedKg = filteredDamaged
-      .filter(d => d.productId === prod.id || (d.productName && d.productName.includes(prod.name.split(' ')[0])))
+      .filter(d => d.productId === prod.id)
       .reduce((sum, d) => sum + (Number(d.quantityKg) || 0), 0);
     
-    const accountedKg = soldKg + damagedKg;
-    const shrinkageKg = Math.max(0, purKg - accountedKg);
-    const shrinkageRate = purKg > 0 ? (shrinkageKg / purKg) * 100 : 0;
-    const estLoss = shrinkageKg * (Number(prod.costPrice) || (Number(prod.defaultPricePerKg) * 0.75));
+    const damagedLoss = filteredDamaged
+      .filter(d => d.productId === prod.id)
+      .reduce((sum, d) => sum + (Number(d.totalLoss) || Number(d.quantityKg) * Number(d.costPerKg) || 0), 0);
 
     return {
       id: prod.id,
@@ -339,15 +364,12 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
       purKg,
       soldKg,
       damagedKg,
-      shrinkageKg: Math.round(shrinkageKg * 100) / 100,
-      shrinkageRate: Math.round(shrinkageRate * 10) / 10,
-      estLoss: Math.round(estLoss * 100) / 100
+      damagedLoss: Math.round(damagedLoss * 100) / 100
     };
-  }).filter(p => p.purKg > 0 || p.soldKg > 0);
+  }).filter(p => p.purKg !== 0 || p.soldKg !== 0 || p.damagedKg !== 0);
 
   const totalPurKgAll = productShrinkage.reduce((s, p) => s + p.purKg, 0);
-  const totalShrinkageKgAll = productShrinkage.reduce((s, p) => s + p.shrinkageKg, 0);
-  const totalShrinkageLossAll = productShrinkage.reduce((s, p) => s + p.estLoss, 0);
+  const totalRecordedDamageLoss = productShrinkage.reduce((s, p) => s + p.damagedLoss, 0);
 
   const handlePrint = () => {
     window.print();
@@ -361,8 +383,9 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
 💵 *المبيعات والإيرادات:*
 • إجمالي المبيعات: ${totalNetSales.toFixed(2)} ${settings.currency}
 • المقبوض نقداً من الفواتير: ${totalCashCollected.toFixed(2)} ${settings.currency}
-• تحصيلات ديون سابقة: ${totalDebtRepaid.toFixed(2)} ${settings.currency}
-• المبيعات الآجلة (ديون جديدة): ${totalCreditSales.toFixed(2)} ${settings.currency}
+• تحصيلات ديون سابقة نقداً: ${totalDebtRepaid.toFixed(2)} ${settings.currency}
+• تحصيلات ديون سابقة بنكيًا: ${totalBankDebtRepaid.toFixed(2)} ${settings.currency}
+• صافي الائتمان الجديد بعد المرتجعات: ${totalCreditSales.toFixed(2)} ${settings.currency}
 • الوزن الإجمالي المباع: ${formatWeight(totalNetKgSold)} (${totalPackagesSold} عبوة)
 
 📦 *المشتريات والتوريد:*
@@ -793,7 +816,10 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                 تاريخ الاستخراج: <strong>{todayStr}</strong>
               </div>
               <div className="text-[10px] text-slate-500">
-                الفترة: {dateFilter === 'all' ? 'كامل السجلات' : dateFilter === 'today' ? 'اليوم فقط' : dateFilter === 'yesterday' ? 'يوم أمس' : dateFilter === 'week' ? 'آخر 7 أيام' : 'هذا الشهر'}
+                الفترة: {['audit', 'partners', 'aging', 'shift'].includes(reportType) ? 'المركز الحالي من كامل السجلات' : dateFilter === 'all' ? 'كامل السجلات' : dateFilter === 'today' ? 'اليوم فقط' : dateFilter === 'yesterday' ? 'يوم أمس' : dateFilter === 'week' ? 'آخر 7 أيام' : 'هذا الشهر'}
+              </div>
+              <div className="text-[10px] text-slate-500">
+                النطاق: جميع الفروع المتاحة لهذا الحساب؛ لا يغيّره الفرع النشط
               </div>
             </div>
           </div>
@@ -829,7 +855,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                 </div>
 
                 <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200">
-                  <span className="text-[10px] text-amber-800 font-bold block">مبيعات آجلة جديدة (ديون)</span>
+                  <span className="text-[10px] text-amber-800 font-bold block">صافي الائتمان الجديد بعد المرتجعات</span>
                   <span className="text-sm font-black font-mono text-amber-900 block mt-0.5">{formatCurrency(totalCreditSales, settings.currency)}</span>
                   <span className="text-[9px] text-amber-700 block mt-1">متبقي بذمة العملاء</span>
                 </div>
@@ -939,19 +965,19 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                 <div className="bg-white p-2 rounded-lg border border-slate-100">
                   <span className="text-[10px] text-slate-500 block">تكلفة البضاعة المباعة (COGS)</span>
                   <span className="text-xs sm:text-sm font-black text-slate-900 font-mono block">
-                    {formatCurrency(productMargins.reduce((s, p) => s + p.totalCOGS, 0), settings.currency)}
+                    {formatCurrency(reportSnapshot.cogs, settings.currency)}
                   </span>
                 </div>
                 <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200">
                   <span className="text-[10px] text-emerald-800 font-bold block">إجمالي الربح التجاري</span>
                   <span className="text-xs sm:text-sm font-black text-emerald-700 font-mono block">
-                    {formatCurrency(productMargins.reduce((s, p) => s + p.grossProfit, 0), settings.currency)}
+                    {formatCurrency(reportSnapshot.grossProfit, settings.currency)}
                   </span>
                 </div>
                 <div className="bg-white p-2 rounded-lg border border-slate-100">
                   <span className="text-[10px] text-slate-500 block">متوسط هامش الربح %</span>
                   <span className="text-xs sm:text-sm font-black text-blue-700 font-mono block">
-                    {totalNetSales > 0 ? ((productMargins.reduce((s, p) => s + p.grossProfit, 0) / totalNetSales) * 100).toFixed(1) : '0.0'}%
+                    {totalNetSales > 0 ? ((reportSnapshot.grossProfit / totalNetSales) * 100).toFixed(1) : '0.0'}%
                   </span>
                 </div>
               </div>
@@ -1000,13 +1026,13 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100 font-black text-slate-900 text-xs">
-                      <td colSpan="2" className="p-2 border border-slate-300">الإجمالي:</td>
+                      <td colSpan={2} className="p-2 border border-slate-300">الإجمالي:</td>
                       <td className="p-2 border border-slate-300 text-center">{formatWeight(productMargins.reduce((s, p) => s + p.soldKg, 0))}</td>
-                      <td colSpan="2" className="p-2 border border-slate-300"></td>
+                      <td colSpan={2} className="p-2 border border-slate-300"></td>
                       <td className="p-2 border border-slate-300 text-center font-mono">{totalNetSales.toFixed(2)}</td>
-                      <td className="p-2 border border-slate-300 text-center font-mono">{productMargins.reduce((s, p) => s + p.totalCOGS, 0).toFixed(2)}</td>
+                      <td className="p-2 border border-slate-300 text-center font-mono">{reportSnapshot.cogs.toFixed(2)}</td>
                       <td className="p-2 border border-slate-300 text-center font-mono text-emerald-800 font-black">
-                        {productMargins.reduce((s, p) => s + p.grossProfit, 0).toFixed(2)}
+                        {reportSnapshot.grossProfit.toFixed(2)}
                       </td>
                       <td className="p-2 border border-slate-300 text-center"></td>
                     </tr>
@@ -1021,7 +1047,10 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
           {/* ========================================================================= */}
           {reportType === 'aging' && (
             <div className="py-4 space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+              <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                أعمار الفواتير تقديرية بافتراض تسوية الدفعات على الأقدم أولًا؛ الرصيد الافتتاحي أو غير القابل للتأريخ يظهر منفصلًا ولا يُصنَّف دينًا حديثًا.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-center p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                 <div className="bg-white p-2 rounded-lg border border-slate-100">
                   <span className="text-[10px] text-slate-500 block">إجمالي ديون السوق</span>
                   <span className="text-xs sm:text-sm font-black text-slate-900 font-mono block">{formatCurrency(totalDebtAgingSum, settings.currency)}</span>
@@ -1042,6 +1071,10 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   <span className="text-[10px] text-rose-800 font-bold block">+30 يوماً (راكد / حرج)</span>
                   <span className="text-xs sm:text-sm font-black text-rose-700 font-mono block">{formatCurrency(debtBucketOver30, settings.currency)}</span>
                 </div>
+                <div className="bg-slate-100 p-2 rounded-lg border border-slate-200">
+                  <span className="text-[10px] text-slate-700 font-bold block">غير مؤرخ / افتتاحي</span>
+                  <span className="text-xs sm:text-sm font-black text-slate-900 font-mono block">{formatCurrency(debtBucketUnknown, settings.currency)}</span>
+                </div>
               </div>
 
               <div className="overflow-x-auto w-full rounded-xl border border-slate-300">
@@ -1051,7 +1084,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                       <th className="p-2 border border-slate-800 text-center w-8">م</th>
                       <th className="p-2 border border-slate-800">اسم العميل</th>
                       <th className="p-2 border border-slate-800">رقم الهاتف</th>
-                      <th className="p-2 border border-slate-800 text-center">تاريخ آخر معاملة</th>
+                      <th className="p-2 border border-slate-800 text-center">تاريخ أصل الدين</th>
                       <th className="p-2 border border-slate-800 text-center">عمر الدين (أيام)</th>
                       <th className="p-2 border border-slate-800 text-center">تصنيف الدين</th>
                       <th className="p-2 border border-slate-800 text-center">المبلغ المستحق</th>
@@ -1063,13 +1096,14 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                         <td className="p-2 border border-slate-200 text-center font-bold text-slate-500">{idx + 1}</td>
                         <td className="p-2 border border-slate-200 font-bold text-slate-900">{c.name}</td>
                         <td className="p-2 border border-slate-200 font-mono text-slate-600">{c.phone}</td>
-                        <td className="p-2 border border-slate-200 text-center font-mono text-slate-600">{c.lastInvoiceDate}</td>
-                        <td className="p-2 border border-slate-200 text-center font-mono font-bold">{c.diffDays} يوم</td>
+                        <td className="p-2 border border-slate-200 text-center font-mono text-slate-600">{c.date || 'غير معروف'}</td>
+                        <td className="p-2 border border-slate-200 text-center font-mono font-bold">{c.diffDays === null ? '—' : `${c.diffDays} يوم`}</td>
                         <td className="p-2 border border-slate-200 text-center">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                             c.severity === 'low' ? 'bg-emerald-100 text-emerald-800' :
                             c.severity === 'medium' ? 'bg-blue-100 text-blue-800' :
                             c.severity === 'high' ? 'bg-amber-100 text-amber-800' :
+                            c.severity === 'unknown' ? 'bg-slate-200 text-slate-800' :
                             'bg-rose-100 text-rose-800'
                           }`}>
                             {c.bucketLabel}
@@ -1082,7 +1116,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                     ))}
                     {customerDebtAging.length === 0 && (
                       <tr>
-                        <td colSpan="7" className="p-6 text-center text-slate-400 font-medium">
+                        <td colSpan={7} className="p-6 text-center text-slate-400 font-medium">
                           🎉 لا توجد ديون مستحقة على العملاء حالياً! كافة الحسابات مسددة بالكامل.
                         </td>
                       </tr>
@@ -1090,7 +1124,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100 font-black text-slate-900 text-xs">
-                      <td colSpan="6" className="p-2 border border-slate-300">إجمالي المديونيات المستحقة على العملاء:</td>
+                      <td colSpan={6} className="p-2 border border-slate-300">إجمالي المديونيات المستحقة على العملاء:</td>
                       <td className="p-2 border border-slate-300 text-center font-mono text-rose-700 font-black text-sm">
                         {formatCurrency(totalDebtAgingSum, settings.currency)}
                       </td>
@@ -1112,7 +1146,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                     كشف حساب المورد: {targetSupplier?.name || 'مورد غير محدد'}
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    هاتف: {targetSupplier?.phone || '—'} • رصيد افتتاحي: {formatCurrency(targetSupplier?.initialBalance || 0, settings.currency)}
+                    هاتف: {targetSupplier?.phone || '—'} • رصيد افتتاحي: {formatCurrency(supplierOpeningBalance, settings.currency)}
                   </p>
                 </div>
                 <div className="text-right sm:text-left">
@@ -1166,7 +1200,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                     ))}
                     {supplierLedgerWithBalance.length === 0 && (
                       <tr>
-                        <td colSpan="8" className="p-6 text-center text-slate-400 font-medium">
+                        <td colSpan={8} className="p-6 text-center text-slate-400 font-medium">
                           لا توجد حركات مسجلة لهذا المورد خلال الفترة المحددة.
                         </td>
                       </tr>
@@ -1174,7 +1208,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100 font-black text-slate-900 text-xs">
-                      <td colSpan="7" className="p-2 border border-slate-300">الرصيد الختامي المستحق للمورد:</td>
+                      <td colSpan={7} className="p-2 border border-slate-300">الرصيد الختامي المستحق للمورد:</td>
                       <td className="p-2 border border-slate-300 text-center font-mono text-rose-700 font-black text-sm bg-slate-200">
                         {supRunningBal.toFixed(2)} {settings.currency}
                       </td>
@@ -1190,21 +1224,32 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
           {/* ========================================================================= */}
           {reportType === 'shift' && (
             <div className="py-4 space-y-4">
+              <p className="text-xs font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                مطابقة الرصيد الحالي من كامل السجلات منذ رصيد فتح الصندوق؛ فلتر التاريخ لا يغير هذا الرصيد. لا يمكن عزل وردية سابقة دون رصيد فتح مستقل لها.
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
                   <h3 className="text-xs font-black text-slate-900">مقبوضات الوردية النقدية (داخل الدرج)</h3>
                   <div className="space-y-1.5 text-xs">
                     <div className="flex justify-between">
+                      <span className="text-slate-600">رصيد فتح الصندوق:</span>
+                      <span className="font-mono font-bold text-slate-900">{formatCurrency(shiftOpeningCash, settings.currency)}</span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-slate-600">المقبوض كاش من فواتير البيع:</span>
-                      <span className="font-mono font-bold text-slate-900">{formatCurrency(totalCashCollected, settings.currency)}</span>
+                      <span className="font-mono font-bold text-slate-900">{formatCurrency(shiftCashCollected, settings.currency)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-600">المقبوض نقداً من سداد ديون العملاء:</span>
-                      <span className="font-mono font-bold text-slate-900">{formatCurrency(totalDebtRepaid, settings.currency)}</span>
+                      <span className="font-mono font-bold text-slate-900">{formatCurrency(shiftCustomerCashPayments, settings.currency)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">استرداد نقدي من مردود مشتريات:</span>
+                      <span className="font-mono font-bold text-slate-900">{formatCurrency(shiftPurchaseCashRefunds, settings.currency)}</span>
                     </div>
                     <div className="flex justify-between pt-1.5 border-t border-slate-200 font-black text-emerald-700">
                       <span>إجمالي النقدية الداخلة:</span>
-                      <span className="font-mono">+{formatCurrency(totalCashFromCustomers, settings.currency)}</span>
+                      <span className="font-mono">+{formatCurrency(shiftCashInflow, settings.currency)}</span>
                     </div>
                   </div>
                 </div>
@@ -1227,6 +1272,14 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                     <div className="flex justify-between">
                       <span className="text-slate-600">مسحوبات الشركاء النقدية:</span>
                       <span className="font-mono font-bold text-rose-700">-{formatCurrency(shiftPartnerCashDrawings, settings.currency)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">رواتب وسلف نقدية:</span>
+                      <span className="font-mono font-bold text-rose-700">-{formatCurrency(shiftWorkerCashSalaries + shiftWorkerCashAdvances, settings.currency)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">مردود مبيعات نقدي وتوزيع شركاء:</span>
+                      <span className="font-mono font-bold text-rose-700">-{formatCurrency(shiftSalesCashRefunds + shiftPartnerCashDistributions, settings.currency)}</span>
                     </div>
                     <div className="flex justify-between pt-1.5 border-t border-slate-200 font-black text-rose-700">
                       <span>إجمالي النقدية الخارجة:</span>
@@ -1285,22 +1338,22 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
             <div className="py-4 space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                 <div className="bg-white p-2 rounded-lg border border-slate-100">
-                  <span className="text-[10px] text-slate-500 block">إجمالي الوزن الوارد (مشتريات)</span>
+                  <span className="text-[10px] text-slate-500 block">صافي الوزن الوارد (بعد المردود)</span>
                   <span className="text-xs sm:text-sm font-black text-slate-900 font-mono block">{formatWeight(totalPurKgAll)}</span>
                 </div>
                 <div className="bg-white p-2 rounded-lg border border-slate-100">
-                  <span className="text-[10px] text-slate-500 block">إجمالي الوزن الصادر (مباع + تالف)</span>
+                  <span className="text-[10px] text-slate-500 block">صافي الوزن المباع + التالف المسجل</span>
                   <span className="text-xs sm:text-sm font-black text-slate-900 font-mono block">
                     {formatWeight(productShrinkage.reduce((s, p) => s + p.soldKg + p.damagedKg, 0))}
                   </span>
                 </div>
                 <div className="bg-amber-50 p-2 rounded-lg border border-amber-200">
-                  <span className="text-[10px] text-amber-800 font-bold block">عجز الميزان / الفقد الطبيعي</span>
-                  <span className="text-xs sm:text-sm font-black text-amber-900 font-mono block">{formatWeight(totalShrinkageKgAll)}</span>
+                  <span className="text-[10px] text-amber-800 font-bold block">العجز غير المسجل</span>
+                  <span className="text-xs sm:text-sm font-black text-amber-900 block">يتطلب جرداً فعلياً</span>
                 </div>
                 <div className="bg-rose-50 p-2 rounded-lg border border-rose-200">
-                  <span className="text-[10px] text-rose-800 font-bold block">القيمة المالية التقديرية للهدر</span>
-                  <span className="text-xs sm:text-sm font-black text-rose-700 font-mono block">{formatCurrency(totalShrinkageLossAll, settings.currency)}</span>
+                  <span className="text-[10px] text-rose-800 font-bold block">قيمة الهالك المسجل فقط</span>
+                  <span className="text-xs sm:text-sm font-black text-rose-700 font-mono block">{formatCurrency(totalRecordedDamageLoss, settings.currency)}</span>
                 </div>
               </div>
 
@@ -1310,12 +1363,12 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                     <tr className="bg-slate-900 text-white text-[10px]">
                       <th className="p-2 border border-slate-800 text-center w-8">م</th>
                       <th className="p-2 border border-slate-800">اسم الصنف</th>
-                      <th className="p-2 border border-slate-800 text-center">الوزن الوارد (كغم)</th>
-                      <th className="p-2 border border-slate-800 text-center">الوزن المباع (كغم)</th>
+                      <th className="p-2 border border-slate-800 text-center">الوارد الصافي (كغم)</th>
+                      <th className="p-2 border border-slate-800 text-center">المباع الصافي (كغم)</th>
                       <th className="p-2 border border-slate-800 text-center">التالف المسجل (كغم)</th>
-                      <th className="p-2 border border-slate-800 text-center">عجز الميزان (كغم)</th>
-                      <th className="p-2 border border-slate-800 text-center">نسبة الهدر %</th>
-                      <th className="p-2 border border-slate-800 text-center">الخسارة التقديرية</th>
+                      <th className="p-2 border border-slate-800 text-center">العجز غير المسجل</th>
+                      <th className="p-2 border border-slate-800 text-center">حالة التحقق</th>
+                      <th className="p-2 border border-slate-800 text-center">خسارة الهالك المسجل</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 text-[11px]">
@@ -1326,24 +1379,16 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                         <td className="p-2 border border-slate-200 text-center font-mono">{formatWeight(p.purKg)}</td>
                         <td className="p-2 border border-slate-200 text-center font-mono text-emerald-700">{formatWeight(p.soldKg)}</td>
                         <td className="p-2 border border-slate-200 text-center font-mono text-rose-600">{formatWeight(p.damagedKg)}</td>
-                        <td className="p-2 border border-slate-200 text-center font-mono font-bold text-amber-800">{formatWeight(p.shrinkageKg)}</td>
-                        <td className="p-2 border border-slate-200 text-center font-mono">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                            p.shrinkageRate <= 3 ? 'bg-emerald-100 text-emerald-800' :
-                            p.shrinkageRate <= 7 ? 'bg-amber-100 text-amber-800' :
-                            'bg-rose-100 text-rose-800'
-                          }`}>
-                            {p.shrinkageRate}%
-                          </span>
-                        </td>
+                        <td className="p-2 border border-slate-200 text-center font-bold text-amber-800">—</td>
+                        <td className="p-2 border border-slate-200 text-center text-amber-800">بانتظار جرد فعلي</td>
                         <td className="p-2 border border-slate-200 text-center font-mono font-black text-rose-700">
-                          {formatCurrency(p.estLoss, settings.currency)}
+                          {formatCurrency(p.damagedLoss, settings.currency)}
                         </td>
                       </tr>
                     ))}
                     {productShrinkage.length === 0 && (
                       <tr>
-                        <td colSpan="8" className="p-6 text-center text-slate-400 font-medium">
+                        <td colSpan={8} className="p-6 text-center text-slate-400 font-medium">
                           لا توجد بيانات مقارنة للأوزان والمشتريات خلال الفترة المحددة.
                         </td>
                       </tr>
@@ -1351,14 +1396,14 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100 font-black text-slate-900 text-xs">
-                      <td colSpan="2" className="p-2 border border-slate-300">الإجمالي العام:</td>
+                      <td colSpan={2} className="p-2 border border-slate-300">الإجمالي العام:</td>
                       <td className="p-2 border border-slate-300 text-center font-mono">{formatWeight(totalPurKgAll)}</td>
                       <td className="p-2 border border-slate-300 text-center font-mono">{formatWeight(productShrinkage.reduce((s, p) => s + p.soldKg, 0))}</td>
                       <td className="p-2 border border-slate-300 text-center font-mono">{formatWeight(productShrinkage.reduce((s, p) => s + p.damagedKg, 0))}</td>
-                      <td className="p-2 border border-slate-300 text-center font-mono text-amber-900 font-black">{formatWeight(totalShrinkageKgAll)}</td>
-                      <td className="p-2 border border-slate-300 text-center"></td>
+                      <td className="p-2 border border-slate-300 text-center text-amber-900 font-black">—</td>
+                      <td className="p-2 border border-slate-300 text-center">بانتظار جرد فعلي</td>
                       <td className="p-2 border border-slate-300 text-center font-mono text-rose-700 font-black text-sm">
-                        {formatCurrency(totalShrinkageLossAll, settings.currency)}
+                        {formatCurrency(totalRecordedDamageLoss, settings.currency)}
                       </td>
                     </tr>
                   </tfoot>
@@ -1386,11 +1431,11 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   <span className="text-xs sm:text-sm font-black text-emerald-700 font-mono block truncate">{formatCurrency(totalNetSales, settings.currency)}</span>
                 </div>
                 <div className="bg-white p-2 rounded-lg border border-slate-100 min-w-0 overflow-hidden">
-                  <span className="text-[10px] text-slate-500 block truncate">المحصل نقداً</span>
+                      <span className="text-[10px] text-slate-500 block truncate">المحصل نقداً من الفواتير</span>
                   <span className="text-xs sm:text-sm font-black text-emerald-700 font-mono block truncate">{formatCurrency(totalCashCollected, settings.currency)}</span>
                 </div>
                 <div className="bg-white p-2 rounded-lg border border-slate-100 min-w-0 overflow-hidden">
-                  <span className="text-[10px] text-slate-500 block truncate">الآجل (الديون)</span>
+                  <span className="text-[10px] text-slate-500 block truncate">صافي الائتمان بعد المرتجعات</span>
                   <span className="text-xs sm:text-sm font-black text-amber-800 font-mono block truncate">{formatCurrency(totalCreditSales, settings.currency)}</span>
                 </div>
                 <div className="bg-white p-2 rounded-lg border border-slate-100 min-w-0 overflow-hidden">
@@ -1430,7 +1475,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                           </span>
                         </td>
                         <td className="p-2 border border-slate-200 text-center">{inv.totalPackages}</td>
-                        <td className="p-2 border border-slate-200 text-center font-mono">{formatWeight(inv.totalNetWeight)}</td>
+                        <td className="p-2 border border-slate-200 text-center font-mono">{formatWeight((inv.items || []).reduce((sum, item) => sum + (Number(item.netWeight) || 0), 0))}</td>
                         <td className="p-2 border border-slate-200 text-center font-black font-mono">
                           {inv.finalTotal.toFixed(2)} {settings.currency}
                         </td>
@@ -1445,14 +1490,14 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100 font-black text-slate-900 text-xs">
-                      <td colSpan="5" className="p-2 border border-slate-300">الإجمالي العام:</td>
+                      <td colSpan={5} className="p-2 border border-slate-300">الصافي بعد مردودات المبيعات (المدفوع فورًا قبل المردود):</td>
                       <td className="p-2 border border-slate-300 text-center">{totalPackagesSold} عبوة</td>
                       <td className="p-2 border border-slate-300 text-center">{formatWeight(totalNetKgSold)}</td>
                       <td className="p-2 border border-slate-300 text-center text-sm font-black bg-slate-200">
                         {totalSalesRevenue.toFixed(2)} {settings.currency}
                       </td>
                       <td className="p-2 border border-slate-300 text-center text-emerald-800">
-                        {totalCashCollected.toFixed(2)}
+                        {totalImmediatePaid.toFixed(2)}
                       </td>
                       <td className="p-2 border border-slate-300 text-center text-amber-900">
                         {totalCreditSales.toFixed(2)}
@@ -1539,7 +1584,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100 font-black text-slate-900 text-xs">
-                      <td colSpan="6" className="p-2 border border-slate-300">الإجمالي العام:</td>
+                      <td colSpan={6} className="p-2 border border-slate-300">الصافي بعد مردودات المشتريات:</td>
                       <td className="p-2 border border-slate-300 text-center font-mono">{totalPurchasesPackages} عبوة</td>
                       <td className="p-2 border border-slate-300 text-center font-mono">{formatWeight(totalPurchasesKg)}</td>
                       <td className="p-2 border border-slate-300"></td>
@@ -1590,20 +1635,56 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
-                      {filteredSalesReturns.map(ret => (
-                        <tr key={ret.id} className="hover:bg-slate-50">
+                      {salesReturnLines.map(({ ret, item, index }) => (
+                        <tr key={`${ret.id}:${index}`} className="hover:bg-slate-50">
                           <td className="p-2 font-mono font-bold">#{ret.id}</td>
                           <td className="p-2 text-slate-600 font-mono">{ret.date}</td>
-                          <td className="p-2 font-mono">#{ret.originalInvoiceId}</td>
+                          <td className="p-2 font-mono">#{ret.invoiceId || ret.originalInvoiceId}</td>
                           <td className="p-2 font-bold">{ret.customerName}</td>
-                          <td className="p-2">{ret.productName}</td>
-                          <td className="p-2 text-center font-mono font-bold">{formatWeight(ret.returnedNetWeight)}</td>
-                          <td className="p-2 text-center font-mono">{Number(ret.originalUnitPrice).toFixed(2)}</td>
-                          <td className="p-2 text-center font-mono font-black text-rose-700">{formatCurrency(ret.totalRefundAmount, settings.currency)}</td>
+                          <td className="p-2">{item.name || item.productName || ret.productName}</td>
+                          <td className="p-2 text-center font-mono font-bold">{formatWeight(item.returnedWeight ?? ret.returnedNetWeight)}</td>
+                          <td className="p-2 text-center font-mono">{Number(item.originalPricePerKg ?? ret.originalUnitPrice ?? 0).toFixed(2)}</td>
+                          <td className="p-2 text-center font-mono font-black text-rose-700">{formatCurrency(item.subtotal ?? ret.totalRefundAmount, settings.currency)}</td>
                         </tr>
                       ))}
                       {filteredSalesReturns.length === 0 && (
                         <tr><td colSpan={8} className="p-4 text-center text-slate-400">لا توجد مردودات مبيعات في الفترة المحددة.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div>
+                <h3 className="text-xs font-black text-slate-800 mb-2">سجل مردودات المشتريات للموردين</h3>
+                <div className="overflow-x-auto w-full rounded-xl border border-slate-300 text-[11px]">
+                  <table className="w-full min-w-[650px] text-right border-collapse">
+                    <thead className="bg-slate-900 text-white text-[10px]">
+                      <tr>
+                        <th className="p-2 border border-slate-800">رقم الإرجاع</th>
+                        <th className="p-2 border border-slate-800">التاريخ</th>
+                        <th className="p-2 border border-slate-800">فاتورة الشراء الأصلية</th>
+                        <th className="p-2 border border-slate-800">المورد</th>
+                        <th className="p-2 border border-slate-800">الصنف</th>
+                        <th className="p-2 border border-slate-800 text-center">الوزن المرتجع</th>
+                        <th className="p-2 border border-slate-800 text-center">التكلفة الأصلية للكيلو</th>
+                        <th className="p-2 border border-slate-800 text-center">المبلغ المسترد</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {filteredPurchaseReturns.map(ret => (
+                        <tr key={ret.id} className="hover:bg-slate-50">
+                          <td className="p-2 font-mono font-bold">#{ret.id}</td>
+                          <td className="p-2 text-slate-600 font-mono">{ret.date}</td>
+                          <td className="p-2 font-mono">#{ret.purchaseId}</td>
+                          <td className="p-2 font-bold">{ret.supplierName}</td>
+                          <td className="p-2">{ret.productName}</td>
+                          <td className="p-2 text-center font-mono font-bold">{formatWeight(ret.returnedKg)}</td>
+                          <td className="p-2 text-center font-mono">{Number(ret.originalCostPerKg || 0).toFixed(2)}</td>
+                          <td className="p-2 text-center font-mono font-black text-emerald-700">{formatCurrency(ret.totalRefundAmount, settings.currency)}</td>
+                        </tr>
+                      ))}
+                      {filteredPurchaseReturns.length === 0 && (
+                        <tr><td colSpan={8} className="p-4 text-center text-slate-400">لا توجد مردودات مشتريات في الفترة المحددة.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1620,7 +1701,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                 <div>
                   <h3 className="text-sm font-black text-slate-900">{targetCustomer?.name || 'عميل نقدي عام'}</h3>
-                  <p className="text-xs text-slate-500">📞 {targetCustomer?.phone || 'بدون هاتف'} • 📍 {targetCustomer?.address || 'غير محدد'}</p>
+                  <p className="text-xs text-slate-500">📞 {targetCustomer?.phone || 'بدون هاتف'} • 📍 {targetCustomer?.address || 'غير محدد'} • رصيد افتتاحي: {formatCurrency(customerOpeningBalance, settings.currency)}</p>
                 </div>
                 <div className="text-right sm:text-left">
                   <span className="text-[10px] text-slate-500 block font-bold">الرصيد النهائي المستحق عليه</span>
@@ -1669,7 +1750,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                     ))}
                     {ledgerWithBalance.length === 0 && (
                       <tr>
-                        <td colSpan="7" className="p-6 text-center text-slate-400 font-medium">
+                        <td colSpan={7} className="p-6 text-center text-slate-400 font-medium">
                           لا توجد حركات مسجلة لهذا العميل.
                         </td>
                       </tr>
@@ -1677,7 +1758,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100 font-black text-slate-900 text-xs">
-                      <td colSpan="6" className="p-2 border border-slate-300">الرصيد النهائي المستحق في ذمة العميل:</td>
+                      <td colSpan={6} className="p-2 border border-slate-300">الرصيد النهائي المستحق في ذمة العميل:</td>
                       <td className="p-2 border border-slate-300 text-center font-mono text-amber-900 font-black text-sm bg-slate-200">
                         {runningBal.toFixed(2)} {settings.currency}
                       </td>
@@ -1725,7 +1806,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100 font-black text-slate-900 text-xs">
-                      <td colSpan="4" className="p-2 border border-slate-300">الإجمالي العام:</td>
+                      <td colSpan={4} className="p-2 border border-slate-300">الإجمالي العام:</td>
                       <td className="p-2 border border-slate-300 text-center font-mono">{formatWeight(productMargins.reduce((sum, p) => sum + p.soldKg, 0))}</td>
                       <td className="p-2 border border-slate-300"></td>
                       <td className="p-2 border border-slate-300 text-center font-mono text-emerald-900 font-black text-sm bg-slate-200">
@@ -1760,7 +1841,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 text-[11px]">
-                    {filteredExpenses.filter(e => !e.isSupplierPayment).map((exp, idx) => (
+                    {filteredExpenses.filter(e => !e.isSupplierPayment && !e.isWorkerPayment).map((exp, idx) => (
                       <tr key={exp.id} className="hover:bg-slate-50">
                         <td className="p-2 border border-slate-200 text-center font-bold text-slate-500">{idx + 1}</td>
                         <td className="p-2 border border-slate-200 text-center font-mono text-slate-600">{exp.date}</td>
@@ -1917,18 +1998,14 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                 </div>
 
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                  <h4 className="font-black text-slate-900 border-b border-slate-200 pb-1.5">2. تكلفة البضاعة المباعة (المشتريات والتوريد)</h4>
+                  <h4 className="font-black text-slate-900 border-b border-slate-200 pb-1.5">2. تكلفة البضاعة المباعة حسب تكلفة الفواتير الأصلية</h4>
                   <div className="flex justify-between text-slate-700">
-                    <span>إجمالي المشتريات من الموردين:</span>
-                    <span className="font-mono font-bold">-{formatCurrency(totalGrossPurchasesCost, settings.currency)}</span>
-                  </div>
-                  <div className="flex justify-between text-emerald-700">
-                    <span>يضاف: مستردات مردودات الشراء:</span>
-                    <span className="font-mono font-bold">+{formatCurrency(totalPurchaseReturnsAmount, settings.currency)}</span>
+                    <span>تكلفة الأصناف المباعة:</span>
+                    <span className="font-mono font-bold">-{formatCurrency(reportSnapshot.cogs, settings.currency)}</span>
                   </div>
                   <div className="flex justify-between font-black text-slate-900 pt-1 border-t border-slate-200">
                     <span>صافي تكلفة البضاعة (=):</span>
-                    <span className="font-mono text-rose-700">-{formatCurrency(totalNetPurchasesCost, settings.currency)}</span>
+                    <span className="font-mono text-rose-700">-{formatCurrency(reportSnapshot.cogs, settings.currency)}</span>
                   </div>
                 </div>
 
@@ -1974,9 +2051,9 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                   <p className="text-[10px] text-slate-300">تحديد أماكن تواجد السيولة والأصول والالتزامات</p>
                 </div>
                 <div className="text-right sm:text-left">
-                  <span className="text-[10px] text-slate-400 block font-bold">صافي حقوق الملكية</span>
+                  <span className="text-[10px] text-slate-400 block font-bold">صافي السيولة والذمم</span>
                   <span className="text-base font-black font-mono text-emerald-400">
-                    {formatCurrency(finPos?.netWorth || 0, settings.currency)}
+                    {formatCurrency(finPos?.totalWorkingCapital || 0, settings.currency)}
                   </span>
                 </div>
               </div>
@@ -1985,7 +2062,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                   <span className="text-[10px] text-slate-500 block">نقدية الصندوق (الدرج)</span>
                   <span className="text-sm font-black font-mono text-slate-900 block mt-1">
-                    {formatCurrency(finPos?.drawerCash || 0, settings.currency)}
+                    {formatCurrency(finPos?.cashBalance || 0, settings.currency)}
                   </span>
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
@@ -1997,13 +2074,13 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                 <div className="p-3 rounded-xl bg-amber-50 border border-amber-200">
                   <span className="text-[10px] text-amber-800 font-bold block">ديون السوق (لنا عند العملاء)</span>
                   <span className="text-sm font-black font-mono text-amber-900 block mt-1">
-                    {formatCurrency(finPos?.marketDebt || 0, settings.currency)}
+                    {formatCurrency(finPos?.totalCustomersDebt || 0, settings.currency)}
                   </span>
                 </div>
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
                   <span className="text-[10px] text-rose-800 font-bold block">مستحقات الموردين (علينا للموردين)</span>
                   <span className="text-sm font-black font-mono text-rose-700 block mt-1">
-                    {formatCurrency(finPos?.supplierPayables || 0, settings.currency)}
+                    {formatCurrency(finPos?.totalSuppliersDebt || 0, settings.currency)}
                   </span>
                 </div>
               </div>
@@ -2033,7 +2110,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                         const partnerDrawingsSum = partnerDrawings.filter(d => d.partnerId === p.id).reduce((sum, d) => sum + Number(d.amount || 0), 0);
                         const partnerProfitSum = profitDistributions.reduce((sum, dist) => {
                           const share = (dist.shares || []).find(s => s.partnerId === p.id);
-                          return sum + Number(share?.amount || 0);
+                          return sum + Number(share?.netPayout ?? share?.amount ?? 0);
                         }, 0);
                         return (
                           <tr key={p.id}>

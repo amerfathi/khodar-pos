@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
-import { useAppStore } from '../store/useAppStore';
 import { 
   Building2, Plus, ArrowLeftRight, CheckCircle2, AlertTriangle, 
   MapPin, Phone, User, Shield, Store, Check, X, Edit3, Trash2,
   ExternalLink, Sparkles, PackageCheck
 } from 'lucide-react';
 
-export default function BranchesManagementModal({ isOpen, onClose }) {
-  const store = useAppStore();
+export default function BranchesManagementModal({ isOpen, onClose, store }) {
   const { 
     branches, 
     activeBranchId, 
@@ -48,6 +46,7 @@ export default function BranchesManagementModal({ isOpen, onClose }) {
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
@@ -56,8 +55,9 @@ export default function BranchesManagementModal({ isOpen, onClose }) {
   const isLimitReached = branches.length >= allowedLimit && currentUser?.role !== 'super_admin';
 
   // Handle Add Branch
-  const handleCreateBranch = (e) => {
+  const handleCreateBranch = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
     setErrorMsg('');
     setSuccessMsg('');
 
@@ -67,27 +67,34 @@ export default function BranchesManagementModal({ isOpen, onClose }) {
         return;
       }
 
-      addBranch(newBranchData);
+      setIsSaving(true);
+      await addBranch(newBranchData);
       setSuccessMsg(`تمت إضافة فرع "${newBranchData.name}" بنجاح!`);
       setNewBranchData({ name: '', code: '', phone: '', address: '', managerName: '' });
       setActiveTab('list');
     } catch (err) {
       setErrorMsg(err.message || 'حدث خطأ أثناء إضافة الفرع');
-    }
+    } finally { setIsSaving(false); }
   };
 
   // Handle Edit Branch
-  const handleUpdateBranch = (e) => {
+  const handleUpdateBranch = async (e) => {
     e.preventDefault();
-    if (!editingBranch) return;
-    updateBranch(editingBranch.id, editingBranch);
-    setEditingBranch(null);
-    setSuccessMsg('تم تحديث بيانات الفرع بنجاح');
+    if (!editingBranch || isSaving) return;
+    setIsSaving(true);
+    try {
+      await updateBranch(editingBranch.id, editingBranch);
+      setEditingBranch(null);
+      setSuccessMsg('تم تحديث بيانات الفرع بنجاح');
+    } catch (err) {
+      setErrorMsg(err.message || 'فشل تحديث الفرع');
+    } finally { setIsSaving(false); }
   };
 
   // Handle Stock Transfer
-  const handleExecuteTransfer = (e) => {
+  const handleExecuteTransfer = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
     setErrorMsg('');
     setSuccessMsg('');
 
@@ -98,7 +105,8 @@ export default function BranchesManagementModal({ isOpen, onClose }) {
         return;
       }
 
-      transferStockBetweenBranches({
+      setIsSaving(true);
+      await transferStockBetweenBranches({
         fromBranchId: transferData.fromBranchId,
         toBranchId: transferData.toBranchId,
         productId: selectedProd.id,
@@ -115,7 +123,7 @@ export default function BranchesManagementModal({ isOpen, onClose }) {
       }));
     } catch (err) {
       setErrorMsg(err.message || 'فشلت عملية مناقلة المخزون');
-    }
+    } finally { setIsSaving(false); }
   };
 
   // WhatsApp Upgrade Link
@@ -286,7 +294,10 @@ export default function BranchesManagementModal({ isOpen, onClose }) {
                           {!branch.isMain && (
                             <button
                               type="button"
-                              onClick={() => deleteBranch(branch.id)}
+                              onClick={async () => {
+                                try { await deleteBranch(branch.id); }
+                                catch (error) { setErrorMsg(error.message || 'تعذر تعطيل الفرع'); }
+                              }}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                               title="حذف الفرع"
                             >
@@ -335,9 +346,11 @@ export default function BranchesManagementModal({ isOpen, onClose }) {
                         {!isCurrent ? (
                           <button
                             type="button"
-                            onClick={() => {
-                              changeActiveBranch(branch.id);
-                              setSuccessMsg(`تم تعيين "${branch.name}" كفرع نشط حالياً للعمليات`);
+                            onClick={async () => {
+                              try {
+                                await changeActiveBranch(branch.id);
+                                setSuccessMsg(`تم تعيين "${branch.name}" كفرع نشط حالياً للعمليات`);
+                              } catch (error) { setErrorMsg(error.message || 'تعذر تغيير الفرع النشط'); }
                             }}
                             className="flex-1 py-1.5 bg-primary-500 hover:bg-primary-600 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs"
                           >
@@ -353,7 +366,10 @@ export default function BranchesManagementModal({ isOpen, onClose }) {
                         {!branch.isMain && (
                           <button
                             type="button"
-                            onClick={() => setMainBranch(branch.id)}
+                            onClick={async () => {
+                              try { await setMainBranch(branch.id); }
+                              catch (error) { setErrorMsg(error.message || 'تعذر تعيين الفرع الرئيسي'); }
+                            }}
                             className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-[11px] font-semibold transition-colors cursor-pointer border border-slate-200/80"
                             title="جعله الفرع الرئيسي للمؤسسة"
                           >

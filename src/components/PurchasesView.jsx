@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   Plus, Trash2, Truck, Search, Calendar, Landmark, 
   CreditCard, Package, Sparkles, X, Check, FileText, 
@@ -28,6 +28,9 @@ export default function PurchasesView({ store, onOpenA4Report }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPayment, setFilterPayment] = useState('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isSavingPurchase, setIsSavingPurchase] = useState(false);
+  const savingPurchaseRef = useRef(false);
+  const [deletingPurchaseId, setDeletingPurchaseId] = useState(null);
   const [selectedPurchaseForReturn, setSelectedPurchaseForReturn] = useState(null);
 
   // Form State
@@ -92,8 +95,9 @@ export default function PurchasesView({ store, onOpenA4Report }) {
     }
   };
 
-  const handleSavePurchase = (e) => {
+  const handleSavePurchase = async (e) => {
     e.preventDefault();
+    if (savingPurchaseRef.current) return;
 
     const kgNum = Number(quantityKg) || 0;
     const costNum = Number(totalCost) || (kgNum * (Number(costPerKg) || 0));
@@ -152,7 +156,17 @@ export default function PurchasesView({ store, onOpenA4Report }) {
       notes: notes.trim()
     };
 
-    addPurchase(purchaseData);
+    savingPurchaseRef.current = true;
+    setIsSavingPurchase(true);
+    try {
+      await addPurchase(purchaseData);
+    } catch (error) {
+      alert('تعذر حفظ فاتورة التوريد: ' + (error.message || 'خطأ غير معروف'));
+      return;
+    } finally {
+      savingPurchaseRef.current = false;
+      setIsSavingPurchase(false);
+    }
 
     // Reset & close
     setIsAddModalOpen(false);
@@ -167,6 +181,14 @@ export default function PurchasesView({ store, onOpenA4Report }) {
     setSupplierName('');
     setBankAccountNumber('');
     setNotes('');
+  };
+
+  const handleDeletePurchase = async purchase => {
+    if (deletingPurchaseId || !window.confirm(`هل أنت متأكد من حذف فاتورة توريد ${purchase.productName} بمبلغ ${purchase.totalCost} ${settings.currency}؟`)) return;
+    setDeletingPurchaseId(purchase.id);
+    try { await deletePurchase(purchase.id); }
+    catch (error) { alert('تعذر حذف فاتورة التوريد: ' + error.message); }
+    finally { setDeletingPurchaseId(null); }
   };
 
   // Filtered List
@@ -535,11 +557,8 @@ export default function PurchasesView({ store, onOpenA4Report }) {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => {
-                                  if (window.confirm(`هل أنت متأكد من حذف فاتورة توريد ${pur.productName} بمبلغ ${pur.totalCost} ${settings.currency}؟`)) {
-                                    deletePurchase(pur.id);
-                                  }
-                                }}
+                                onClick={() => handleDeletePurchase(pur)}
+                                disabled={deletingPurchaseId === pur.id}
                                 icon={Trash2}
                                 className="text-slate-400 hover:text-rose-600 hover:bg-rose-50"
                                 title="حذف فاتورة التوريد"
@@ -638,11 +657,8 @@ export default function PurchasesView({ store, onOpenA4Report }) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            if (window.confirm(`هل أنت متأكد من حذف فاتورة توريد ${pur.productName} بمبلغ ${pur.totalCost} ${settings.currency}؟`)) {
-                              deletePurchase(pur.id);
-                            }
-                          }}
+                          onClick={() => handleDeletePurchase(pur)}
+                          disabled={deletingPurchaseId === pur.id}
                           icon={Trash2}
                           className="text-slate-400 hover:text-rose-600 hover:bg-rose-50"
                           title="حذف فاتورة التوريد"
@@ -730,9 +746,10 @@ export default function PurchasesView({ store, onOpenA4Report }) {
               <div className="pt-1.5 flex justify-end">
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     if (window.confirm('هل أنت متأكد من حذف سند مردود المشتريات هذا؟ سيتم التراجع عن خصم الكمية وإعادة ضبط حساب المورد.')) {
-                      deletePurchaseReturn(ret.id);
+                      try { await deletePurchaseReturn(ret.id); }
+                      catch (error) { alert('تعذر حذف سند مردود المشتريات: ' + error.message); }
                     }
                   }}
                   className="text-xs text-slate-400 hover:text-red-600 font-bold flex items-center gap-1 transition-colors cursor-pointer"
@@ -751,7 +768,7 @@ export default function PurchasesView({ store, onOpenA4Report }) {
       {/* Add New Purchase Modal */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => { if (!savingPurchaseRef.current) setIsAddModalOpen(false); }}
         title="تسجيل فاتورة توريد جديدة"
         subtitle="شراء وتوريد خضروات وفواكه وتوثيق حسابات المورد"
         maxWidth="max-w-xl"
@@ -1182,18 +1199,20 @@ export default function PurchasesView({ store, onOpenA4Report }) {
                   variant="outline"
                   size="md"
                   className="flex-1"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => { if (!savingPurchaseRef.current) setIsAddModalOpen(false); }}
+                  disabled={isSavingPurchase}
                 >
                   إلغاء
                 </Button>
                 <Button
                   type="submit"
+                  disabled={isSavingPurchase}
                   variant="primary"
                   size="md"
                   className="flex-2"
                   icon={Check}
                 >
-                  حفظ فاتورة التوريد
+                  {isSavingPurchase ? 'جارٍ حفظ فاتورة التوريد...' : 'حفظ فاتورة التوريد'}
                 </Button>
               </div>
 

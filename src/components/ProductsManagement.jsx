@@ -27,17 +27,23 @@ export default function ProductsManagement({ store }) {
   // Fast daily price updates state
   const [tempPrices, setTempPrices] = useState({});
   const [savedSuccessKey, setSavedSuccessKey] = useState(null);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
 
   const handlePriceChange = (id, val) => {
     setTempPrices(prev => ({ ...prev, [id]: val }));
   };
 
-  const handleSaveSinglePrice = (id) => {
+  const handleSaveSinglePrice = async (id) => {
+    if (isSavingProduct) return;
     const newPrice = tempPrices[id];
     if (newPrice !== undefined && newPrice !== '') {
-      updateProductPrice(id, newPrice);
-      setSavedSuccessKey(id);
-      setTimeout(() => setSavedSuccessKey(null), 1500);
+      setIsSavingProduct(true);
+      try {
+        await updateProductPrice(id, newPrice);
+        setSavedSuccessKey(id);
+        setTimeout(() => setSavedSuccessKey(null), 1500);
+      } catch (error) { alert('تعذر حفظ سعر الصنف: ' + error.message); }
+      finally { setIsSavingProduct(false); }
     }
   };
 
@@ -71,25 +77,27 @@ export default function ProductsManagement({ store }) {
     setIsNewProductModalOpen(true);
   };
 
-  const handleSaveProductForm = () => {
+  const handleSaveProductForm = async () => {
+    if (isSavingProduct) return;
     if (!formData.name) {
       alert('يرجى كتابة اسم الصنف');
       return;
     }
 
-    if (editingProduct) {
-      updateProduct(editingProduct.id, formData);
-    } else {
-      addProduct(formData);
-    }
-
-    setIsNewProductModalOpen(false);
-    setEditingProduct(null);
+    setIsSavingProduct(true);
+    try {
+      if (editingProduct) await updateProduct(editingProduct.id, formData);
+      else await addProduct(formData);
+      setIsNewProductModalOpen(false);
+      setEditingProduct(null);
+    } catch (error) { alert('تعذر حفظ الصنف: ' + error.message); }
+    finally { setIsSavingProduct(false); }
   };
 
-  const handleDelete = (id, name) => {
+  const handleDelete = async (id, name) => {
     if (window.confirm(`هل أنت متأكد من حذف صنف (${name})؟`)) {
-      deleteProduct(id);
+      try { await deleteProduct(id); }
+      catch (error) { alert('تعذر حذف الصنف: ' + error.message); }
     }
   };
 
@@ -315,7 +323,6 @@ export default function ProductsManagement({ store }) {
         isOpen={isNewProductModalOpen}
         onClose={() => setIsNewProductModalOpen(false)}
         title={editingProduct ? 'تعديل بيانات الصنف' : 'إضافة صنف خضار / فاكهة جديد'}
-        size="md"
       >
         <div className="space-y-3.5">
 

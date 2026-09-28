@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   Users, UserPlus, Phone, MapPin, DollarSign, ArrowDownLeft, 
   Search, Plus, Edit2, Trash2, CheckCircle2, History, FileText,
@@ -24,6 +24,8 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
 
   // Payment modal state
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const savingPaymentRef = useRef(false);
   const [selectedSupplierForPayment, setSelectedSupplierForPayment] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'cash' | 'bank'
@@ -39,16 +41,17 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
     initialBalance: '',
     notes: ''
   });
+  const [isSavingSupplier, setIsSavingSupplier] = useState(false);
 
   // Edit supplier modal state
   const [editingSupplier, setEditingSupplier] = useState(null);
-  const [editForm, setEditForm] = useState({
+  const [editForm, setEditForm] = useState(/** @type {{name: string, phone: string, marketOrFarm: string, balance: string | number, notes: string}} */ ({
     name: '',
     phone: '',
     marketOrFarm: '',
     balance: 0,
     notes: ''
-  });
+  }));
 
   // Supplier Statement Modal State
   const [statementSupplier, setStatementSupplier] = useState(null);
@@ -81,26 +84,36 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
     setIsPaymentModalOpen(true);
   };
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment = async () => {
+    if (savingPaymentRef.current) return;
     if (!selectedSupplierForPayment || !paymentAmount || Number(paymentAmount) <= 0) {
       alert('يرجى إدخال مبلغ سداد صحيح');
       return;
     }
 
-    recordSupplierPayment({
+    savingPaymentRef.current = true;
+    setIsSavingPayment(true);
+    try {
+      await recordSupplierPayment({
       supplierId: selectedSupplierForPayment.id,
       amount: Number(paymentAmount),
       paymentMethod,
       notes: paymentNote.trim(),
       date: getCurrentDateFormatted(),
       time: getCurrentTimeFormatted()
-    });
-
-    setIsPaymentModalOpen(false);
-    setSelectedSupplierForPayment(null);
+      });
+      setIsPaymentModalOpen(false);
+      setSelectedSupplierForPayment(null);
+    } catch (error) {
+      alert('تعذر حفظ سداد المورد: ' + error.message);
+    } finally {
+      savingPaymentRef.current = false;
+      setIsSavingPayment(false);
+    }
   };
 
-  const handleCreateSupplier = () => {
+  const handleCreateSupplier = async () => {
+    if (isSavingSupplier) return;
     if (!supplierForm.name.trim()) {
       alert('يرجى كتابة اسم المورد أو المزرعة');
       return;
@@ -114,7 +127,8 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
       computedBalance = -Math.abs(initAmt);
     }
 
-    addSupplier({
+    setIsSavingSupplier(true);
+    try { await addSupplier({
       name: supplierForm.name.trim(),
       phone: supplierForm.phone.trim(),
       marketOrFarm: supplierForm.marketOrFarm.trim(),
@@ -131,6 +145,8 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
       notes: ''
     });
     setIsNewSupplierModalOpen(false);
+    } catch (error) { alert('تعذر حفظ المورد: ' + error.message); }
+    finally { setIsSavingSupplier(false); }
   };
 
   const handleOpenEdit = (sup) => {
@@ -144,26 +160,30 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
     });
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
+    if (isSavingSupplier) return;
     if (!editForm.name.trim()) {
       alert('يرجى كتابة اسم المورد');
       return;
     }
 
-    updateSupplier(editingSupplier.id, {
+    setIsSavingSupplier(true);
+    try { await updateSupplier(editingSupplier.id, {
       name: editForm.name.trim(),
       phone: editForm.phone.trim(),
       marketOrFarm: editForm.marketOrFarm.trim(),
       balance: Number(editForm.balance) || 0,
       notes: editForm.notes.trim()
     });
-
-    setEditingSupplier(null);
+      setEditingSupplier(null);
+    } catch (error) { alert('تعذر تحديث المورد: ' + error.message); }
+    finally { setIsSavingSupplier(false); }
   };
 
-  const handleDeleteSupplier = (id, name) => {
+  const handleDeleteSupplier = async (id, name) => {
     if (window.confirm(`هل أنت متأكد من حذف المورد: "${name}"؟\nلن يتم حذف فواتير التوريد السابقة.`)) {
-      deleteSupplier(id);
+      try { await deleteSupplier(id); }
+      catch (error) { alert('تعذر حذف المورد: ' + error.message); }
     }
   };
 
@@ -668,7 +688,8 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsPaymentModalOpen(false)}
+                  onClick={() => { if (!savingPaymentRef.current) setIsPaymentModalOpen(false); }}
+                  disabled={isSavingPayment}
                   className="text-slate-400 hover:text-slate-600 text-sm font-bold"
                 >
                   ✕
@@ -771,7 +792,8 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
               <div className="flex gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsPaymentModalOpen(false)}
+                  onClick={() => { if (!savingPaymentRef.current) setIsPaymentModalOpen(false); }}
+                  disabled={isSavingPayment}
                   className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
                 >
                   إلغاء
@@ -779,9 +801,10 @@ export default function SuppliersLedgerView({ store, onOpenNewPurchaseForSupplie
                 <button
                   type="button"
                   onClick={handleConfirmPayment}
+                  disabled={isSavingPayment}
                   className="flex-2 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-xl shadow-sm cursor-pointer"
                 >
-                  تأكيد سداد الدفعة
+                  {isSavingPayment ? 'جارٍ حفظ السداد...' : 'تأكيد سداد الدفعة'}
                 </button>
               </div>
             </motion.div>

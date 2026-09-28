@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import http from 'http';
 import fs from 'fs';
 
+if (!process.env.BRAKA_TEST_PASSWORD || !process.env.BRAKA_TEST_USERNAME) throw new Error('Configure isolated test account credentials in the environment; never use a production account');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -69,8 +71,9 @@ async function runVerification() {
 
     const pageErrors = [];
     page.on('pageerror', (err) => {
-      console.error('PAGE ERROR DETECTED:', err.message);
-      pageErrors.push(err.message);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('PAGE ERROR DETECTED:', message);
+      pageErrors.push(message);
     });
 
     // 1. Load Marketing Landing Page
@@ -157,8 +160,8 @@ async function runVerification() {
     await page.screenshot({ path: path.join(ARTIFACTS_DIR, 'test_clean_white_login.png') });
 
     // Type Master Owner Credentials into clean empty inputs
-    await page.type('input[placeholder*="اسم المستخدم أو البريد"]', 'amerfathi123@gmail.com');
-    await page.type('input[type="password"]', 'A20101993f');
+    await page.type('input[placeholder*="اسم المستخدم أو البريد"]', process.env.BRAKA_TEST_USERNAME);
+    await page.type('input[type="password"]', process.env.BRAKA_TEST_PASSWORD);
     await new Promise(r => setTimeout(r, 300));
 
     await page.evaluate(() => {
@@ -170,7 +173,7 @@ async function runVerification() {
     console.log('5. Opening SuperAdmin Portal...');
     await page.evaluate(() => {
       const superAdminBtn = document.querySelector('button[title*="سوبر"]') || Array.from(document.querySelectorAll('button')).find(b => b.title?.includes('سوبر') || b.innerText?.includes('سوبر'));
-      if (superAdminBtn) superAdminBtn.click();
+      if (superAdminBtn instanceof HTMLElement) superAdminBtn.click();
     });
     await new Promise(r => setTimeout(r, 1500));
 

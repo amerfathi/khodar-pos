@@ -1,402 +1,80 @@
-/**
- * Central Multi-Tenant Users API (/api/users)
- * Handles Cloudflare D1 database operations for staff users, roles, and granular permissions
- */
+import { authenticateRequest, requireAdmin, requireTenant } from '../../_lib/auth.js';
+import { hashPassword } from '../../_lib/passwords.js';
+import { json, badRequest, options, readJson } from '../../_lib/http.js';
 
-const CORS_HEADERS = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
-export async function onRequestOptions() {
-  return new Response(null, { headers: CORS_HEADERS });
+const roles = new Set(['admin', 'cashier', 'accountant', 'inventory_manager', 'custom']);
+const statuses = new Set(['active', 'inactive']);
+const permissionNames = new Set(['canSell', 'canViewInvoices', 'canVoidInvoices', 'canManageCustomers',
+  'canManagePurchases', 'canManageInventory', 'canManageExpenses', 'canManagePayroll', 'canViewFinance', 'canAccessSettings']);
+export const onRequestOptions = options;
+const serialize = u => ({
+  id: u.id, tenantId: u.tenant_id, branchId: u.branch_id, name: u.name, username: u.username,
+  role: u.role, status: u.status, phone: u.phone, permissions: JSON.parse(u.permissions_json || '{}')
+});
+async function authorize(request, env, tenantId) {
+  const auth = await authenticateRequest(request, env);
+  return { auth, error: requireAdmin(auth) || requireTenant(auth, tenantId) };
 }
-
-async function isAuthorizedTenantAdmin(request, env, targetTenantId) {
-  const authHeader = request.headers.get('Authorization') || '';
-  let token = '';
-  if (authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  }
-
-  // Fallback if no token passed in dev mode
-  if (!token) return true;
-
-  // Master super admin check
-  if (token === 'A20101993f' || token === 'admin' || (env?.SUPER_ADMIN_SECRET && token === env.SUPER_ADMIN_SECRET)) {
-    return true;
-  }
-
-  if (env?.DB && targetTenantId && token) {
-    try {
-      const tenantOwner = await env.DB.prepare(
-        "SELECT id FROM tenants WHERE id = ? AND password_hash = ? LIMIT 1"
-      ).bind(targetTenantId, token).first();
-      if (tenantOwner) return true;
-
-      const adminUser = await env.DB.prepare(
-        "SELECT id FROM users WHERE tenant_id = ? AND role = 'admin' AND password_hash = ? AND status = 'active' LIMIT 1"
-      ).bind(targetTenantId, token).first();
-      if (adminUser) return true;
-    } catch (e) {}
-  }
-
-  return false;
+function validate(body) {
+  if (!roles.has(body.role) || !statuses.has(body.status)) throw new Error('Invalid role or status');
+  if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > 120 ||
+      typeof body.username !== 'string' || !body.username.trim() || body.username.length > 120) throw new Error('Invalid user');
+  if (!body.permissions || typeof body.permissions !== 'object' || Array.isArray(body.permissions)) throw new Error('Invalid permissions');
+  if (Object.entries(body.permissions).some(([k,v]) => !permissionNames.has(k) || typeof v !== 'boolean')) throw new Error('Invalid permissions');
 }
-
-// 1. GET: Fetch users for a tenant or specific user
-export async function onRequestGet(context) {
-  const { request, env } = context;
+export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
-  const tenantId = (url.searchParams.get('tenantId') || '').trim();
-  const userId = (url.searchParams.get('id') || '').trim();
-
-  if (!tenantId && !userId) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'tenantId مطلوب للاستعلام عن المستخدمين لضمان عزل البيانات بين المتاجر' 
-    }), { status: 400, headers: CORS_HEADERS });
-  }
-
-  if (!env || !env.DB) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'قاعدة البيانات السحابية D1 غير متصلة' 
-    }), { status: 500, headers: CORS_HEADERS });
-  }
-
-  try {
-    let query = "SELECT * FROM users";
-    const params = [];
-
-    if (userId && tenantId) {
-      query += " WHERE id = ? AND tenant_id = ? LIMIT 1";
-      params.push(userId, tenantId);
-    } else if (userId) {
-      query += " WHERE id = ? LIMIT 1";
-      params.push(userId);
-    } else {
-      query += " WHERE tenant_id = ? ORDER BY created_at DESC";
-      params.push(tenantId);
-    }
-
-    const { results } = await env.DB.prepare(query).bind(...params).all();
-
-    const formattedUsers = (results || []).map(u => {
-      let perms = {};
-      try {
-        perms = typeof u.permissions_json === 'string' ? JSON.parse(u.permissions_json) : (u.permissions_json || {});
-      } catch (e) {
-        perms = {};
-      }
-
-      return {
-        id: u.id,
-        tenantId: u.tenant_id,
-        branchId: u.branch_id || 'all',
-        name: u.name,
-        username: u.username,
-        role: u.role || 'cashier',
-        status: u.status || 'active',
-        phone: u.phone || '',
-        permissions: perms,
-        createdAt: u.created_at,
-        updatedAt: u.updated_at
-      };
-    });
-
-    return new Response(JSON.stringify({
-      success: true,
-      users: formattedUsers,
-      total: formattedUsers.length
-    }), { headers: CORS_HEADERS });
-
-  } catch (err) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: err.message 
-    }), { status: 500, headers: CORS_HEADERS });
-  }
+  const auth = await authenticateRequest(request, env);
+  if (auth.error) return auth.error;
+  const access = requireTenant(auth, url.searchParams.get('tenantId'));
+  if (access) return access;
+  const id = url.searchParams.get('id');
+  if (requireAdmin(auth) && id !== auth.principal.id) return json({ success: false, error: 'Forbidden' }, 403);
+  const q = id ? 'SELECT * FROM users WHERE tenant_id = ? AND id = ?' : 'SELECT * FROM users WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1000';
+  const rows = await env.DB.prepare(q).bind(...(id ? [auth.principal.tenantId, id] : [auth.principal.tenantId])).all();
+  return json({ success: true, users: rows.results.map(serialize), total: rows.results.length });
 }
-
-// 2. POST: Create a new user in D1
-export async function onRequestPost(context) {
-  const { request, env } = context;
-
-  if (!env || !env.DB) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'قاعدة البيانات السحابية D1 غير متصلة' 
-    }), { status: 500, headers: CORS_HEADERS });
-  }
-
+export async function onRequestPost({ request, env }) {
   try {
-    const body = await request.json();
-    const { 
-      id, 
-      tenantId, 
-      branchId = 'all', 
-      name, 
-      username, 
-      password, 
-      role = 'cashier', 
-      status = 'active', 
-      phone = '', 
-      permissions = {} 
-    } = body;
-
-    if (!tenantId || !name || !username || !password) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'بيانات غير مكتملة: tenantId, name, username, password مطلوبة'
-      }), { status: 400, headers: CORS_HEADERS });
-    }
-
-    if (!(await isAuthorizedTenantAdmin(request, env, tenantId))) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'غير مصرح: إضافة موظفين تتطلب صلاحيات مدير أو مالك المتجر'
-      }), { status: 401, headers: CORS_HEADERS });
-    }
-
-    const cleanUsername = username.trim().toLowerCase();
-    const userId = id || `user-${Date.now()}`;
-    const permissionsJson = typeof permissions === 'string' ? permissions : JSON.stringify(permissions || {});
-
-    // Check duplicate username within same tenant
-    const existing = await env.DB.prepare(
-      "SELECT id FROM users WHERE tenant_id = ? AND LOWER(username) = ? LIMIT 1"
-    ).bind(tenantId, cleanUsername).first();
-
-    if (existing) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: `اسم المستخدم (${username}) مسجل مسبقاً لموظف آخر في متجركم`
-      }), { status: 409, headers: CORS_HEADERS });
-    }
-
-    await env.DB.prepare(`
-      INSERT INTO users (
-        id, tenant_id, branch_id, name, username, password_hash, role, status, phone, permissions_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    `).bind(
-      userId,
-      tenantId,
-      branchId || 'all',
-      name.trim(),
-      cleanUsername,
-      password,
-      role,
-      status,
-      (phone || '').trim(),
-      permissionsJson
-    ).run();
-
-    return new Response(JSON.stringify({
-      success: true,
-      message: 'تم إضافة المستخدم بنجاح في السحابة المركزية',
-      user: {
-        id: userId,
-        tenantId,
-        branchId: branchId || 'all',
-        name: name.trim(),
-        username: cleanUsername,
-        password,
-        role,
-        status,
-        phone: (phone || '').trim(),
-        permissions: typeof permissions === 'object' ? permissions : JSON.parse(permissionsJson)
-      }
-    }), { status: 201, headers: CORS_HEADERS });
-
-  } catch (err) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: err.message
-    }), { status: 500, headers: CORS_HEADERS });
-  }
+    const body = await readJson(request, 16384);
+    const { auth, error } = await authorize(request, env, body.tenantId);
+    if (error) return error;
+    const user = { role: 'cashier', status: 'active', branchId: 'all', permissions: {}, phone: '', ...body };
+    validate(user);
+    const branch = user.branchId || 'all';
+    if (branch !== 'all' && !await env.DB.prepare('SELECT id FROM branches WHERE id = ? AND tenant_id = ?').bind(branch, auth.principal.tenantId).first()) return badRequest('Invalid branch');
+    const passwordHash = await hashPassword(user.password);
+    const id = user.id || crypto.randomUUID();
+    if (await env.DB.prepare('SELECT id FROM users WHERE id = ? OR (tenant_id = ? AND LOWER(username) = ?)').bind(id, auth.principal.tenantId, user.username.trim().toLowerCase()).first()) return json({ success: false, error: 'User already exists' }, 409);
+    await env.DB.prepare('INSERT INTO users (id, tenant_id, branch_id, name, username, password_hash, role, status, phone, permissions_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(id, auth.principal.tenantId, branch, user.name.trim(), user.username.trim().toLowerCase(), passwordHash, user.role, user.status, String(user.phone).slice(0,40), JSON.stringify(user.permissions)).run();
+    const row = await env.DB.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(id, auth.principal.tenantId).first();
+    return json({ success: true, user: serialize(row) }, 201);
+  } catch { return badRequest('Invalid user request'); }
 }
-
-// 3. PATCH / PUT: Update user and permissions in D1
-export async function onRequestPatch(context) {
-  const { request, env } = context;
-
-  if (!env || !env.DB) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'قاعدة البيانات السحابية D1 غير متصلة' 
-    }), { status: 500, headers: CORS_HEADERS });
-  }
-
+export async function onRequestPatch({ request, env }) {
   try {
-    const body = await request.json();
-    const { id, tenantId, name, username, password, role, status, branchId, phone, permissions } = body;
-
-    if (!id || !tenantId) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'معرف المستخدم id وكود المستأجر tenantId مطلوبان لتحديث البيانات لضمان عزل البيانات'
-      }), { status: 400, headers: CORS_HEADERS });
-    }
-
-    if (!(await isAuthorizedTenantAdmin(request, env, tenantId))) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'غير مصرح: تعديل بيانات أو صلاحيات الموظفين تتطلب صلاحيات مدير أو مالك المتجر'
-      }), { status: 401, headers: CORS_HEADERS });
-    }
-
-    // Fetch existing user to verify tenant ownership
-    const existing = await env.DB.prepare(
-      "SELECT * FROM users WHERE id = ? AND tenant_id = ? LIMIT 1"
-    ).bind(id, tenantId).first();
-
-    if (!existing) {
-      // If user doesn't exist yet in D1 (e.g. was created offline or initially), upsert it!
-      if (tenantId && name && username) {
-        const permsJson = permissions ? (typeof permissions === 'string' ? permissions : JSON.stringify(permissions)) : '{}';
-        await env.DB.prepare(`
-          INSERT INTO users (
-            id, tenant_id, branch_id, name, username, password_hash, role, status, phone, permissions_json, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-        `).bind(
-          id,
-          tenantId,
-          branchId || 'all',
-          name.trim(),
-          username.trim().toLowerCase(),
-          password || '123456',
-          role || 'cashier',
-          status || 'active',
-          (phone || '').trim(),
-          permsJson
-        ).run();
-
-        return new Response(JSON.stringify({
-          success: true,
-          message: 'تم إنشاء المستخدم وحفظ الصلاحيات في السحابة بنجاح',
-          upserted: true
-        }), { headers: CORS_HEADERS });
-      }
-
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'المستخدم غير موجود بالسحابة المركزية'
-      }), { status: 404, headers: CORS_HEADERS });
-    }
-
-    const updatedName = name !== undefined ? name.trim() : existing.name;
-    const updatedUsername = username !== undefined ? username.trim().toLowerCase() : existing.username;
-    const updatedPassword = password !== undefined ? password : existing.password_hash;
-    const updatedRole = role !== undefined ? role : existing.role;
-    const updatedStatus = status !== undefined ? status : existing.status;
-    const updatedBranchId = branchId !== undefined ? branchId : existing.branch_id;
-    const updatedPhone = phone !== undefined ? phone.trim() : existing.phone;
-    
-    let updatedPermissionsJson = existing.permissions_json;
-    if (permissions !== undefined) {
-      updatedPermissionsJson = typeof permissions === 'string' ? permissions : JSON.stringify(permissions);
-    }
-
-    await env.DB.prepare(`
-      UPDATE users SET
-        name = ?,
-        username = ?,
-        password_hash = ?,
-        role = ?,
-        status = ?,
-        branch_id = ?,
-        phone = ?,
-        permissions_json = ?,
-        updated_at = datetime('now')
-      WHERE id = ?
-    `).bind(
-      updatedName,
-      updatedUsername,
-      updatedPassword,
-      updatedRole,
-      updatedStatus,
-      updatedBranchId,
-      updatedPhone,
-      updatedPermissionsJson,
-      id
-    ).run();
-
-    let parsedPerms = {};
-    try { parsedPerms = JSON.parse(updatedPermissionsJson); } catch (e) {}
-
-    return new Response(JSON.stringify({
-      success: true,
-      message: 'تم تحديث بيانات وصلاحيات المستخدم بنجاح',
-      user: {
-        id,
-        tenantId: existing.tenant_id,
-        branchId: updatedBranchId,
-        name: updatedName,
-        username: updatedUsername,
-        password: updatedPassword,
-        role: updatedRole,
-        status: updatedStatus,
-        phone: updatedPhone,
-        permissions: parsedPerms
-      }
-    }), { headers: CORS_HEADERS });
-
-  } catch (err) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: err.message
-    }), { status: 500, headers: CORS_HEADERS });
-  }
+    const body = await readJson(request, 16384);
+    const { auth, error } = await authorize(request, env, body.tenantId);
+    if (error) return error;
+    const old = await env.DB.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(body.id, auth.principal.tenantId).first();
+    if (!old) return json({ success: false, error: 'User not found' }, 404);
+    const user = { ...serialize(old), ...body };
+    validate(user);
+    if (user.branchId !== 'all' && !await env.DB.prepare('SELECT id FROM branches WHERE id = ? AND tenant_id = ?').bind(user.branchId, auth.principal.tenantId).first()) return badRequest('Invalid branch');
+    const passwordHash = body.password === undefined ? old.password_hash : await hashPassword(body.password);
+    await env.DB.prepare("UPDATE users SET name = ?, username = ?, password_hash = ?, role = ?, status = ?, branch_id = ?, phone = ?, permissions_json = ?, auth_version = auth_version + 1, updated_at = datetime('now') WHERE id = ? AND tenant_id = ?")
+      .bind(user.name.trim(), user.username.trim().toLowerCase(), passwordHash, user.role, user.status, user.branchId, String(user.phone).slice(0,40), JSON.stringify(user.permissions), body.id, auth.principal.tenantId).run();
+    return json({ success: true, user: serialize(await env.DB.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(body.id, auth.principal.tenantId).first()) });
+  } catch { return badRequest('Invalid user update'); }
 }
-
-// 4. DELETE: Remove user from D1
-export async function onRequestDelete(context) {
-  const { request, env } = context;
+export const onRequestPut = onRequestPatch;
+export async function onRequestDelete({ request, env }) {
   const url = new URL(request.url);
-  const id = (url.searchParams.get('id') || '').trim();
-  const tenantId = (url.searchParams.get('tenantId') || '').trim();
-
-  if (!id || !tenantId) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: 'معرف المستخدم id وكود المستأجر tenantId مطلوبان للحذف لضمان عزل البيانات'
-    }), { status: 400, headers: CORS_HEADERS });
-  }
-
-  if (!(await isAuthorizedTenantAdmin(request, env, tenantId))) {
-    return new Response(JSON.stringify({
-      success: false,
-      error: 'غير مصرح: حذف الموظفين يتطلب صلاحيات مدير أو مالك المتجر'
-    }), { status: 401, headers: CORS_HEADERS });
-  }
-
-  if (!env || !env.DB) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'قاعدة البيانات السحابية D1 غير متصلة' 
-    }), { status: 500, headers: CORS_HEADERS });
-  }
-
-  try {
-    const res = await env.DB.prepare("DELETE FROM users WHERE id = ? AND tenant_id = ?").bind(id, tenantId).run();
-    if (!res.meta?.changes) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'لم يتم العثور على المستخدم للحذف أو أنه لا يتبع هذا المتجر'
-      }), { status: 404, headers: CORS_HEADERS });
-    }
-    return new Response(JSON.stringify({
-      success: true,
-      message: 'تم حذف المستخدم من السحابة بنجاح',
-      changes: res.meta?.changes || 0
-    }), { headers: CORS_HEADERS });
-  } catch (err) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: err.message 
-    }), { status: 500, headers: CORS_HEADERS });
-  }
+  const { auth, error } = await authorize(request, env, url.searchParams.get('tenantId'));
+  if (error) return error;
+  const id = url.searchParams.get('id');
+  if (!id || id === auth.principal.id) return badRequest('Cannot delete active user');
+  const result = await env.DB.prepare('DELETE FROM users WHERE id = ? AND tenant_id = ?').bind(id, auth.principal.tenantId).run();
+  return json({ success: result.meta.changes > 0 }, result.meta.changes ? 200 : 404);
 }

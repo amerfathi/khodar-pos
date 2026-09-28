@@ -262,7 +262,7 @@ export default function A4InvoiceModal({
                 </tbody>
                 <tfoot>
                   <tr className="bg-slate-100 font-black text-slate-900 text-xs">
-                    <td colSpan="3" className="p-2.5 border border-slate-300 text-right">الإجماليات الكلية:</td>
+                    <td colSpan={3} className="p-2.5 border border-slate-300 text-right">الإجماليات الكلية:</td>
                     <td className="p-2.5 border border-slate-300 text-center">{invoice.totalPackages} عبوة</td>
                     <td className="p-2.5 border border-slate-300 text-center">{formatWeight(invoice.totalGrossWeight)}</td>
                     <td className="p-2.5 border border-slate-300 text-center">-{invoice.totalTareWeight?.toFixed(2) || '0.00'} كجم</td>

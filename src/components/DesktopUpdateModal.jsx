@@ -33,7 +33,7 @@ export default function DesktopUpdateModal({
     // Listen to download progress from Electron IPC
     if (typeof window !== 'undefined' && window.electronAPI?.onDownloadProgress) {
       const cleanup = window.electronAPI.onDownloadProgress((data) => {
-        setProgress(data);
+        setProgress(previous => ({ ...previous, ...data }));
       });
       return cleanup;
     }
@@ -86,7 +86,8 @@ export default function DesktopUpdateModal({
 
     try {
       if (window.electronAPI?.installUpdate) {
-        await window.electronAPI.installUpdate(downloadedFilePath);
+        const result = await window.electronAPI.installUpdate();
+        if (!result.success) throw new Error(result.error || 'تعذر تشغيل مثبت التحديث');
       }
     } catch (err) {
       setErrorMessage(err.message || 'تعذر تشغيل مثبت التحديث');

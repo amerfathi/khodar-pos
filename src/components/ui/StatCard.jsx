@@ -1,5 +1,11 @@
 import React from 'react';
 
+/**
+ * @param {{title: React.ReactNode, value: React.ReactNode, currency?: string,
+ *   subtitle?: React.ReactNode, icon?: React.ElementType, iconBg?: string,
+ *   valueColor?: string, badge?: React.ReactNode, badgeVariant?: string,
+ *   className?: string, onClick?: React.MouseEventHandler<HTMLDivElement>}} props
+ */
 export default function StatCard({
   title,
   value,

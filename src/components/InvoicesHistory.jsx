@@ -65,21 +65,24 @@ export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice 
     .filter(i => i.status !== 'voided')
     .reduce((sum, i) => sum + (Number(i.remainingDebt) || 0), 0);
 
-  const handleVoid = (id) => {
+  const handleVoid = async (id) => {
     if (window.confirm(`هل أنت متأكد من إلغاء الفاتورة رقم #${id}؟ سيتم إلغاء تأثيرها المالي والديون المرتبطة بها.`)) {
-      voidInvoice(id);
+      try { await voidInvoice(id); }
+      catch (error) { alert('تعذر إلغاء الفاتورة: ' + error.message); }
     }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (window.confirm(`هل أنت متأكد من حذف الفاتورة نهائياً #${id}؟`)) {
-      deleteInvoice(id);
+      try { await deleteInvoice(id); }
+      catch (error) { alert('تعذر حذف الفاتورة: ' + error.message); }
     }
   };
 
-  const handleDeleteReturn = (returnId) => {
+  const handleDeleteReturn = async (returnId) => {
     if (window.confirm('هل أنت متأكد من حذف سند المردود هذا؟ سيتم التراجع عن إعادة البضاعة واسترداد المبالغ المالية.')) {
-      deleteSalesReturn(returnId);
+      try { await deleteSalesReturn(returnId); }
+      catch (error) { alert('تعذر حذف سند المردود: ' + error.message); }
     }
   };
 

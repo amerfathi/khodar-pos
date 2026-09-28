@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { formatCurrency, getCurrentDateFormatted, getCurrentTimeFormatted } from '../utils/formatters';
 
 export default function WorkersPayrollView({ store, onOpenA4Report }) {
-  const { workers, workerTransactions, settings, addWorker, updateWorker, deleteWorker, addWorkerTransaction, deleteWorkerTransaction } = store;
+  const { workers, workerTransactions, settings, addWorker, updateWorker, deleteWorker, addWorkerTransaction, recordWorkerTransactionWithUpdate, deleteWorkerTransaction } = store;
 
   const [activeTab, setActiveTab] = useState('workers'); // 'workers' | 'transactions'
   
@@ -18,9 +18,10 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
   const [isSalaryModalOpen, setIsSalaryModalOpen] = useState(false);
   const [isAbsenceModalOpen, setIsAbsenceModalOpen] = useState(false);
   const [selectedWorker, setSelectedWorker] = useState(null);
+  const [isSavingTransaction, setIsSavingTransaction] = useState(false);
 
   // Forms
-  const [workerForm, setWorkerForm] = useState({
+  const [workerForm, setWorkerForm] = useState(/** @type {{name: string, phone: string, role: string, salaryType: string, monthlySalary: string, workDaysPerMonth: string | number, notes: string}} */ ({
     name: '',
     phone: '',
     role: 'موظف مبيعات وميزان',
@@ -28,40 +29,41 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
     monthlySalary: '',
     workDaysPerMonth: 30,
     notes: '',
-  });
+  }));
 
   const [advanceForm, setAdvanceForm] = useState({
     amount: '',
     notes: 'سلفة نقدية على الراتب',
   });
 
-  const [absenceForm, setAbsenceForm] = useState({
+  const [absenceForm, setAbsenceForm] = useState(/** @type {{absenceType: string, daysCount: string | number, notes: string}} */ ({
     absenceType: 'unexcused', // 'unexcused' | 'medical'
     daysCount: 1,
     notes: 'غياب بدون إذن',
-  });
+  }));
 
-  const [salaryForm, setSalaryForm] = useState({
+  const [salaryForm, setSalaryForm] = useState(/** @type {{baseSalary: number, medicalAbsenceDays: number, unexcusedAbsenceDays: number, deductAdvances: string | number, bonusAmount: string | number, notes: string}} */ ({
     baseSalary: 0,
     medicalAbsenceDays: 0,
     unexcusedAbsenceDays: 0,
     deductAdvances: 0,
     bonusAmount: 0,
     notes: 'تسوية وصرف راتب شهري',
-  });
+  }));
 
   // Calculations
   const totalAdvancesOpen = workers.reduce((sum, w) => sum + (Number(w.currentAdvance) || 0), 0);
   const totalBaseSalaries = workers.reduce((sum, w) => sum + (Number(w.monthlySalary ?? w.baseSalary) || 0), 0);
 
-  const handleCreateWorker = () => {
+  const handleCreateWorker = async () => {
     const salary = Number(workerForm.monthlySalary) || 0;
     if (!workerForm.name.trim() || salary <= 0) {
       alert('يرجى كتابة اسم الموظف وتحديد راتبه الشهري');
       return;
     }
 
-    addWorker({
+    try {
+      await addWorker({
       name: workerForm.name.trim(),
       phone: workerForm.phone.trim(),
       role: workerForm.role,
@@ -72,7 +74,7 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
       medicalAbsenceDays: 0,
       unexcusedAbsenceDays: 0,
       notes: workerForm.notes.trim()
-    });
+      });
 
     setWorkerForm({
       name: '',
@@ -84,6 +86,7 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
       notes: '',
     });
     setIsAddWorkerModalOpen(false);
+    } catch (error) { alert('تعذر حفظ العامل: ' + error.message); }
   };
 
   const handleOpenAdvance = (worker) => {
@@ -92,14 +95,16 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
     setIsAdvanceModalOpen(true);
   };
 
-  const handleConfirmAdvance = () => {
+  const handleConfirmAdvance = async () => {
+    if (isSavingTransaction) return;
     const amount = Number(advanceForm.amount);
     if (!selectedWorker || amount <= 0) {
       alert('يرجى إدخال مبلغ سلفة صحيح');
       return;
     }
 
-    addWorkerTransaction({
+    setIsSavingTransaction(true);
+    try { await addWorkerTransaction({
       workerId: selectedWorker.id,
       workerName: selectedWorker.name,
       type: 'advance',
@@ -108,9 +113,10 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
       time: getCurrentTimeFormatted(),
       notes: advanceForm.notes,
     });
-
-    setIsAdvanceModalOpen(false);
-    setSelectedWorker(null);
+      setIsAdvanceModalOpen(false);
+      setSelectedWorker(null);
+    } catch (error) { alert('تعذر حفظ السلفة: ' + error.message); }
+    finally { setIsSavingTransaction(false); }
   };
 
   const handleOpenAbsence = (worker) => {
@@ -123,7 +129,8 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
     setIsAbsenceModalOpen(true);
   };
 
-  const handleConfirmAbsence = () => {
+  const handleConfirmAbsence = async () => {
+    if (isSavingTransaction) return;
     const days = Number(absenceForm.daysCount) || 1;
     if (!selectedWorker || days <= 0) {
       alert('يرجى تحديد عدد أيام الغياب');
@@ -134,12 +141,11 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
     const updatedMedical = (Number(selectedWorker.medicalAbsenceDays) || 0) + (isMedical ? days : 0);
     const updatedUnexcused = (Number(selectedWorker.unexcusedAbsenceDays) || 0) + (!isMedical ? days : 0);
 
-    updateWorker(selectedWorker.id, {
+    setIsSavingTransaction(true);
+    try { await recordWorkerTransactionWithUpdate(selectedWorker.id, {
       medicalAbsenceDays: updatedMedical,
       unexcusedAbsenceDays: updatedUnexcused,
-    });
-
-    addWorkerTransaction({
+    }, {
       workerId: selectedWorker.id,
       workerName: selectedWorker.name,
       type: 'absence_record',
@@ -149,10 +155,11 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
       date: getCurrentDateFormatted(),
       time: getCurrentTimeFormatted(),
       notes: (isMedical ? 'غياب بعذر مرضي: ' : 'غياب بدون إذن: ') + days + ' يوم (' + absenceForm.notes + ')',
-    });
-
-    setIsAbsenceModalOpen(false);
-    setSelectedWorker(null);
+    }, true);
+      setIsAbsenceModalOpen(false);
+      setSelectedWorker(null);
+    } catch (error) { alert('تعذر حفظ الغياب: ' + error.message); }
+    finally { setIsSavingTransaction(false); }
   };
 
   const handleOpenSalary = (worker) => {
@@ -172,8 +179,8 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
     setIsSalaryModalOpen(true);
   };
 
-  const handleConfirmSalary = () => {
-    if (!selectedWorker) return;
+  const handleConfirmSalary = async () => {
+    if (!selectedWorker || isSavingTransaction) return;
 
     const monthly = Number(salaryForm.baseSalary) || 0;
     const workDays = Number(selectedWorker.workDaysPerMonth) || 30;
@@ -185,7 +192,11 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
 
     const netSalaryPaid = Math.max(0, monthly - unexcusedDeduction - advancesDeducted + bonus);
 
-    addWorkerTransaction({
+    setIsSavingTransaction(true);
+    try { await recordWorkerTransactionWithUpdate(selectedWorker.id, {
+      medicalAbsenceDays: 0,
+      unexcusedAbsenceDays: 0,
+    }, {
       workerId: selectedWorker.id,
       workerName: selectedWorker.name,
       type: 'salary_payment',
@@ -198,19 +209,16 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
       time: getCurrentTimeFormatted(),
       notes: salaryForm.notes + ' (صافي الراتب بعد خصم الغياب والسلف)',
     });
-
-    updateWorker(selectedWorker.id, {
-      medicalAbsenceDays: 0,
-      unexcusedAbsenceDays: 0,
-    });
-
-    setIsSalaryModalOpen(false);
-    setSelectedWorker(null);
+      setIsSalaryModalOpen(false);
+      setSelectedWorker(null);
+    } catch (error) { alert('تعذر حفظ الراتب: ' + error.message); }
+    finally { setIsSavingTransaction(false); }
   };
 
-  const handleDeleteWorker = (id, name) => {
+  const handleDeleteWorker = async (id, name) => {
     if (window.confirm('هل أنت متأكد من حذف الموظف (' + name + ') وجميع سجلاته؟')) {
-      deleteWorker(id);
+      try { await deleteWorker(id); }
+      catch (error) { alert('تعذر حذف العامل: ' + error.message); }
     }
   };
 
@@ -490,9 +498,10 @@ export default function WorkersPayrollView({ store, onOpenA4Report }) {
 
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         if (window.confirm('هل أنت متأكد من حذف هذه الحركة؟')) {
-                          deleteWorkerTransaction(tx.id);
+                          try { await deleteWorkerTransaction(tx.id); }
+                          catch (error) { alert('تعذر حذف حركة العامل: ' + error.message); }
                         }
                       }}
                       className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"

@@ -22,6 +22,12 @@ const SIZES = {
   'icon-xs': 'h-6 w-6 p-0 flex items-center justify-center rounded-md shrink-0',
 };
 
+/**
+ * @param {React.ButtonHTMLAttributes<HTMLButtonElement> & {
+ *   variant?: string, size?: string, isLoading?: boolean, loadingText?: string,
+ *   icon?: React.ElementType, iconPosition?: 'start' | 'end'
+ * }} props
+ */
 export default function Button({
   children,
   variant = 'primary',

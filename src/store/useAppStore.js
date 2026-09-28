@@ -26,7 +26,20 @@ import {
   ROLE_PERMISSIONS_PRESETS
 } from '../data/initialData';
 import { getCurrentDateFormatted, getCurrentTimeFormatted } from '../utils/formatters';
+import { adjustBalance, applyPurchaseInventory, applyPurchaseReturnPurchase, applyPurchaseReturnInventory, applyDamageInventory, applyWorkerAdvance, applyStockTransfer, applySalesReturnInventory, applySalesReturnInvoice } from '../services/businessEffects.js';
+import { backupToState, validateBackup } from '../services/backupValidation.js';
+import { SYNC_HEADS_STATE_KEY } from '../services/syncConflictPolicy.js';
+import { scheduleBackup } from '../services/backupScheduler.js';
+import { AtomicStore } from '../services/atomicStore.js';
+import { DurableAggregate } from '../services/durableAggregate.js';
+import { branchCreateEvent } from '../services/branchEvents.js';
+import { applyInvoiceInventory } from '../services/invoiceInventory.js';
 import { cloudflareSync } from '../services/cloudflareSync';
+import { apiFetch as fetch, getSessionToken, setSessionToken, getSessionUser, setSessionUser } from '../services/authSession.js';
+import { createTenantStorage, writeTenantLoginContext, readAccessScopeTransition, clearAccessScopeTransition } from '../services/tenantStorage.js';
+import { acquireWithCheckedLegacyMigration } from '../services/checkedLegacyMigration.js';
+import { fetchCloudCheckpointPage, fetchServerBranchManifest } from '../services/cloudMigrationApi.js';
+import { buildAccountingSnapshot } from '../services/accountingReconciliation.js';
 import { getApiBaseUrl } from '../config/appVersion';
 
 const STORAGE_KEYS = {
@@ -57,23 +70,6 @@ const STORAGE_KEYS = {
   TRIAL_REQUESTS: 'khodar_trial_leads_v1'
 };
 
-const getStoredItem = (key, fallback) => {
-  try {
-    const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : fallback;
-  } catch (e) {
-    console.error(`Error reading ${key} from localStorage`, e);
-    return fallback;
-  }
-};
-
-const setStoredItem = (key, value) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    console.error(`Error saving ${key} to localStorage`, e);
-  }
-};
 
 /**
  * Authoritative User Permissions Resolver
@@ -93,97 +89,258 @@ export const resolveUserPermissions = (user) => {
   return user.permissions ? { ...DEFAULT_PERMISSIONS, ...user.permissions } : { ...DEFAULT_PERMISSIONS };
 };
 
-export function useAppStore() {
-  const [products, setProducts] = useState(() => getStoredItem(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS));
-  const [customers, setCustomers] = useState(() => getStoredItem(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS));
-  const [invoices, setInvoices] = useState(() => getStoredItem(STORAGE_KEYS.INVOICES, INITIAL_INVOICES));
-  const [expenses, setExpenses] = useState(() => getStoredItem(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES));
-  const [expenseCategories, setExpenseCategories] = useState(() => getStoredItem(STORAGE_KEYS.EXPENSE_CATEGORIES, INITIAL_EXPENSE_CATEGORIES));
-  const [settings, setSettings] = useState(() => getStoredItem(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS));
-  const [damagedItems, setDamagedItems] = useState(() => getStoredItem(STORAGE_KEYS.DAMAGED, INITIAL_DAMAGED_ITEMS));
-  const [workers, setWorkers] = useState(() => getStoredItem(STORAGE_KEYS.WORKERS, INITIAL_WORKERS));
-  const [workerTransactions, setWorkerTransactions] = useState(() => getStoredItem(STORAGE_KEYS.WORKER_TRANSACTIONS, INITIAL_WORKER_TRANSACTIONS));
-  const [customerPayments, setCustomerPayments] = useState(() => getStoredItem(STORAGE_KEYS.CUSTOMER_PAYMENTS, INITIAL_CUSTOMER_PAYMENTS));
-  const [purchases, setPurchases] = useState(() => getStoredItem(STORAGE_KEYS.PURCHASES, INITIAL_PURCHASES));
-  const [suppliers, setSuppliers] = useState(() => getStoredItem(STORAGE_KEYS.SUPPLIERS, INITIAL_SUPPLIERS));
-  const [supplierPayments, setSupplierPayments] = useState(() => getStoredItem(STORAGE_KEYS.SUPPLIER_PAYMENTS, INITIAL_SUPPLIER_PAYMENTS));
-  const [partners, setPartners] = useState(() => getStoredItem(STORAGE_KEYS.PARTNERS, INITIAL_PARTNERS));
-  const [partnerDrawings, setPartnerDrawings] = useState(() => getStoredItem(STORAGE_KEYS.PARTNER_DRAWINGS, INITIAL_PARTNER_DRAWINGS));
-  const [profitDistributions, setProfitDistributions] = useState(() => getStoredItem(STORAGE_KEYS.PROFIT_DISTRIBUTIONS, INITIAL_PROFIT_DISTRIBUTIONS));
-  const [salesReturns, setSalesReturns] = useState(() => getStoredItem(STORAGE_KEYS.SALES_RETURNS, INITIAL_SALES_RETURNS));
-  const [purchaseReturns, setPurchaseReturns] = useState(() => getStoredItem(STORAGE_KEYS.PURCHASE_RETURNS, INITIAL_PURCHASE_RETURNS));
-  const [tenants, setTenants] = useState(() => getStoredItem(STORAGE_KEYS.TENANTS, INITIAL_TENANTS));
-  const [users, setUsers] = useState(() => getStoredItem(STORAGE_KEYS.USERS, INITIAL_USERS));
-  const [currentUser, setCurrentUser] = useState(() => getStoredItem(STORAGE_KEYS.CURRENT_USER, null));
-  const [branches, setBranches] = useState(() => getStoredItem(STORAGE_KEYS.BRANCHES, INITIAL_BRANCHES));
-  const [activeBranchId, setActiveBranchId] = useState(() => getStoredItem(STORAGE_KEYS.ACTIVE_BRANCH_ID, 'branch-main'));
-  const [stockTransfers, setStockTransfers] = useState(() => getStoredItem(STORAGE_KEYS.STOCK_TRANSFERS, INITIAL_STOCK_TRANSFERS));
-  const [trialRequests, setTrialRequests] = useState(() => getStoredItem(STORAGE_KEYS.TRIAL_REQUESTS, []));
+export function useAppStore(options = {}) {
+  const [currentUser, setCurrentUser] = useState(() => getSessionUser());
+  const [persistence, setPersistence] = useState({ ready: false, error: null });
+  const [, redraw] = useState(0);
+  // Keep the repository bound to this mounted identity.
+  const [durableRepository] = useState(() => {
+    if (Object.hasOwn(options, 'durableRepository')) return options.durableRepository || null;
+    return getSessionUser() && globalThis.indexedDB ? new DurableAggregate(globalThis.indexedDB) : null;
+  });
+  const [local] = useState(() => {
+    const storage = createTenantStorage();
+    const storedBranches = storage.read(STORAGE_KEYS.BRANCHES, null);
+    const storedActiveBranchId = storage.read(STORAGE_KEYS.ACTIVE_BRANCH_ID, null);
+    const branchContext = options.serverBranchContext || (durableRepository && Array.isArray(storedBranches) && storedActiveBranchId
+      ? { branches: storedBranches, activeBranchId: storedActiveBranchId } : null);
+    if (branchContext && (!Array.isArray(branchContext.branches) ||
+        branchContext.branches.some(branch => branch?.tenantId !== getSessionUser()?.tenantId) ||
+        !branchContext.branches.some(branch => branch.id === branchContext.activeBranchId)))
+      throw new Error('بيانات فروع الخادم الأولية غير صالحة');
+    const readInitial = (key, fallback) => {
+      if (!durableRepository) return storage.read(key, fallback);
+      if (key === STORAGE_KEYS.BRANCHES) return branchContext?.branches || fallback;
+      if (key === STORAGE_KEYS.ACTIVE_BRANCH_ID) return branchContext?.activeBranchId || fallback;
+      return fallback;
+    };
+    return new AtomicStore(getSessionUser(), {
+      [STORAGE_KEYS.PRODUCTS]: readInitial(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS),
+      [STORAGE_KEYS.CUSTOMERS]: readInitial(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS),
+      [STORAGE_KEYS.INVOICES]: readInitial(STORAGE_KEYS.INVOICES, INITIAL_INVOICES),
+      [STORAGE_KEYS.EXPENSES]: readInitial(STORAGE_KEYS.EXPENSES, INITIAL_EXPENSES),
+      [STORAGE_KEYS.EXPENSE_CATEGORIES]: readInitial(STORAGE_KEYS.EXPENSE_CATEGORIES, INITIAL_EXPENSE_CATEGORIES),
+      [STORAGE_KEYS.SETTINGS]: readInitial(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS),
+      [STORAGE_KEYS.DAMAGED]: readInitial(STORAGE_KEYS.DAMAGED, INITIAL_DAMAGED_ITEMS),
+      [STORAGE_KEYS.WORKERS]: readInitial(STORAGE_KEYS.WORKERS, INITIAL_WORKERS),
+      [STORAGE_KEYS.WORKER_TRANSACTIONS]: readInitial(STORAGE_KEYS.WORKER_TRANSACTIONS, INITIAL_WORKER_TRANSACTIONS),
+      [STORAGE_KEYS.CUSTOMER_PAYMENTS]: readInitial(STORAGE_KEYS.CUSTOMER_PAYMENTS, INITIAL_CUSTOMER_PAYMENTS),
+      [STORAGE_KEYS.PURCHASES]: readInitial(STORAGE_KEYS.PURCHASES, INITIAL_PURCHASES),
+      [STORAGE_KEYS.SUPPLIERS]: readInitial(STORAGE_KEYS.SUPPLIERS, INITIAL_SUPPLIERS),
+      [STORAGE_KEYS.SUPPLIER_PAYMENTS]: readInitial(STORAGE_KEYS.SUPPLIER_PAYMENTS, INITIAL_SUPPLIER_PAYMENTS),
+      [STORAGE_KEYS.PARTNERS]: readInitial(STORAGE_KEYS.PARTNERS, getSessionUser() ? [] : INITIAL_PARTNERS),
+      [STORAGE_KEYS.PARTNER_DRAWINGS]: readInitial(STORAGE_KEYS.PARTNER_DRAWINGS, INITIAL_PARTNER_DRAWINGS),
+      [STORAGE_KEYS.PROFIT_DISTRIBUTIONS]: readInitial(STORAGE_KEYS.PROFIT_DISTRIBUTIONS, INITIAL_PROFIT_DISTRIBUTIONS),
+      [STORAGE_KEYS.SALES_RETURNS]: readInitial(STORAGE_KEYS.SALES_RETURNS, INITIAL_SALES_RETURNS),
+      [STORAGE_KEYS.PURCHASE_RETURNS]: readInitial(STORAGE_KEYS.PURCHASE_RETURNS, INITIAL_PURCHASE_RETURNS),
+      [STORAGE_KEYS.TENANTS]: readInitial(STORAGE_KEYS.TENANTS, INITIAL_TENANTS),
+      [STORAGE_KEYS.USERS]: readInitial(STORAGE_KEYS.USERS, INITIAL_USERS),
+      [STORAGE_KEYS.BRANCHES]: readInitial(STORAGE_KEYS.BRANCHES, getSessionUser() ? [] : INITIAL_BRANCHES),
+      [STORAGE_KEYS.ACTIVE_BRANCH_ID]: readInitial(STORAGE_KEYS.ACTIVE_BRANCH_ID, getSessionUser() ? null : 'branch-main'),
+      [STORAGE_KEYS.STOCK_TRANSFERS]: readInitial(STORAGE_KEYS.STOCK_TRANSFERS, INITIAL_STOCK_TRANSFERS),
+      [STORAGE_KEYS.TRIAL_REQUESTS]: readInitial(STORAGE_KEYS.TRIAL_REQUESTS, []),
+      [SYNC_HEADS_STATE_KEY]: {},
+    }, globalThis.localStorage, { durableFirst: Boolean(durableRepository) });
+  });
+  let products = local.read(STORAGE_KEYS.PRODUCTS);
+  const setProducts = update => local.set(STORAGE_KEYS.PRODUCTS, update);
+  let customers = local.read(STORAGE_KEYS.CUSTOMERS);
+  const setCustomers = update => local.set(STORAGE_KEYS.CUSTOMERS, update);
+  let invoices = local.read(STORAGE_KEYS.INVOICES);
+  const setInvoices = update => local.set(STORAGE_KEYS.INVOICES, update);
+  let expenses = local.read(STORAGE_KEYS.EXPENSES);
+  const setExpenses = update => local.set(STORAGE_KEYS.EXPENSES, update);
+  let expenseCategories = local.read(STORAGE_KEYS.EXPENSE_CATEGORIES);
+  const setExpenseCategories = update => local.set(STORAGE_KEYS.EXPENSE_CATEGORIES, update);
+  let settings = local.read(STORAGE_KEYS.SETTINGS);
+  const setSettings = update => local.set(STORAGE_KEYS.SETTINGS, update);
+  let damagedItems = local.read(STORAGE_KEYS.DAMAGED);
+  const setDamagedItems = update => local.set(STORAGE_KEYS.DAMAGED, update);
+  let workers = local.read(STORAGE_KEYS.WORKERS);
+  const setWorkers = update => local.set(STORAGE_KEYS.WORKERS, update);
+  let workerTransactions = local.read(STORAGE_KEYS.WORKER_TRANSACTIONS);
+  const setWorkerTransactions = update => local.set(STORAGE_KEYS.WORKER_TRANSACTIONS, update);
+  let customerPayments = local.read(STORAGE_KEYS.CUSTOMER_PAYMENTS);
+  const setCustomerPayments = update => local.set(STORAGE_KEYS.CUSTOMER_PAYMENTS, update);
+  let purchases = local.read(STORAGE_KEYS.PURCHASES);
+  const setPurchases = update => local.set(STORAGE_KEYS.PURCHASES, update);
+  let suppliers = local.read(STORAGE_KEYS.SUPPLIERS);
+  const setSuppliers = update => local.set(STORAGE_KEYS.SUPPLIERS, update);
+  let supplierPayments = local.read(STORAGE_KEYS.SUPPLIER_PAYMENTS);
+  const setSupplierPayments = update => local.set(STORAGE_KEYS.SUPPLIER_PAYMENTS, update);
+  let partners = local.read(STORAGE_KEYS.PARTNERS);
+  const setPartners = update => local.set(STORAGE_KEYS.PARTNERS, update);
+  let partnerDrawings = local.read(STORAGE_KEYS.PARTNER_DRAWINGS);
+  const setPartnerDrawings = update => local.set(STORAGE_KEYS.PARTNER_DRAWINGS, update);
+  let profitDistributions = local.read(STORAGE_KEYS.PROFIT_DISTRIBUTIONS);
+  const setProfitDistributions = update => local.set(STORAGE_KEYS.PROFIT_DISTRIBUTIONS, update);
+  let salesReturns = local.read(STORAGE_KEYS.SALES_RETURNS);
+  const setSalesReturns = update => local.set(STORAGE_KEYS.SALES_RETURNS, update);
+  let purchaseReturns = local.read(STORAGE_KEYS.PURCHASE_RETURNS);
+  const setPurchaseReturns = update => local.set(STORAGE_KEYS.PURCHASE_RETURNS, update);
+  let tenants = local.read(STORAGE_KEYS.TENANTS);
+  const setTenants = update => local.set(STORAGE_KEYS.TENANTS, update);
+  let users = local.read(STORAGE_KEYS.USERS);
+  const setUsers = update => local.set(STORAGE_KEYS.USERS, update);
+  let branches = local.read(STORAGE_KEYS.BRANCHES);
+  const setBranches = update => local.set(STORAGE_KEYS.BRANCHES, update);
+  let activeBranchId = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
+  const setActiveBranchId = update => local.set(STORAGE_KEYS.ACTIVE_BRANCH_ID, update);
+  let stockTransfers = local.read(STORAGE_KEYS.STOCK_TRANSFERS);
+  const setStockTransfers = update => local.set(STORAGE_KEYS.STOCK_TRANSFERS, update);
+  let trialRequests = local.read(STORAGE_KEYS.TRIAL_REQUESTS);
+  const setTrialRequests = update => local.set(STORAGE_KEYS.TRIAL_REQUESTS, update);
 
-  // Sync to localStorage
-  useEffect(() => { setStoredItem(STORAGE_KEYS.PRODUCTS, products); }, [products]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.CUSTOMERS, customers); }, [customers]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.INVOICES, invoices); }, [invoices]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.EXPENSES, expenses); }, [expenses]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.EXPENSE_CATEGORIES, expenseCategories); }, [expenseCategories]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.SETTINGS, settings); }, [settings]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.DAMAGED, damagedItems); }, [damagedItems]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.WORKERS, workers); }, [workers]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.WORKER_TRANSACTIONS, workerTransactions); }, [workerTransactions]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.CUSTOMER_PAYMENTS, customerPayments); }, [customerPayments]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.PURCHASES, purchases); }, [purchases]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.SUPPLIERS, suppliers); }, [suppliers]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.SUPPLIER_PAYMENTS, supplierPayments); }, [supplierPayments]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.PARTNERS, partners); }, [partners]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.PARTNER_DRAWINGS, partnerDrawings); }, [partnerDrawings]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.PROFIT_DISTRIBUTIONS, profitDistributions); }, [profitDistributions]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.SALES_RETURNS, salesReturns); }, [salesReturns]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.PURCHASE_RETURNS, purchaseReturns); }, [purchaseReturns]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.TENANTS, tenants); }, [tenants]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.USERS, users); }, [users]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.CURRENT_USER, currentUser); }, [currentUser]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.BRANCHES, branches); }, [branches]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.ACTIVE_BRANCH_ID, activeBranchId); }, [activeBranchId]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.STOCK_TRANSFERS, stockTransfers); }, [stockTransfers]);
-  useEffect(() => { setStoredItem(STORAGE_KEYS.TRIAL_REQUESTS, trialRequests); }, [trialRequests]);
-  
+  useEffect(() => {
+    let disposed = false;
+    const unsubscribe = local.subscribe(() => {
+      if (!disposed) {
+        redraw(value => value + 1);
+        if (local.failure) setPersistence(previous => ({ ...previous, error: local.failure }));
+      }
+    });
+    if (currentUser) {
+      const transition = readAccessScopeTransition(currentUser);
+      const cachedPrevious = transition ? globalThis.localStorage?.getItem(transition.oldKey) : null;
+      const previous = cachedPrevious ? JSON.parse(cachedPrevious) : null;
+      if (previous?.outbox?.length) {
+        setPersistence({ ready: false, error:
+          `تغيّر نطاق صلاحيات هذا المستخدم وتوجد ${previous.outbox.length} حركة محلية معلّقة في النطاق السابق. حُفظت دون حذف، وأُوقفت العمليات حتى يستردها المدير.` });
+      } else acquireWithCheckedLegacyMigration({
+        store: local,
+        durable: durableRepository,
+        createLegacyStore: () => new AtomicStore(currentUser, local.value.state, globalThis.localStorage),
+        fetchPage: fetchCloudCheckpointPage,
+        fetchBranches: fetchServerBranchManifest
+      }).then(async ready => {
+        if (disposed) return;
+        if (ready) {
+          const ownedBranches = local.read(STORAGE_KEYS.BRANCHES);
+          const selected = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
+          if (!Array.isArray(ownedBranches) || !ownedBranches.length ||
+              ownedBranches.some(branch => branch?.tenantId !== currentUser.tenantId) ||
+              !ownedBranches.some(branch => branch.id === selected)) {
+            await local.close();
+            if (!disposed) setPersistence({ ready: false, error: 'تعذر التحقق من فروع الشركة أو الفرع النشط؛ لم تُفتح العمليات المالية. يلزم مراجعة بيانات الفروع.' });
+            return;
+          }
+          let manifest = null;
+          if (['company_owner','admin','super_admin'].includes(currentUser.role) &&
+              (!currentUser.branchId || currentUser.branchId === 'all')) {
+            manifest=await fetchServerBranchManifest({tenantId:currentUser.tenantId});
+            if (!manifest?.fullTenantVisibility) throw new Error('تعذر تهيئة سياسة تعارض الأجهزة دون رؤية كاملة للشركة');
+            if (!Object.hasOwn(local.value.state,SYNC_HEADS_STATE_KEY))
+              await local.initializeConflictPolicy(manifest.conflictHeads,manifest.latestSequence);
+          }
+          if (ready && manifest)
+            await (local.durable ? local.bootstrapBranchesDurable(STORAGE_KEYS.BRANCHES, manifest.conflictHeads) :
+              local.bootstrapBranches(STORAGE_KEYS.BRANCHES, manifest.conflictHeads));
+        }
+        if (disposed) return;
+        if (ready) clearAccessScopeTransition(currentUser);
+        setPersistence({ ready, error: ready ? null : 'هذا الحساب مفتوح في نافذة أخرى. أغلقها ثم أعد فتح هذه النافذة للحفظ.' });
+      }).catch(error => { if (!disposed) setPersistence({ ready: false, error: error.message }); });
+    }
+    return () => { disposed = true; unsubscribe(); void local.close(); };
+  }, [local, durableRepository, currentUser]);
+
+  const refreshBindings = () => {
+    products = local.read(STORAGE_KEYS.PRODUCTS);
+    customers = local.read(STORAGE_KEYS.CUSTOMERS);
+    invoices = local.read(STORAGE_KEYS.INVOICES);
+    expenses = local.read(STORAGE_KEYS.EXPENSES);
+    expenseCategories = local.read(STORAGE_KEYS.EXPENSE_CATEGORIES);
+    settings = local.read(STORAGE_KEYS.SETTINGS);
+    damagedItems = local.read(STORAGE_KEYS.DAMAGED);
+    workers = local.read(STORAGE_KEYS.WORKERS);
+    workerTransactions = local.read(STORAGE_KEYS.WORKER_TRANSACTIONS);
+    customerPayments = local.read(STORAGE_KEYS.CUSTOMER_PAYMENTS);
+    purchases = local.read(STORAGE_KEYS.PURCHASES);
+    suppliers = local.read(STORAGE_KEYS.SUPPLIERS);
+    supplierPayments = local.read(STORAGE_KEYS.SUPPLIER_PAYMENTS);
+    partners = local.read(STORAGE_KEYS.PARTNERS);
+    partnerDrawings = local.read(STORAGE_KEYS.PARTNER_DRAWINGS);
+    profitDistributions = local.read(STORAGE_KEYS.PROFIT_DISTRIBUTIONS);
+    salesReturns = local.read(STORAGE_KEYS.SALES_RETURNS);
+    purchaseReturns = local.read(STORAGE_KEYS.PURCHASE_RETURNS);
+    tenants = local.read(STORAGE_KEYS.TENANTS);
+    users = local.read(STORAGE_KEYS.USERS);
+    branches = local.read(STORAGE_KEYS.BRANCHES);
+    activeBranchId = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
+    stockTransfers = local.read(STORAGE_KEYS.STOCK_TRANSFERS);
+    trialRequests = local.read(STORAGE_KEYS.TRIAL_REQUESTS);
+    refreshInboundRecords();
+  };
+  const atomicAction = action => (...args) => {
+    if (currentUser?.tenantId && currentUser.tenantId !== 'tenant-demo' &&
+        !Object.hasOwn(local.value.state,SYNC_HEADS_STATE_KEY))
+      throw new Error('انتظر اكتمال مزامنة سياسة تعارض الأجهزة قبل تسجيل حركة جديدة');
+    const invoke = () => { refreshBindings(); return action(...args); };
+    if (local.durable) return local.transactDurable(invoke)
+      .catch(error => {
+        setPersistence(previous => ({ ...previous, error: error.message }));
+        throw error;
+      }).finally(refreshBindings);
+    try {
+      return local.transact(invoke);
+    } catch (error) {
+      setPersistence(previous => ({ ...previous, error: error.message }));
+      throw error;
+    } finally { refreshBindings(); }
+  };
+
+  // Server account changes are authoritative. A failed local cache commit must
+  // remain visible, but must not turn a successful server mutation into a
+  // misleading "request failed" result that invites a duplicate retry.
+  const commitRemoteCache = useCallback(async (update) => {
+    try {
+      if (local.durable) await local.transactDurable(update);
+      else local.transact(update);
+      return true;
+    } catch (error) {
+      setPersistence(previous => ({ ...previous, error: `تعذر تحديث النسخة المحلية بعد نجاح الخادم: ${error.message}` }));
+      console.warn('Remote account cache update failed:', error);
+      return false;
+    }
+  }, [local]);
+
   // Central Cloud Tenants Synchronization (Super Admin Only, Cloud-First & Offline-First)
   const syncCloudTenants = useCallback(async () => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !local.writable) return;
     try {
       const baseUrl = getApiBaseUrl();
       const res = await fetch(`${baseUrl}/api/tenants`, {
         headers: {
-          'Authorization': `Bearer ${currentUser?.password || 'A20101993f'}`
+          'Authorization': `Bearer ${getSessionToken()}`
         }
       });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.tenants)) {
-          setTenants(prev => {
+          await commitRemoteCache(() => setTenants(prev => {
             const map = new Map();
             prev.forEach(t => map.set(t.id, t));
             data.tenants.forEach(t => map.set(t.id, { ...map.get(t.id), ...t }));
             return Array.from(map.values());
-          });
+          }));
         }
       }
     } catch (e) {
       console.warn('Sync cloud tenants warning:', e);
     }
-  }, []);
+  }, [local, commitRemoteCache]);
 
   useEffect(() => {
     if (currentUser?.role === 'super_admin') {
       syncCloudTenants();
     }
-  }, [currentUser?.role, syncCloudTenants]);
+  }, [currentUser?.role, syncCloudTenants, persistence.ready]);
 
   // Central Cloud Users Synchronization (Cloud-First & Offline-First)
   const syncCloudUsers = useCallback(async (targetTenantId) => {
     if (typeof window === 'undefined') return;
     const tid = targetTenantId || currentUser?.tenantId;
-    if (!tid) return;
+    if (!local.writable || !tid || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
 
     try {
       const baseUrl = getApiBaseUrl();
@@ -191,7 +348,7 @@ export function useAppStore() {
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
-          setUsers(prev => {
+          await commitRemoteCache(() => setUsers(prev => {
             const map = new Map();
             prev.forEach(u => map.set(u.id, u));
             data.users.forEach(u => {
@@ -199,176 +356,124 @@ export function useAppStore() {
               map.set(u.id, { ...local, ...u });
             });
             return Array.from(map.values());
-          });
+          }));
         }
       }
     } catch (e) {
       console.warn('Sync cloud users warning:', e);
     }
-  }, [currentUser?.tenantId]);
+  }, [currentUser?.tenantId, local, commitRemoteCache]);
 
   useEffect(() => {
     if (currentUser?.tenantId) {
       syncCloudUsers(currentUser.tenantId);
     }
-  }, [currentUser?.tenantId, syncCloudUsers]);
+  }, [currentUser?.tenantId, syncCloudUsers, persistence.ready]);
 
-  // Dynamic Active Session Revalidation (تحديث صلاحيات جلسة المستخدم النشطة فوراً عند تعديلها)
+  // Local caches and broadcast messages are hints, never a source of role
+  // or membership authority. Revalidate with the server on focus and periodically.
   useEffect(() => {
-    if (!currentUser || !currentUser.isStaff) return;
-    const freshUser = users.find(u => 
-      u.id === currentUser.id || 
-      (u.username?.toLowerCase() === currentUser.username?.toLowerCase() && u.tenantId === currentUser.tenantId)
-    );
-
-    if (freshUser) {
-      const freshPerms = resolveUserPermissions(freshUser);
-      const hasRoleChanged = freshUser.role !== currentUser.role;
-      const hasStatusChanged = freshUser.status !== currentUser.status;
-      const hasBranchChanged = freshUser.branchId !== currentUser.branchId;
-      const hasPermsChanged = JSON.stringify(currentUser.permissions || {}) !== JSON.stringify(freshPerms);
-
-      if (hasRoleChanged || hasStatusChanged || hasBranchChanged || hasPermsChanged) {
-        setCurrentUser(prev => ({
-          ...prev,
-          name: freshUser.name,
-          role: freshUser.role,
-          status: freshUser.status,
-          branchId: freshUser.branchId,
-          permissions: freshPerms
-        }));
-      }
-    }
-  }, [users, currentUser?.id, currentUser?.role, currentUser?.status, currentUser?.isStaff]);
-
-  // Real-Time Cross-Tab / Window Synchronization (BroadcastChannel)
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    let channel = null;
-    try {
-      if ('BroadcastChannel' in window) {
-        channel = new BroadcastChannel('khodar_auth_sync_channel');
-        channel.onmessage = (event) => {
-          const { type, payload } = event.data || {};
-          if (type === 'USER_UPDATED' && payload) {
-            setUsers(prev => prev.map(u => u.id === payload.id ? { ...u, ...payload } : u));
-            
-            // If the updated user is the currently logged-in user in this tab
-            setCurrentUser(prevUser => {
-              if (!prevUser) return prevUser;
-              if (prevUser.id === payload.id || (prevUser.username?.toLowerCase() === payload.username?.toLowerCase() && prevUser.tenantId === payload.tenantId)) {
-                const updatedSession = {
-                  ...prevUser,
-                  ...payload,
-                  permissions: resolveUserPermissions(payload)
-                };
-                try {
-                  localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(updatedSession));
-                } catch (e) {}
-                return updatedSession;
-              }
-              return prevUser;
-            });
-          } else if (type === 'USER_DELETED' && payload?.id) {
-            setUsers(prev => prev.filter(u => u.id !== payload.id));
-            setCurrentUser(prevUser => {
-              if (prevUser?.id === payload.id) {
-                try { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); } catch (e) {}
-                return null; // Force logout
-              }
-              return prevUser;
-            });
-          }
-        };
-      }
-    } catch (e) {
-      console.warn('BroadcastChannel sync init warning:', e);
-    }
-
-    return () => {
-      if (channel) channel.close();
-    };
-  }, []);
-
-  // Background Cloud Permissions Sync & Window Focus Revalidation
-  useEffect(() => {
-    if (typeof window === 'undefined' || !currentUser || !currentUser.isStaff) return;
-
-    const checkCloudPermissions = async () => {
+    if (!currentUser?.id) return;
+    let disposed = false;
+    const token = getSessionToken();
+    const revalidate = async () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       try {
-        const baseUrl = getApiBaseUrl();
-        const res = await fetch(`${baseUrl}/api/users?id=${encodeURIComponent(currentUser.id)}&tenantId=${encodeURIComponent(currentUser.tenantId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.users) && data.users.length > 0) {
-            const fresh = data.users[0];
-            const freshPerms = resolveUserPermissions(fresh);
-            
-            setCurrentUser(prev => {
-              if (!prev) return prev;
-              const hasChanged = prev.role !== fresh.role || 
-                                prev.status !== fresh.status || 
-                                JSON.stringify(prev.permissions || {}) !== JSON.stringify(freshPerms);
-              if (hasChanged) {
-                const updated = {
-                  ...prev,
-                  name: fresh.name,
-                  role: fresh.role,
-                  status: fresh.status,
-                  branchId: fresh.branchId,
-                  permissions: freshPerms
-                };
-                setUsers(uList => uList.map(u => u.id === fresh.id ? { ...u, ...fresh, permissions: freshPerms } : u));
-                return updated;
-              }
-              return prev;
-            });
-          }
+        const response = await fetch(`${getApiBaseUrl()}/api/auth/me`, { signal: AbortSignal.timeout(10000) });
+        if (disposed || token !== getSessionToken()) return;
+        if (response.status === 401) {
+          cloudflareSync.stopAutoSync();
+          cloudflareSync.currentTenantId = null;
+          cloudflareSync.setUpdateHandler(null);
+          setSessionToken(null);
+          setCurrentUser(null);
+          window.location.reload();
+          return;
         }
-      } catch (e) {}
+        if (!response.ok) return; // Network failure does not destroy offline work.
+        const result = await response.json();
+        if (disposed || token !== getSessionToken() || !result.success) return;
+        const verified = { ...result.user, permissions: resolveUserPermissions(result.user) };
+        setSessionUser({ ...getSessionUser(), ...verified });
+        setCurrentUser(previous => previous ? { ...previous, ...verified } : null);
+      } catch { /* Offline: retain saved work; server still authorizes every API request. */ }
     };
-
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        checkCloudPermissions();
-      }
-    };
-
-    window.addEventListener('focus', handleVisibilityOrFocus);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    const interval = setInterval(checkCloudPermissions, 15000);
-
+    const onVisible = () => { if (document.visibilityState === 'visible') void revalidate(); };
+    const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('khodar_auth_sync_channel') : null;
+    if (channel) channel.onmessage = () => { void revalidate(); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = setInterval(revalidate, 15000);
+    void revalidate();
     return () => {
-      window.removeEventListener('focus', handleVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-      clearInterval(interval);
+      disposed = true;
+      clearInterval(timer);
+      channel?.close();
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [currentUser?.id, currentUser?.tenantId, currentUser?.isStaff]);
+  }, [currentUser?.id]);
+
+  // Track record identity before scheduling React updates. Deduplicating only
+  // the invoice array does not deduplicate its inventory/debt side effects.
+  const indexRows = rows => new Map(rows.map(row => [row.id, row]));
+  const inboundRecords = useRef({
+    invoice: new Map(), product: new Map(), customer: new Map(), supplier: new Map(),
+    purchase: new Map(), expense: new Map(), customer_payment: new Map(),
+    supplier_payment: new Map(), sales_return: new Map(), purchase_return: new Map(),
+    damaged_item: new Map(), worker: new Map(), worker_transaction: new Map(),
+    partner: new Map(), partner_drawing: new Map(), profit_distribution: new Map(),
+    stock_transfer: new Map(), branch: new Map()
+  });
+  const refreshInboundRecords = () => { inboundRecords.current = {
+    invoice:indexRows(invoices), product:indexRows(products), customer:indexRows(customers), supplier:indexRows(suppliers),
+    purchase:indexRows(purchases), expense:indexRows(expenses), customer_payment:indexRows(customerPayments),
+    supplier_payment:indexRows(supplierPayments), sales_return:indexRows(salesReturns), purchase_return:indexRows(purchaseReturns),
+    damaged_item:indexRows(damagedItems), worker:indexRows(workers), worker_transaction:indexRows(workerTransactions),
+    partner:indexRows(partners), partner_drawing:indexRows(partnerDrawings), profit_distribution:indexRows(profitDistributions),
+    stock_transfer:indexRows(stockTransfers), branch:indexRows(branches)
+  }; };
+  refreshInboundRecords();
 
   // Inbound Cloud Synchronization Ingestion Handler
   // Merges transactions and changes received from other cashiers and mobile devices in real time
-  const handleInboundSyncEvents = useCallback((events) => {
+  const applyInboundSyncEvents = (events) => {
     if (!Array.isArray(events) || events.length === 0) return;
 
     events.forEach(evt => {
       const { entityType, entityId, action, payload } = evt;
-      if (!payload) return;
+      if (entityType === 'restore_snapshot') {
+        if (action !== 'create' || payload?.id !== entityId)
+          throw new Error('حدث استعادة غير صالح؛ لم يتقدم مؤشر الاستقبال');
+        const restored = validateBackup(payload.snapshot, currentUser?.tenantId);
+        for (const [key,value] of Object.entries(backupToState(restored))) local.set(key,value);
+        inboundRecords.current = {
+          invoice:indexRows(restored.invoices),product:indexRows(restored.products),customer:indexRows(restored.customers),supplier:indexRows(restored.suppliers),
+          purchase:indexRows(restored.purchases),expense:indexRows(restored.expenses),customer_payment:indexRows(restored.customerPayments),
+          supplier_payment:indexRows(restored.supplierPayments),sales_return:indexRows(restored.salesReturns),purchase_return:indexRows(restored.purchaseReturns),
+          damaged_item:indexRows(restored.damagedItems),worker:indexRows(restored.workers),worker_transaction:indexRows(restored.workerTransactions),
+          partner:indexRows(restored.partners),partner_drawing:indexRows(restored.partnerDrawings),profit_distribution:indexRows(restored.profitDistributions),
+          stock_transfer:indexRows(restored.stockTransfers),branch:indexRows(restored.branches)
+        };
+        return;
+      }
+      const records = inboundRecords.current[entityType];
+      const mutableTypes = ['invoice','customer','product','supplier','worker','partner','branch'];
+      const allowed = entityType === 'settings' ? ['update'] : entityType === 'stock_transfer' ? ['create'] :
+        ['create','delete', ...(mutableTypes.includes(entityType) ? ['update'] : []), ...(entityType === 'invoice' ? ['void'] : [])];
+      if ((!records && entityType !== 'settings') || !allowed.includes(action) || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error('حركة مزامنة غير مدعومة؛ لم يتقدم مؤشر الاستقبال');
+      }
+      const existing = records?.get(entityId);
+      if (action === 'create' && existing) return;
+      if (action === 'create') records?.set(entityId, payload);
+      else if (action === 'delete') records?.delete(entityId);
+      else if (existing) records?.set(entityId, { ...existing, ...payload });
 
       if (entityType === 'invoice') {
         if (action === 'create') {
           setInvoices(prev => prev.some(i => i.id === entityId) ? prev : [payload, ...prev]);
-          // Sync stock deduction and customer balance on receiving terminals
-          if (Array.isArray(payload.items)) {
-            setProducts(prev => prev.map(p => {
-              const soldItem = payload.items.find(it => it.productId === p.id || it.name === p.name);
-              if (soldItem) {
-                const soldQty = Number(soldItem.netWeight || soldItem.quantityKg || soldItem.packageCount) || 0;
-                return { ...p, currentStockKg: Math.round(((Number(p.currentStockKg) || 0) - soldQty) * 100) / 100 };
-              }
-              return p;
-            }));
-          }
+          setProducts(prev => applyInvoiceInventory(prev, payload, -1));
           if (payload.customerId && Number(payload.remainingDebt) > 0) {
             setCustomers(prev => prev.map(c => c.id === payload.customerId 
               ? { ...c, balance: Math.round(((Number(c.balance) || 0) + Number(payload.remainingDebt)) * 100) / 100 }
@@ -376,8 +481,24 @@ export function useAppStore() {
             ));
           }
         } else if (action === 'update' || action === 'void') {
+          if(action === 'void' && [...inboundRecords.current.sales_return.values()].some(row=>row.invoiceId===entityId)) throw new Error('لا يمكن إلغاء فاتورة لها مردود قائم');
+          if (action === 'void' && existing && existing.status !== 'voided') {
+            setProducts(prev => applyInvoiceInventory(prev, existing, 1));
+            if (existing.customerId && Number(existing.remainingDebt) > 0) {
+              setCustomers(prev => prev.map(c => c.id === existing.customerId
+                ? { ...c, balance: Math.round(((Number(c.balance) || 0) - Number(existing.remainingDebt)) * 100) / 100 } : c));
+            }
+          }
           setInvoices(prev => prev.map(i => i.id === entityId ? { ...i, ...payload } : i));
         } else if (action === 'delete') {
+          if([...inboundRecords.current.sales_return.values()].some(row=>row.invoiceId===entityId)) throw new Error('لا يمكن حذف فاتورة لها مردود قائم');
+          if (existing && existing.status !== 'voided') {
+            setProducts(prev => applyInvoiceInventory(prev, existing, 1));
+            if (existing.customerId && Number(existing.remainingDebt) > 0) {
+              setCustomers(prev => prev.map(c => c.id === existing.customerId
+                ? { ...c, balance: Math.round(((Number(c.balance) || 0) - Number(existing.remainingDebt)) * 100) / 100 } : c));
+            }
+          }
           setInvoices(prev => prev.filter(i => i.id !== entityId));
         }
       } else if (entityType === 'customer') {
@@ -405,12 +526,7 @@ export function useAppStore() {
       } else if (entityType === 'purchase') {
         if (action === 'create') {
           setPurchases(prev => prev.some(p => p.id === entityId) ? prev : [payload, ...prev]);
-          if (payload.productId && Number(payload.quantityKg) > 0) {
-            setProducts(prev => prev.map(p => p.id === payload.productId
-              ? { ...p, currentStockKg: Math.round(((Number(p.currentStockKg) || 0) + Number(payload.quantityKg)) * 100) / 100 }
-              : p
-            ));
-          }
+          setProducts(prev => applyPurchaseInventory(prev, payload, 1));
           if (payload.supplierId && Number(payload.creditAmount) > 0) {
             setSuppliers(prev => prev.map(s => s.id === payload.supplierId
               ? { ...s, balance: Math.round(((Number(s.balance) || 0) + Number(payload.creditAmount)) * 100) / 100 }
@@ -418,6 +534,11 @@ export function useAppStore() {
             ));
           }
         } else if (action === 'delete') {
+          if([...inboundRecords.current.purchase_return.values()].some(row=>row.purchaseId===entityId)) throw new Error('لا يمكن حذف شحنة لها مردود قائم');
+          if (existing) {
+            setProducts(prev => applyPurchaseInventory(prev, existing, -1));
+            if (existing.supplierId && Number(existing.creditAmount) > 0) setSuppliers(prev => adjustBalance(prev, existing.supplierId, -Number(existing.creditAmount)));
+          }
           setPurchases(prev => prev.filter(p => p.id !== entityId));
         }
       } else if (entityType === 'customer_payment') {
@@ -430,6 +551,7 @@ export function useAppStore() {
             ));
           }
         } else if (action === 'delete') {
+          if (existing) setCustomers(prev => adjustBalance(prev, existing.customerId, Number(existing.amount)));
           setCustomerPayments(prev => prev.filter(p => p.id !== entityId));
         }
       } else if (entityType === 'supplier_payment') {
@@ -442,6 +564,8 @@ export function useAppStore() {
             ));
           }
         } else if (action === 'delete') {
+          if (existing) setSuppliers(prev => adjustBalance(prev, existing.supplierId, Number(existing.amount)));
+          setExpenses(prev => prev.filter(expense => expense.supplierPaymentId !== entityId));
           setSupplierPayments(prev => prev.filter(p => p.id !== entityId));
         }
       } else if (entityType === 'supplier') {
@@ -454,20 +578,50 @@ export function useAppStore() {
         }
       } else if (entityType === 'sales_return') {
         if (action === 'create') {
+          const invoice = inboundRecords.current.invoice.get(payload.invoiceId);
+          if (!invoice || invoice.status === 'voided') throw new Error('الفاتورة الأصلية للمردود غير صالحة');
+          setInvoices(prev => applySalesReturnInvoice(prev, payload, 1));
+          setProducts(prev => applySalesReturnInventory(prev, invoice, payload, 1));
+          if (payload.refundMethod === 'credit_deduction' && payload.customerId && payload.customerId !== 'walk_in') {
+            setCustomers(prev => adjustBalance(prev, payload.customerId, -Number(payload.totalRefundAmount)));
+          }
           setSalesReturns(prev => prev.some(r => r.id === entityId) ? prev : [payload, ...prev]);
         } else if (action === 'delete') {
+          if (!existing) throw new Error('مردود المبيعات المراد عكسه غير موجود');
+          const invoice = inboundRecords.current.invoice.get(existing.invoiceId);
+          if (!invoice) throw new Error('الفاتورة الأصلية للمردود غير موجودة');
+          setInvoices(prev => applySalesReturnInvoice(prev, existing, -1));
+          setProducts(prev => applySalesReturnInventory(prev, invoice, existing, -1));
+          if (existing.refundMethod === 'credit_deduction' && existing.customerId && existing.customerId !== 'walk_in') {
+            setCustomers(prev => adjustBalance(prev, existing.customerId, Number(existing.totalRefundAmount)));
+          }
           setSalesReturns(prev => prev.filter(r => r.id !== entityId));
         }
       } else if (entityType === 'purchase_return') {
         if (action === 'create') {
+          const purchase=inboundRecords.current.purchase.get(payload.purchaseId);
+          if (!purchase) throw new Error('شحنة المشتريات الأصلية للمردود غير موجودة');
+          setPurchases(prev=>applyPurchaseReturnPurchase(prev,payload,1));
+          setProducts(prev=>applyPurchaseReturnInventory(prev,purchase,payload,1));
+          if(payload.refundMethod==='supplier_debt_deduction') setSuppliers(prev=>adjustBalance(prev,purchase.supplierId,-Number(payload.totalRefundAmount)));
           setPurchaseReturns(prev => prev.some(r => r.id === entityId) ? prev : [payload, ...prev]);
         } else if (action === 'delete') {
+          if(!existing) throw new Error('مردود المشتريات المراد عكسه غير موجود');
+          const purchase=inboundRecords.current.purchase.get(existing.purchaseId);
+          if(!purchase) throw new Error('شحنة المشتريات الأصلية للمردود غير موجودة');
+          setPurchases(prev=>applyPurchaseReturnPurchase(prev,existing,-1));
+          setProducts(prev=>applyPurchaseReturnInventory(prev,purchase,existing,-1));
+          if(existing.refundMethod==='supplier_debt_deduction') setSuppliers(prev=>adjustBalance(prev,purchase.supplierId,Number(existing.totalRefundAmount)));
           setPurchaseReturns(prev => prev.filter(r => r.id !== entityId));
         }
       } else if (entityType === 'damaged_item') {
         if (action === 'create') {
+          if(!branches.some(branch=>branch.id===payload.branchId)) throw new Error('فرع قيد الهالك غير موجود');
+          setProducts(prev=>applyDamageInventory(prev,payload,1));
           setDamagedItems(prev => prev.some(d => d.id === entityId) ? prev : [payload, ...prev]);
         } else if (action === 'delete') {
+          if(!existing) throw new Error('قيد الهالك المراد عكسه غير موجود');
+          setProducts(prev=>applyDamageInventory(prev,existing,-1));
           setDamagedItems(prev => prev.filter(d => d.id !== entityId));
         }
       } else if (entityType === 'worker') {
@@ -480,8 +634,11 @@ export function useAppStore() {
         }
       } else if (entityType === 'worker_transaction') {
         if (action === 'create') {
+          setWorkers(prev => applyWorkerAdvance(prev, payload, 1));
           setWorkerTransactions(prev => prev.some(t => t.id === entityId) ? prev : [payload, ...prev]);
         } else if (action === 'delete') {
+          if (existing) setWorkers(prev => applyWorkerAdvance(prev, existing, -1));
+          setExpenses(prev => prev.filter(expense => expense.workerTransactionId !== entityId));
           setWorkerTransactions(prev => prev.filter(t => t.id !== entityId));
         }
       } else if (entityType === 'partner') {
@@ -490,6 +647,9 @@ export function useAppStore() {
         } else if (action === 'update') {
           setPartners(prev => prev.map(p => p.id === entityId ? { ...p, ...payload } : p));
         } else if (action === 'delete') {
+          if ([...inboundRecords.current.partner_drawing.values()].some(row=>row.partnerId===entityId) ||
+              [...inboundRecords.current.profit_distribution.values()].some(row=>(row.shares||[]).some(share=>share.partnerId===entityId)))
+            throw new Error('لا يمكن حذف شريك له مسحوبات أو توزيعات قائمة');
           setPartners(prev => prev.filter(p => p.id !== entityId));
         }
       } else if (entityType === 'partner_drawing') {
@@ -504,48 +664,44 @@ export function useAppStore() {
         } else if (action === 'delete') {
           setProfitDistributions(prev => prev.filter(d => d.id !== entityId));
         }
+      } else if (entityType === 'branch') {
+        if (action === 'create') setBranches(prev => prev.some(b => b.id === entityId) ? prev : [...prev, payload]);
+        else if (action === 'update') setBranches(prev => prev.map(b => b.id === entityId ? { ...b, ...payload } : b));
+        else if (action === 'delete') setBranches(prev => prev.filter(b => b.id !== entityId));
+      } else if (entityType === 'stock_transfer') {
+        if (action !== 'create') throw new Error('المناقلة حركة مثبتة؛ عكسها يتطلب مناقلة مقابلة');
+        setProducts(prev => applyStockTransfer(prev, branches, payload));
+        setStockTransfers(prev => [payload, ...prev]);
       } else if (entityType === 'settings') {
         if (action === 'update') {
           setSettings(prev => ({ ...prev, ...payload }));
         }
       }
     });
-  }, []);
+  };
+
+  const inboundRef = useRef(null);
+  inboundRef.current = (events, cursor, serverHeads) => {
+    const apply = batch => {
+      refreshBindings();
+      applyInboundSyncEvents(batch);
+    };
+    if (local.durable) return local.receiveDurable(events, cursor, apply, serverHeads).finally(refreshBindings);
+    try {
+      return local.receive(events, cursor, apply, serverHeads);
+    } finally { refreshBindings(); }
+  };
+  const handleInboundSyncEvents = useCallback((...args) => inboundRef.current(...args), []);
 
   // Background Auto-sync to Cloudflare Edge (Near Real-Time: 4-second polling + on-focus immediate sync)
   useEffect(() => {
-    const tenantId = currentUser?.tenantId || 'tenant-demo';
+    if (!currentUser || !getSessionToken() || !persistence.ready) return;
+    cloudflareSync.repository = local;
+    const tenantId = currentUser.tenantId;
     
-    // Initial Hydration for newly logged-in accounts / fresh device environments
-    const tenantSyncKey = `khodar_last_sync_timestamp_${tenantId}`;
-    const hasSyncedThisTenant = typeof window !== 'undefined' ? localStorage.getItem(tenantSyncKey) : 'yes';
-
-    if (!hasSyncedThisTenant && tenantId && tenantId !== 'tenant-demo') {
-      cloudflareSync.fetchLatestSnapshot(tenantId).then(snapshot => {
-        if (snapshot && typeof snapshot === 'object') {
-          if (Array.isArray(snapshot.products) && snapshot.products.length > 0) setProducts(snapshot.products);
-          if (Array.isArray(snapshot.customers) && snapshot.customers.length > 0) setCustomers(snapshot.customers);
-          if (Array.isArray(snapshot.suppliers) && snapshot.suppliers.length > 0) setSuppliers(snapshot.suppliers);
-          if (Array.isArray(snapshot.invoices) && snapshot.invoices.length > 0) setInvoices(snapshot.invoices);
-          if (Array.isArray(snapshot.expenses) && snapshot.expenses.length > 0) setExpenses(snapshot.expenses);
-          if (Array.isArray(snapshot.purchases) && snapshot.purchases.length > 0) setPurchases(snapshot.purchases);
-          if (Array.isArray(snapshot.workers) && snapshot.workers.length > 0) setWorkers(snapshot.workers);
-          if (Array.isArray(snapshot.workerTransactions) && snapshot.workerTransactions.length > 0) setWorkerTransactions(snapshot.workerTransactions);
-          if (Array.isArray(snapshot.partners) && snapshot.partners.length > 0) setPartners(snapshot.partners);
-          if (Array.isArray(snapshot.partnerDrawings) && snapshot.partnerDrawings.length > 0) setPartnerDrawings(snapshot.partnerDrawings);
-          if (Array.isArray(snapshot.profitDistributions) && snapshot.profitDistributions.length > 0) setProfitDistributions(snapshot.profitDistributions);
-          if (snapshot.settings && typeof snapshot.settings === 'object') setSettings(prev => ({ ...prev, ...snapshot.settings }));
-        }
-        // Then pull all historical delta events from since=0
-        cloudflareSync.pullUpdates(tenantId, handleInboundSyncEvents, 0);
-      }).catch(() => {
-        cloudflareSync.pullUpdates(tenantId, handleInboundSyncEvents, 0);
-      });
-    }
-
     cloudflareSync.startAutoSync(tenantId, handleInboundSyncEvents, 4000);
-    return () => cloudflareSync.stopAutoSync();
-  }, [currentUser?.tenantId, handleInboundSyncEvents]);
+    return () => { cloudflareSync.stopAutoSync(); if (cloudflareSync.repository === local) cloudflareSync.repository = null; };
+  }, [currentUser?.tenantId, handleInboundSyncEvents, persistence.ready, local]);
 
   // Live Sync Status subscription
   const [syncStatus, setSyncStatus] = useState(() => ({
@@ -567,47 +723,24 @@ export function useAppStore() {
     return await cloudflareSync.syncNow(tenantId, handleInboundSyncEvents);
   }, [currentUser?.tenantId, handleInboundSyncEvents]);
 
-  // Debounced cloud backup snapshot upload (runs 5 seconds after mutations settle)
-  const isDirtyRef = useRef(false);
+  const [backupStatus, setBackupStatus] = useState({ status: 'idle', error: null });
   useEffect(() => {
-    isDirtyRef.current = true;
     const activeTenantId = currentUser?.tenantId;
-    if (!activeTenantId || activeTenantId === 'tenant-demo') return;
-
-    const timer = setTimeout(() => {
-      if (isDirtyRef.current) {
-        isDirtyRef.current = false;
-        const fullSnapshot = {
-          products,
-          customers,
-          suppliers,
-          invoices,
-          expenses,
-          purchases,
-          workers,
-          workerTransactions,
-          customerPayments,
-          supplierPayments,
-          partners,
-          partnerDrawings,
-          profitDistributions,
-          salesReturns,
-          purchaseReturns,
-          damagedItems,
-          settings,
-          exportedAt: new Date().toISOString(),
-          version: '2.6.1'
-        };
-        cloudflareSync.uploadBackupSnapshot(activeTenantId, fullSnapshot).catch(() => {});
-      }
-    }, 5000);
-
-    return () => clearTimeout(timer);
+    // Branch-scoped replicas must not publish tenant-wide snapshots.
+    if (!persistence.ready || !getSessionToken() || !activeTenantId ||
+        activeTenantId === 'tenant-demo' || currentUser?.role !== 'company_owner' ||
+        (currentUser?.branchId && currentUser.branchId !== 'all')) return;
+    return scheduleBackup({
+      snapshot: () => getBackupSnapshot(),
+      upload: snapshot => cloudflareSync.uploadBackupSnapshot(activeTenantId, snapshot),
+      onStatus: setBackupStatus
+    });
   }, [
-    products, customers, suppliers, invoices, expenses, purchases,
+    products, customers, suppliers, invoices, expenses, expenseCategories, purchases,
     workers, workerTransactions, customerPayments, supplierPayments,
     partners, partnerDrawings, profitDistributions, salesReturns,
-    purchaseReturns, damagedItems, settings, currentUser?.tenantId
+    purchaseReturns, damagedItems, settings, branches, stockTransfers,
+    currentUser?.tenantId, currentUser?.role, currentUser?.branchId, persistence.ready
   ]);
 
   // Product Actions (with real-time cloud mutation broadcasting)
@@ -620,7 +753,7 @@ export function useAppStore() {
     setProducts(prev => [newProd, ...prev]);
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'product', newProd.id, 'create', newProd);
-    } catch (e) {}
+    } catch (e) { throw e; }
     return newProd;
   };
 
@@ -629,7 +762,7 @@ export function useAppStore() {
     setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'product', id, 'update', updates);
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   const updateProductPrice = (id, newPrice) => {
@@ -638,7 +771,7 @@ export function useAppStore() {
     setProducts(prev => prev.map(p => p.id === id ? { ...p, defaultPricePerKg: priceNum } : p));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'product', id, 'update', { defaultPricePerKg: priceNum });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   const deleteProduct = (id) => {
@@ -646,7 +779,7 @@ export function useAppStore() {
     setProducts(prev => prev.filter(p => p.id !== id));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'product', id, 'delete', { id });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // Customer Actions (with real-time cloud mutation broadcasting)
@@ -664,7 +797,7 @@ export function useAppStore() {
     setCustomers(prev => [newCust, ...prev]);
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'customer', newCust.id, 'create', newCust);
-    } catch (e) {}
+    } catch (e) { throw e; }
     return newCust;
   };
 
@@ -673,7 +806,7 @@ export function useAppStore() {
     setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'customer', id, 'update', updates);
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   const deleteCustomer = (id) => {
@@ -681,7 +814,7 @@ export function useAppStore() {
     setCustomers(prev => prev.filter(c => c.id !== id));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'customer', id, 'delete', { id });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   const recordCustomerPayment = (customerId, amount, note = 'سداد دفعة نقدية', paymentMethod = 'cash', paymentId = null, clientTransactionId = null) => {
@@ -731,7 +864,7 @@ export function useAppStore() {
 
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'customer_payment', newPayment.id, 'create', newPayment);
-    } catch (e) {}
+    } catch (e) { throw e; }
 
     return newPayment;
   };
@@ -752,7 +885,7 @@ export function useAppStore() {
       try {
         const activeTenantId = currentUser?.tenantId || target.tenantId || 'tenant-demo';
         cloudflareSync.recordMutation(activeTenantId, null, 'customer_payment', paymentId, 'delete', { id: paymentId });
-      } catch (e) {}
+      } catch (e) { throw e; }
     }
   };
 
@@ -761,7 +894,7 @@ export function useAppStore() {
     // 0. Idempotency Guard: prevent duplicate invoice creation and duplicate stock deductions
     const clientTxId = invoiceData.clientTransactionId || invoiceData.idempotencyKey || invoiceData.id;
     if (clientTxId) {
-      const existing = invoices.find(inv => 
+      const existing = [...inboundRecords.current.invoice.values()].find(inv =>
         (inv.clientTransactionId && inv.clientTransactionId === clientTxId) ||
         (inv.idempotencyKey && inv.idempotencyKey === clientTxId) ||
         (inv.id && inv.id === clientTxId)
@@ -793,6 +926,8 @@ export function useAppStore() {
     const newInvoice = {
       ...invoiceData,
       id: invoiceId,
+      date: invoiceData.date || getCurrentDateFormatted(),
+      time: invoiceData.time || getCurrentTimeFormatted(),
       clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       idempotencyKey: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       tenantId: activeTenantId,
@@ -802,6 +937,8 @@ export function useAppStore() {
       timestamp: invoiceData.timestamp || Date.now(),
       status: 'active'
     };
+
+    inboundRecords.current.invoice.set(newInvoice.id, newInvoice);
 
     // If there is debt remaining and a known customer, update balance
     if (newInvoice.customerId && newInvoice.customerId !== 'walk_in' && creditDebt > 0) {
@@ -816,36 +953,7 @@ export function useAppStore() {
       }));
     }
 
-    // Deduct sold weights from products inventory stock
-    if (newInvoice.items && Array.isArray(newInvoice.items)) {
-      setProducts(prev => {
-        let updated = [...prev];
-        newInvoice.items.forEach(it => {
-          const soldWeight = Math.round((Number(it.netWeight) || Number(it.grossWeight) || 0) * 100) / 100;
-          if (soldWeight > 0) {
-            updated = updated.map(p => {
-              const isMatch = (it.productId && p.id === it.productId) || 
-                              (p.name.trim() === (it.name || '').trim());
-              if (isMatch) {
-                const curStock = Number(p.currentStockKg) || 0;
-                const bStock = p.branchStock || {};
-                const curBStock = Number(bStock[targetBranchId] !== undefined ? bStock[targetBranchId] : curStock);
-                return {
-                  ...p,
-                  currentStockKg: Math.round((curStock - soldWeight) * 100) / 100,
-                  branchStock: {
-                    ...bStock,
-                    [targetBranchId]: Math.round((curBStock - soldWeight) * 100) / 100
-                  }
-                };
-              }
-              return p;
-            });
-          }
-        });
-        return updated;
-      });
-    }
+    setProducts(prev => applyInvoiceInventory(prev, newInvoice, -1));
 
     setInvoices(prev => [newInvoice, ...prev]);
 
@@ -854,7 +962,7 @@ export function useAppStore() {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'invoice', invoiceId, 'create', newInvoice);
     } catch (e) {
-      console.warn('Sync recording non-fatal warning:', e);
+      throw e;
     }
 
     setSettings(prev => ({
@@ -866,12 +974,19 @@ export function useAppStore() {
   };
 
   const updateInvoiceNotes = (invoiceId, notes) => {
+    const target = invoices.find(inv => inv.id === invoiceId);
+    if (!target) throw new Error('الفاتورة غير موجودة');
+    if (typeof notes !== 'string') throw new Error('ملاحظات الفاتورة غير صالحة');
     setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, notes } : inv));
+    cloudflareSync.recordMutation(currentUser?.tenantId || 'tenant-demo', target.branchId || null,
+      'invoice', invoiceId, 'update', { id: invoiceId, notes });
   };
 
   const voidInvoice = (invoiceId) => {
-    const target = invoices.find(i => i.id === invoiceId);
+    const target = inboundRecords.current.invoice.get(invoiceId);
     if (!target || target.status === 'voided') return;
+    if (salesReturns.some(row=>row.invoiceId===invoiceId)) throw new Error('لا يمكن إلغاء فاتورة لها مردود قائم');
+    inboundRecords.current.invoice.set(invoiceId, { ...target, status: 'voided' });
 
     // Reverse customer debt if applicable
     if (target.customerId && target.remainingDebt > 0) {
@@ -886,48 +1001,20 @@ export function useAppStore() {
       }));
     }
 
-    // Restore stock back to products (both total and branch-specific)
     const targetBranchId = target.branchId || 'branch-main';
-    if (target.items && Array.isArray(target.items)) {
-      setProducts(prev => {
-        let updated = [...prev];
-        target.items.forEach(it => {
-          const returnedWeight = Math.round((Number(it.netWeight) || Number(it.grossWeight) || 0) * 100) / 100;
-          if (returnedWeight > 0) {
-            updated = updated.map(p => {
-              const isMatch = (it.productId && p.id === it.productId) || 
-                              (p.name.trim() === (it.name || '').trim());
-              if (isMatch) {
-                const curStock = Number(p.currentStockKg) || 0;
-                const bStock = p.branchStock || {};
-                const curBStock = Number(bStock[targetBranchId] !== undefined ? bStock[targetBranchId] : curStock);
-                return {
-                  ...p,
-                  currentStockKg: Math.round((curStock + returnedWeight) * 100) / 100,
-                  branchStock: {
-                    ...bStock,
-                    [targetBranchId]: Math.round((curBStock + returnedWeight) * 100) / 100
-                  }
-                };
-              }
-              return p;
-            });
-          }
-        });
-        return updated;
-      });
-    }
+    setProducts(prev => applyInvoiceInventory(prev, target, 1));
 
     setInvoices(prev => prev.map(i => i.id === invoiceId ? { ...i, status: 'voided' } : i));
 
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'invoice', invoiceId, 'void', { id: invoiceId, status: 'voided' });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   const deleteInvoice = (invoiceId) => {
     const target = invoices.find(i => i.id === invoiceId);
+    if (salesReturns.some(row=>row.invoiceId===invoiceId)) throw new Error('لا يمكن حذف فاتورة لها مردود قائم');
     if (target && target.status !== 'voided') {
       if (target.customerId && target.remainingDebt > 0) {
         setCustomers(prev => prev.map(c => {
@@ -941,43 +1028,15 @@ export function useAppStore() {
         }));
       }
 
-      // Restore stock if it was not already voided (both total and branch-specific)
-      const targetBranchId = target.branchId || 'branch-main';
-      if (target.items && Array.isArray(target.items)) {
-        setProducts(prev => {
-          let updated = [...prev];
-          target.items.forEach(it => {
-            const returnedWeight = Math.round((Number(it.netWeight) || Number(it.grossWeight) || 0) * 100) / 100;
-            if (returnedWeight > 0) {
-              updated = updated.map(p => {
-                const isMatch = (it.productId && p.id === it.productId) || 
-                                (p.name.trim() === (it.name || '').trim());
-                if (isMatch) {
-                  const curStock = Number(p.currentStockKg) || 0;
-                  const bStock = p.branchStock || {};
-                  const curBStock = Number(bStock[targetBranchId] !== undefined ? bStock[targetBranchId] : curStock);
-                  return {
-                    ...p,
-                    currentStockKg: Math.round((curStock + returnedWeight) * 100) / 100,
-                    branchStock: {
-                      ...bStock,
-                      [targetBranchId]: Math.round((curBStock + returnedWeight) * 100) / 100
-                    }
-                  };
-                }
-                return p;
-              });
-            }
-          });
-          return updated;
-        });
-      }
+      // Use the same ID-first inventory effect as posting and inbound reversal.
+      // Name fallback is only valid when the sale line has no product ID.
+      setProducts(prev => applyInvoiceInventory(prev, target, 1));
     }
     setInvoices(prev => prev.filter(i => i.id !== invoiceId));
     try {
       const activeTenantId = currentUser?.tenantId || target?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, target?.branchId || null, 'invoice', invoiceId, 'delete', { id: invoiceId });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // Sales Return Actions (مردودات المبيعات - بالسعر الفعلي التاريخي المحمي المسجل في الفاتورة)
@@ -994,10 +1053,11 @@ export function useAppStore() {
     let totalRefund = 0;
     const processedItems = returnedItems.map(retItem => {
       // Find matching item in original invoice
-      const origItem = originalInvoice.items.find(i => 
+      const sourceLineIndex = originalInvoice.items.findIndex(i =>
         (retItem.productId && i.productId === retItem.productId) || 
         (i.name && retItem.name && i.name.trim() === retItem.name.trim())
       );
+      const origItem = originalInvoice.items[sourceLineIndex];
 
       // CRITICAL: Strictly use the historical price that was actually sold on this invoice!
       // Any subsequent changes to product catalog price are ignored.
@@ -1006,35 +1066,11 @@ export function useAppStore() {
       const subtotal = Math.round(retWeight * historicalPrice * 100) / 100;
       totalRefund += subtotal;
 
-      // Update inventory stock or damaged goods
-      if (retWeight > 0) {
-        if (inventoryAction === 'restock') {
-          // Add back to product inventory stock
-          const targetProdId = origItem?.productId || retItem.productId;
-          setProducts(prev => prev.map(p => {
-            if ((targetProdId && p.id === targetProdId) || p.name.trim() === retItem.name.trim()) {
-              return {
-                ...p,
-                currentStockKg: Math.round(((Number(p.currentStockKg) || 0) + retWeight) * 100) / 100
-              };
-            }
-            return p;
-          }));
-        } else if (inventoryAction === 'damaged') {
-          // Automatically log to damaged / loss records
-          addDamagedItem({
-            productName: retItem.name,
-            quantityKg: retWeight,
-            estimatedCostPerKg: historicalPrice,
-            lossReason: `مردود مبيعات تالف من فاتورة #${invoiceId} (${retItem.reason || 'بضاعة غير صالحة'})`,
-            date: getCurrentDateFormatted(),
-            time: getCurrentTimeFormatted()
-          });
-        }
-      }
+      // Inventory effects are posted after the return record is complete.
 
       return {
         ...retItem,
+        sourceLineIndex,
         originalPricePerKg: historicalPrice,
         returnedWeight: retWeight,
         subtotal
@@ -1045,16 +1081,9 @@ export function useAppStore() {
 
     // Handle financial refund deduction:
     // If credit_deduction: decrease customer debt
+    if (originalInvoice.status === 'voided') throw new Error('لا يمكن رد فاتورة ملغاة');
     if (refundMethod === 'credit_deduction' && originalInvoice.customerId && originalInvoice.customerId !== 'walk_in') {
-      setCustomers(prev => prev.map(c => {
-        if (c.id === originalInvoice.customerId) {
-          return {
-            ...c,
-            balance: Math.round(((c.balance || 0) - totalRefund) * 100) / 100
-          };
-        }
-        return c;
-      }));
+      setCustomers(prev => adjustBalance(prev, originalInvoice.customerId, -totalRefund));
     }
 
     const returnId = `ret-sale-${Date.now()}`;
@@ -1075,42 +1104,13 @@ export function useAppStore() {
     };
 
     setSalesReturns(prev => [newReturn, ...prev]);
+    setProducts(prev => applySalesReturnInventory(prev, originalInvoice, newReturn, 1));
+    setInvoices(prev => applySalesReturnInvoice(prev, newReturn, 1));
 
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, originalInvoice.branchId || null, 'sales_return', newReturn.id, 'create', newReturn);
-    } catch (e) {}
-
-    // Update invoice record to track returned quantities
-    setInvoices(prev => prev.map(inv => {
-      if (inv.id === invoiceId) {
-        const updatedItems = inv.items.map(item => {
-          const ret = processedItems.find(r => 
-            (r.productId && r.productId === item.productId) || 
-            (r.name && item.name && r.name.trim() === item.name.trim())
-          );
-          if (ret) {
-            return {
-              ...item,
-              returnedWeight: Math.round(((Number(item.returnedWeight) || 0) + ret.returnedWeight) * 100) / 100
-            };
-          }
-          return item;
-        });
-
-        const totalReturnedAmount = Math.round(((Number(inv.totalReturnedAmount) || 0) + totalRefund) * 100) / 100;
-        const totalReturnedWeight = updatedItems.reduce((s, i) => s + (Number(i.returnedWeight) || 0), 0);
-
-        return {
-          ...inv,
-          items: updatedItems,
-          hasReturns: true,
-          totalReturnedAmount,
-          totalReturnedWeight
-        };
-      }
-      return inv;
-    }));
+    } catch (e) { throw e; }
 
     return newReturn;
   };
@@ -1121,64 +1121,20 @@ export function useAppStore() {
 
     // Reverse customer balance if credit_deduction
     if (target.refundMethod === 'credit_deduction' && target.customerId && target.customerId !== 'walk_in') {
-      setCustomers(prev => prev.map(c => {
-        if (c.id === target.customerId) {
-          return {
-            ...c,
-            balance: Math.round(((c.balance || 0) + target.totalRefundAmount) * 100) / 100
-          };
-        }
-        return c;
-      }));
+      setCustomers(prev => adjustBalance(prev, target.customerId, Number(target.totalRefundAmount)));
     }
 
-    // Reverse inventory if restock
-    if (target.inventoryAction === 'restock') {
-      target.items.forEach(it => {
-        setProducts(prev => prev.map(p => {
-          if ((it.productId && p.id === it.productId) || p.name.trim() === it.name.trim()) {
-            return {
-              ...p,
-              currentStockKg: Math.max(0, Math.round(((Number(p.currentStockKg) || 0) - it.returnedWeight) * 100) / 100)
-            };
-          }
-          return p;
-        }));
-      });
-    }
+    const sourceInvoice = invoices.find(invoice => invoice.id === target.invoiceId);
+    if (!sourceInvoice) throw new Error('الفاتورة الأصلية للمردود غير موجودة');
+    setProducts(prev => applySalesReturnInventory(prev, sourceInvoice, target, -1));
 
-    // Revert invoice returned quantities
-    setInvoices(prev => prev.map(inv => {
-      if (inv.id === target.invoiceId) {
-        const updatedItems = inv.items.map(item => {
-          const ret = target.items.find(r => 
-            (r.productId && r.productId === item.productId) || 
-            (r.name && item.name && r.name.trim() === item.name.trim())
-          );
-          if (ret) {
-            return {
-              ...item,
-              returnedWeight: Math.max(0, Math.round(((Number(item.returnedWeight) || 0) - ret.returnedWeight) * 100) / 100)
-            };
-          }
-          return item;
-        });
-        const totalReturnedAmount = Math.max(0, Math.round(((Number(inv.totalReturnedAmount) || 0) - target.totalRefundAmount) * 100) / 100);
-        return {
-          ...inv,
-          items: updatedItems,
-          hasReturns: totalReturnedAmount > 0,
-          totalReturnedAmount
-        };
-      }
-      return inv;
-    }));
+    setInvoices(prev => applySalesReturnInvoice(prev, target, -1));
 
     setSalesReturns(prev => prev.filter(r => r.id !== returnId));
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, null, 'sales_return', returnId, 'delete', { id: returnId });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // Expense Categories Actions
@@ -1229,7 +1185,7 @@ export function useAppStore() {
 
     try {
       cloudflareSync.recordMutation(activeTenantId, newExp.branchId, 'expense', newExp.id, 'create', newExp);
-    } catch (e) {}
+    } catch (e) { throw e; }
 
     return newExp;
   };
@@ -1240,19 +1196,21 @@ export function useAppStore() {
     try {
       const activeTenantId = currentUser?.tenantId || target?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, target?.branchId || null, 'expense', id, 'delete', { id });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // Damaged / Spoiled Items Actions (التوالف والإعدامات)
   const addDamagedItem = (item) => {
-    const qtyKg = Math.round((Number(item.quantityKg) || 0) * 100) / 100;
-    const costPerKg = Number(item.costPerKg) || 0;
+    const qtyKg = Number(item.quantityKg);
+    const costPerKg = Number(item.costPerKg);
+    if (!Number.isFinite(costPerKg) || costPerKg < 0) throw new Error('تكلفة الهالك غير صالحة');
+    if (item.branchId && !branches.some(branch=>branch.id===item.branchId)) throw new Error('فرع قيد الهالك غير موجود');
     const activeB = branches.find(b => b.id === (item.branchId || activeBranchId)) || branches[0];
     const targetBranchId = activeB?.id || 'branch-main';
 
     const newItem = {
       ...item,
-      id: `dmg-${Date.now()}`,
+      id: `dmg-${crypto.randomUUID()}`,
       branchId: targetBranchId,
       branchName: activeB?.name || 'الفرع الرئيسي',
       date: item.date || new Date().toISOString().split('T')[0],
@@ -1261,60 +1219,26 @@ export function useAppStore() {
       totalLoss: Math.round(qtyKg * costPerKg * 100) / 100
     };
 
-    // Deduct damaged quantity from product stock
-    if (qtyKg > 0) {
-      setProducts(prev => prev.map(p => {
-        const isMatch = (newItem.productId && p.id === newItem.productId) || 
-                        (p.name.trim() === (newItem.productName || newItem.name || '').trim());
-        if (isMatch) {
-          const curStock = Number(p.currentStockKg) || 0;
-          const curBStock = p.branchStock || {};
-          const branchOldStock = Number(curBStock[targetBranchId] !== undefined ? curBStock[targetBranchId] : curStock);
-          return {
-            ...p,
-            currentStockKg: Math.round((curStock - qtyKg) * 100) / 100,
-            branchStock: {
-              ...curBStock,
-              [targetBranchId]: Math.round((branchOldStock - qtyKg) * 100) / 100
-            }
-          };
-        }
-        return p;
-      }));
-    }
-
+    setProducts(prev=>applyDamageInventory(prev,newItem,1));
     setDamagedItems(prev => [newItem, ...prev]);
 
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'damaged_item', newItem.id, 'create', newItem);
-    } catch (e) {}
+    } catch (e) { throw e; }
 
     return newItem;
   };
 
   const deleteDamagedItem = (id) => {
     const target = damagedItems.find(d => d.id === id);
-    if (target && Number(target.quantityKg) > 0) {
-      const qtyKg = Number(target.quantityKg);
-      setProducts(prev => prev.map(p => {
-        const isMatch = (target.productId && p.id === target.productId) || 
-                        (p.name.trim() === (target.productName || target.name || '').trim());
-        if (isMatch) {
-          const curStock = Number(p.currentStockKg) || 0;
-          return {
-            ...p,
-            currentStockKg: Math.round((curStock + qtyKg) * 100) / 100
-          };
-        }
-        return p;
-      }));
-    }
+    if (!target) return;
+    setProducts(prev=>applyDamageInventory(prev,target,-1));
     setDamagedItems(prev => prev.filter(d => d.id !== id));
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, null, 'damaged_item', id, 'delete', { id });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // Workers & Payroll Actions (العمال والرواتب مع المزامنة السحابية اللحظية)
@@ -1330,7 +1254,7 @@ export function useAppStore() {
     setWorkers(prev => [newWorker, ...prev]);
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'worker', newWorker.id, 'create', newWorker);
-    } catch (e) {}
+    } catch (e) { throw e; }
     return newWorker;
   };
 
@@ -1339,7 +1263,7 @@ export function useAppStore() {
     setWorkers(prev => prev.map(w => w.id === id ? { ...w, ...updates } : w));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'worker', id, 'update', updates);
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   const deleteWorker = (id) => {
@@ -1347,7 +1271,7 @@ export function useAppStore() {
     setWorkers(prev => prev.filter(w => w.id !== id));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'worker', id, 'delete', { id });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // Worker Transactions (سلفيات ورواتب)
@@ -1356,26 +1280,13 @@ export function useAppStore() {
     const paymentMethod = transaction.paymentMethod || 'cash';
     const newTx = {
       ...transaction,
-      id: `wt-${Date.now()}`,
+      id: transaction.id || `wt-${crypto.randomUUID()}`,
       amount,
       paymentMethod,
       date: transaction.date || new Date().toISOString().split('T')[0]
     };
 
-    // Update worker's currentAdvance
-    setWorkers(prev => prev.map(w => {
-      if (w.id === transaction.workerId) {
-        if (transaction.type === 'advance') {
-          // Worker took advance money -> advance asset increases (NOT a general expense)
-          return { ...w, currentAdvance: (w.currentAdvance || 0) + amount };
-        } else if (transaction.type === 'salary_payment') {
-          // Salary paid -> deducts deductedAdvances if any
-          const deducted = Number(transaction.deductedAdvance) || 0;
-          return { ...w, currentAdvance: Math.max(0, (w.currentAdvance || 0) - deducted) };
-        }
-      }
-      return w;
-    }));
+    setWorkers(prev => applyWorkerAdvance(prev, newTx, 1));
 
     setWorkerTransactions(prev => [newTx, ...prev]);
 
@@ -1401,31 +1312,39 @@ export function useAppStore() {
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, null, 'worker_transaction', newTx.id, 'create', newTx);
-    } catch (e) {}
+    } catch (e) { throw e; }
 
     return newTx;
+  };
+
+  const recordWorkerTransactionWithUpdate = (workerId, updates, transaction, updateBefore = false) => {
+    if (!workers.some(worker => worker.id === workerId) || transaction.workerId !== workerId)
+      throw new Error('العامل المرتبط بالحركة غير صالح');
+    if (updateBefore) updateWorker(workerId, updates);
+    const saved = addWorkerTransaction(transaction);
+    if (!updateBefore) updateWorker(workerId, updates);
+    return saved;
   };
 
   const deleteWorkerTransaction = (id) => {
     const target = workerTransactions.find(t => t.id === id);
     if (target) {
-      setWorkers(prev => prev.map(w => {
-        if (w.id === target.workerId) {
-          if (target.type === 'advance') {
-            return { ...w, currentAdvance: Math.max(0, (w.currentAdvance || 0) - (Number(target.amount) || 0)) };
-          } else if (target.type === 'salary_payment') {
-            const deducted = Number(target.deductedAdvance) || 0;
-            return { ...w, currentAdvance: (w.currentAdvance || 0) + deducted };
-          }
-        }
-        return w;
-      }));
+      if (target.type === 'absence_record') {
+        const field = target.absenceType === 'medical' ? 'medicalAbsenceDays' :
+          target.absenceType === 'unexcused' ? 'unexcusedAbsenceDays' : null;
+        const days = Number(target.daysCount);
+        const worker = workers.find(item => item.id === target.workerId);
+        if (!field || !Number.isSafeInteger(days) || days <= 0 || !worker || Number(worker[field] || 0) < days)
+          throw new Error('لا يمكن حذف غياب تمت تسويته أو لا يمكن التحقق من أيامه');
+        updateWorker(worker.id, { [field]: Number(worker[field] || 0) - days });
+      }
+      setWorkers(prev => applyWorkerAdvance(prev, target, -1));
       // Remove linked expense if it was a salary payment
       setExpenses(prev => prev.filter(e => e.workerTransactionId !== id && e.id !== `exp-${id}`));
       try {
         const activeTenantId = currentUser?.tenantId || 'tenant-demo';
         cloudflareSync.recordMutation(activeTenantId, null, 'worker_transaction', id, 'delete', { id });
-      } catch (e) {}
+      } catch (e) { throw e; }
     }
     setWorkerTransactions(prev => prev.filter(t => t.id !== id));
   };
@@ -1437,7 +1356,7 @@ export function useAppStore() {
       const nextSettings = { ...prev, ...updates };
       try {
         cloudflareSync.recordMutation(activeTenantId, null, 'settings', 'settings', 'update', nextSettings);
-      } catch (e) {}
+      } catch (e) { throw e; }
       return nextSettings;
     });
   };
@@ -1469,7 +1388,7 @@ export function useAppStore() {
     setSuppliers(prev => [newSup, ...prev]);
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'supplier', newSup.id, 'create', newSup);
-    } catch (e) {}
+    } catch (e) { throw e; }
     return newSup;
   };
 
@@ -1482,7 +1401,7 @@ export function useAppStore() {
     } : s));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'supplier', id, 'update', updates);
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   const deleteSupplier = (id) => {
@@ -1490,7 +1409,7 @@ export function useAppStore() {
     setSuppliers(prev => prev.filter(s => s.id !== id));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'supplier', id, 'delete', { id });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   const recordSupplierPayment = ({ supplierId, amount, paymentMethod = 'cash', notes = '', date = null, time = null, id = null, clientTransactionId = null, idempotencyKey = null }) => {
@@ -1561,7 +1480,7 @@ export function useAppStore() {
     try {
       const activeTenantId = currentUser?.tenantId || targetSupplier?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, null, 'supplier_payment', newPayment.id, 'create', newPayment);
-    } catch (e) {}
+    } catch (e) { throw e; }
 
     return newPayment;
   };
@@ -1585,7 +1504,7 @@ export function useAppStore() {
       try {
         const activeTenantId = currentUser?.tenantId || 'tenant-demo';
         cloudflareSync.recordMutation(activeTenantId, null, 'supplier_payment', paymentId, 'delete', { id: paymentId });
-      } catch (e) {}
+      } catch (e) { throw e; }
     }
   };
 
@@ -1594,7 +1513,7 @@ export function useAppStore() {
     // 0. Idempotency Guard: prevent duplicate purchase creation, double stock additions & double supplier balances
     const clientTxId = purData.clientTransactionId || purData.idempotencyKey || purData.id;
     if (clientTxId) {
-      const existing = purchases.find(p => 
+      const existing = [...inboundRecords.current.purchase.values()].find(p =>
         (p.clientTransactionId && p.clientTransactionId === clientTxId) ||
         (p.idempotencyKey && p.idempotencyKey === clientTxId) ||
         (p.id && p.id === clientTxId)
@@ -1658,6 +1577,8 @@ export function useAppStore() {
       notes: purData.notes || ''
     };
 
+    inboundRecords.current.purchase.set(newPurchase.id, newPurchase);
+
     // If purchase has debt (credit) and is linked to a supplier, increase supplier's balance (له فلوس علينا)
     if (creditAmount > 0) {
       if (newPurchase.supplierId) {
@@ -1671,28 +1592,15 @@ export function useAppStore() {
           return s;
         }));
       } else if (newPurchase.supplierName && newPurchase.supplierName !== 'سوق الجملة المركزي') {
-        // Auto-match or auto-create supplier
-        setSuppliers(prev => {
-          const match = prev.find(s => s.name.trim() === newPurchase.supplierName.trim());
-          if (match) {
-            newPurchase.supplierId = match.id;
-            return prev.map(s => s.id === match.id ? {
-              ...s,
-              balance: Math.round(((s.balance || 0) + creditAmount) * 100) / 100
-            } : s);
-          } else {
-            const newSupId = `sup-${Date.now()}`;
-            newPurchase.supplierId = newSupId;
-            return [{
-              id: newSupId,
-              name: newPurchase.supplierName.trim(),
-              phone: '',
-              marketOrFarm: '',
-              balance: creditAmount,
-              notes: 'تم إنشاؤه تلقائياً من فاتورة توريد آجل'
-            }, ...prev];
-          }
+        // The supplier's opening event must precede the purchase. Its opening
+        // balance is zero: the purchase event applies the debt on every replica.
+        const match = suppliers.find(s => s.name.trim() === newPurchase.supplierName.trim());
+        const supplier = match || addSupplier({
+          name: newPurchase.supplierName.trim(), balance: 0,
+          notes: 'تم إنشاؤه تلقائياً من فاتورة توريد آجل'
         });
+        newPurchase.supplierId = supplier.id;
+        setSuppliers(prev => adjustBalance(prev, supplier.id, creditAmount));
       }
     }
 
@@ -1704,7 +1612,7 @@ export function useAppStore() {
     if (purData.isNewProduct && prodName) {
       const existing = products.find(p => p.name.trim() === prodName);
       if (!existing) {
-        addProduct({
+        const createdProduct = addProduct({
           name: prodName,
           category: purData.category || 'خضروات',
           icon: purData.icon || '📦',
@@ -1716,6 +1624,8 @@ export function useAppStore() {
           currentStockKg: purQty,
           branchStock: { [targetBranchId]: purQty }
         });
+        newPurchase.productId = createdProduct.id;
+        newPurchase.inventorySeededWithPurchase = true;
       } else {
         // If already exists, update existing product stock and average cost
         setProducts(prev => prev.map(p => {
@@ -1780,13 +1690,14 @@ export function useAppStore() {
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'purchase', newPurchase.id, 'create', newPurchase);
-    } catch (e) {}
+    } catch (e) { throw e; }
 
     return newPurchase;
   };
 
   const deletePurchase = (id) => {
     const target = purchases.find(p => p.id === id);
+    if (purchaseReturns.some(row=>row.purchaseId===id)) throw new Error('لا يمكن حذف شحنة لها مردود قائم');
     if (target) {
       if (target.creditAmount > 0 && target.supplierId) {
         setSuppliers(prev => prev.map(s => {
@@ -1800,26 +1711,11 @@ export function useAppStore() {
         }));
       }
 
-      // Deduct purchased quantity from product stock
-      const purQty = Number(target.quantityKg) || 0;
-      if (purQty > 0) {
-        setProducts(prev => prev.map(p => {
-          const isMatch = (target.productId && p.id === target.productId) || 
-                          (target.productName && p.name.trim() === target.productName.trim());
-          if (isMatch) {
-            const curStock = Number(p.currentStockKg) || 0;
-            return {
-              ...p,
-              currentStockKg: Math.round((curStock - purQty) * 100) / 100
-            };
-          }
-          return p;
-        }));
-      }
+      setProducts(prev => applyPurchaseInventory(prev, target, -1));
       try {
         const activeTenantId = currentUser?.tenantId || 'tenant-demo';
         cloudflareSync.recordMutation(activeTenantId, target.branchId || null, 'purchase', id, 'delete', { id });
-      } catch (e) {}
+      } catch (e) { throw e; }
     }
     setPurchases(prev => prev.filter(p => p.id !== id));
   };
@@ -1839,32 +1735,6 @@ export function useAppStore() {
     // CRITICAL: Strictly lock to historical costPerKg from that purchase bill!
     const historicalCostPerKg = Number(originalPurchase.costPerKg) || 0;
     const totalRefund = Math.round(retKg * historicalCostPerKg * 100) / 100;
-
-    // Deduct from supplier debt if applicable (reduces what we owe him)
-    if (refundMethod === 'supplier_debt_deduction' && originalPurchase.supplierId) {
-      setSuppliers(prev => prev.map(s => {
-        if (s.id === originalPurchase.supplierId) {
-          return {
-            ...s,
-            balance: Math.round(((s.balance || 0) - totalRefund) * 100) / 100
-          };
-        }
-        return s;
-      }));
-    }
-
-    // Deduct returned quantity from inventory
-    if (retKg > 0) {
-      setProducts(prev => prev.map(p => {
-        if (p.name.trim() === originalPurchase.productName.trim() || p.id === originalPurchase.productId) {
-          return {
-            ...p,
-            currentStockKg: Math.max(0, Math.round(((Number(p.currentStockKg) || 0) - retKg) * 100) / 100)
-          };
-        }
-        return p;
-      }));
-    }
 
     const returnId = `ret-pur-${Date.now()}`;
     const newReturn = {
@@ -1886,24 +1756,14 @@ export function useAppStore() {
     };
 
     setPurchaseReturns(prev => [newReturn, ...prev]);
+    setPurchases(prev=>applyPurchaseReturnPurchase(prev,newReturn,1));
+    setProducts(prev=>applyPurchaseReturnInventory(prev,originalPurchase,newReturn,1));
+    if (refundMethod === 'supplier_debt_deduction') setSuppliers(prev=>adjustBalance(prev,originalPurchase.supplierId,-totalRefund));
 
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, originalPurchase.branchId || null, 'purchase_return', newReturn.id, 'create', newReturn);
-    } catch (e) {}
-
-    // Update purchase record
-    setPurchases(prev => prev.map(p => {
-      if (p.id === purchaseId) {
-        return {
-          ...p,
-          returnedKg: Math.round(((Number(p.returnedKg) || 0) + retKg) * 100) / 100,
-          totalReturnedAmount: Math.round(((Number(p.totalReturnedAmount) || 0) + totalRefund) * 100) / 100,
-          hasReturns: true
-        };
-      }
-      return p;
-    }));
+    } catch (e) { throw e; }
 
     return newReturn;
   };
@@ -1912,55 +1772,23 @@ export function useAppStore() {
     const target = purchaseReturns.find(r => r.id === returnId);
     if (!target) return;
 
-    // Re-add to supplier debt if it was deducted
-    if (target.refundMethod === 'supplier_debt_deduction' && target.supplierId) {
-      setSuppliers(prev => prev.map(s => {
-        if (s.id === target.supplierId) {
-          return {
-            ...s,
-            balance: Math.round(((s.balance || 0) + target.totalRefundAmount) * 100) / 100
-          };
-        }
-        return s;
-      }));
-    }
-
-    // Re-add to inventory
-    if (target.returnedKg > 0) {
-      setProducts(prev => prev.map(p => {
-        if (p.name.trim() === target.productName.trim() || p.id === target.productId) {
-          return {
-            ...p,
-            currentStockKg: Math.round(((Number(p.currentStockKg) || 0) + target.returnedKg) * 100) / 100
-          };
-        }
-        return p;
-      }));
-    }
-
-    // Revert purchase record
-    setPurchases(prev => prev.map(p => {
-      if (p.id === target.purchaseId) {
-        const totalReturnedAmount = Math.max(0, Math.round(((Number(p.totalReturnedAmount) || 0) - target.totalRefundAmount) * 100) / 100);
-        return {
-          ...p,
-          returnedKg: Math.max(0, Math.round(((Number(p.returnedKg) || 0) - target.returnedKg) * 100) / 100),
-          totalReturnedAmount,
-          hasReturns: totalReturnedAmount > 0
-        };
-      }
-      return p;
-    }));
+    const originalPurchase=purchases.find(p=>p.id===target.purchaseId);
+    if(!originalPurchase) throw new Error('شحنة المشتريات الأصلية للمردود غير موجودة');
+    setPurchases(prev=>applyPurchaseReturnPurchase(prev,target,-1));
+    setProducts(prev=>applyPurchaseReturnInventory(prev,originalPurchase,target,-1));
+    if(target.refundMethod==='supplier_debt_deduction') setSuppliers(prev=>adjustBalance(prev,originalPurchase.supplierId,Number(target.totalRefundAmount)));
 
     setPurchaseReturns(prev => prev.filter(r => r.id !== returnId));
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
       cloudflareSync.recordMutation(activeTenantId, null, 'purchase_return', returnId, 'delete', { id: returnId });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // Reset or Export/Import
   const resetToSampleData = () => {
+    if (currentUser?.tenantId && currentUser.tenantId !== 'tenant-demo')
+      throw new Error('لا يمكن استبدال بيانات شركة فعّالة ببيانات تجريبية دون استعادة معتمدة من الخادم');
     setProducts(INITIAL_PRODUCTS);
     setCustomers(INITIAL_CUSTOMERS);
     setInvoices(INITIAL_INVOICES);
@@ -1978,11 +1806,13 @@ export function useAppStore() {
     setPurchaseReturns(INITIAL_PURCHASE_RETURNS);
   };
 
-  const exportBackupJSON = () => {
-    const data = {
-      version: 3,
+  const getBackupSnapshot = () => {
+    refreshBindings();
+    return {
+      version: 4,
       tenantId: currentUser?.tenantId || 'tenant-demo',
       exportDate: new Date().toISOString(),
+      syncCursor: local.value.cursor,
       products,
       customers,
       invoices,
@@ -2000,8 +1830,15 @@ export function useAppStore() {
       purchaseReturns,
       partners,
       partnerDrawings,
-      profitDistributions
+      profitDistributions,
+      branches,
+      activeBranchId,
+      stockTransfers
     };
+  };
+
+  const exportBackupJSON = () => {
+    const data = getBackupSnapshot();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2024,7 +1861,7 @@ export function useAppStore() {
     setPartners(prev => [...prev, newPartner]);
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'partner', newPartner.id, 'create', newPartner);
-    } catch (e) {}
+    } catch (e) { throw e; }
     return newPartner;
   };
 
@@ -2038,16 +1875,18 @@ export function useAppStore() {
     } : p));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'partner', id, 'update', updates);
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   const deletePartner = (id) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    if (partnerDrawings.some(row=>row.partnerId===id) ||
+        profitDistributions.some(row=>(row.shares||[]).some(share=>share.partnerId===id)))
+      throw new Error('لا يمكن حذف شريك له مسحوبات أو توزيعات قائمة');
     setPartners(prev => prev.filter(p => p.id !== id));
-    setPartnerDrawings(prev => prev.filter(d => d.partnerId !== id));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'partner', id, 'delete', { id });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // Partner Drawings (سحب الشركاء مع المزامنة السحابية)
@@ -2066,7 +1905,7 @@ export function useAppStore() {
     setPartnerDrawings(prev => [newDrawing, ...prev]);
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'partner_drawing', newDrawing.id, 'create', newDrawing);
-    } catch (e) {}
+    } catch (e) { throw e; }
     return newDrawing;
   };
 
@@ -2075,7 +1914,7 @@ export function useAppStore() {
     setPartnerDrawings(prev => prev.filter(d => d.id !== id));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'partner_drawing', id, 'delete', { id });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // Profit Distributions (توزيعات الأرباح مع المزامنة السحابية)
@@ -2095,7 +1934,7 @@ export function useAppStore() {
     setProfitDistributions(prev => [newDist, ...prev]);
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'profit_distribution', newDist.id, 'create', newDist);
-    } catch (e) {}
+    } catch (e) { throw e; }
     return newDist;
   };
 
@@ -2104,7 +1943,7 @@ export function useAppStore() {
     setProfitDistributions(prev => prev.filter(d => d.id !== id));
     try {
       cloudflareSync.recordMutation(activeTenantId, null, 'profit_distribution', id, 'delete', { id });
-    } catch (e) {}
+    } catch (e) { throw e; }
   };
 
   // --------------------------------------------------------------------------
@@ -2292,37 +2131,22 @@ export function useAppStore() {
     };
   };
 
+  const getAccountingSnapshot = () => buildAccountingSnapshot({
+    products, customers, invoices, expenses, damagedItems, workers, workerTransactions,
+    purchases, suppliers, partnerDrawings, profitDistributions, salesReturns, purchaseReturns,
+    partners
+  }, getFinancialPosition());
+
   const importBackupJSON = (jsonString) => {
     try {
-      const data = JSON.parse(jsonString);
-      
-      // Multi-Tenant Isolation Gate: Reject importing another tenant's backup into the current tenant
-      if (data.tenantId && currentUser?.tenantId && data.tenantId !== currentUser.tenantId && currentUser.role !== 'super_admin') {
-        return { 
-          success: false, 
-          error: `لا يمكن استيراد هذه النسخة الاحتياطية لأنها تنتمي لمتجر آخر (${data.tenantId}) ولا تطابق متجرك الحالي (${currentUser.tenantId}) لمنع تداخل واختراق بيانات المتاجر.` 
-        };
-      }
-
-      if (data.products) setProducts(data.products);
-      if (data.customers) setCustomers(data.customers);
-      if (data.invoices) setInvoices(data.invoices);
-      if (data.expenses) setExpenses(data.expenses);
-      if (data.expenseCategories) setExpenseCategories(data.expenseCategories);
-      if (data.settings) setSettings(data.settings);
-      if (data.damagedItems) setDamagedItems(data.damagedItems);
-      if (data.workers) setWorkers(data.workers);
-      if (data.workerTransactions) setWorkerTransactions(data.workerTransactions);
-      if (data.customerPayments) setCustomerPayments(data.customerPayments);
-      if (data.purchases) setPurchases(data.purchases);
-      if (data.suppliers) setSuppliers(data.suppliers);
-      if (data.supplierPayments) setSupplierPayments(data.supplierPayments);
-      if (data.salesReturns) setSalesReturns(data.salesReturns);
-      if (data.purchaseReturns) setPurchaseReturns(data.purchaseReturns);
-      if (data.partners) setPartners(data.partners);
-      if (data.partnerDrawings) setPartnerDrawings(data.partnerDrawings);
-      if (data.profitDistributions) setProfitDistributions(data.profitDistributions);
-      return { success: true };
+      const data = validateBackup(JSON.parse(jsonString), currentUser?.tenantId);
+      if (!['company_owner','admin','super_admin'].includes(currentUser?.role)) throw new Error('الاستعادة تتطلب صلاحية مدير');
+      const id=`restore-${crypto.randomUUID()}`;
+      for (const [key,value] of Object.entries(backupToState(data))) local.set(key,value);
+      local.replaceOutboxWithRestore({id,tenantId:currentUser.tenantId,entityType:'restore_snapshot',entityId:id,
+        action:'create',payload:{id,snapshot:data},timestamp:Date.now()});
+      return { success: true, restoreEventId: id,
+        policy: 'authoritative replacement; prior local outbox superseded; later server events apply after restore' };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -2330,558 +2154,87 @@ export function useAppStore() {
 
   // Authentication & Multi-Tenant Actions (with Store Code support)
   const login = async (username, password, explicitStoreCode = '') => {
-    let cleanUser = (username || '').trim().toLowerCase();
-    let cleanStoreCode = (explicitStoreCode || '').trim().toUpperCase();
-
-    // Support smart inline format: username@storeCode or storeCode/username
-    if (cleanUser.includes('@') && !cleanUser.includes('@gmail.com') && !cleanUser.includes('@yahoo.com') && !cleanUser.includes('@hotmail.com') && !cleanUser.includes('@outlook.com')) {
-      const parts = cleanUser.split('@');
-      cleanUser = parts[0].trim();
-      if (!cleanStoreCode && parts[1]) {
-        cleanStoreCode = parts[1].trim().toUpperCase();
-      }
-    } else if (cleanUser.includes('/')) {
-      const parts = cleanUser.split('/');
-      cleanStoreCode = parts[0].trim().toUpperCase();
-      cleanUser = parts[1].trim().toLowerCase();
-    }
-
-    // If still no storeCode provided, fallback to remembered store code in localStorage
-    if (!cleanStoreCode && typeof window !== 'undefined') {
-      try {
-        cleanStoreCode = (localStorage.getItem('khodar_remembered_store_code') || '').trim().toUpperCase();
-      } catch (e) {}
-    }
-
-    // 0. Master System Creator & Platform Owner (صانع ومالك المنصة الرئيسي)
-    if (cleanUser === 'amerfathi123@gmail.com') {
-      if (password === 'A20101993f') {
-        const ownerSession = {
-          id: 'tenant-super-admin',
-          storeCode: 'BRK-000',
-          companyName: 'إدارة المنظومة (صانع ومالك المنصة)',
-          username: 'amerfathi123@gmail.com',
-          role: 'super_admin',
-          status: 'active',
-          expiresAt: '2099-12-31',
-          allowedBranches: 999,
-          tenantId: 'tenant-super-admin',
-          permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions }
-        };
-        // Ensure owner is present in tenants list
-        setTenants(prev => {
-          const exists = prev.some(t => t.username.toLowerCase() === 'amerfathi123@gmail.com');
-          if (!exists) {
-            return [ownerSession, ...prev];
-          }
-          return prev.map(t => t.username.toLowerCase() === 'amerfathi123@gmail.com' ? { ...t, password: 'A20101993f', role: 'super_admin', storeCode: 'BRK-000' } : t);
-        });
-        setCurrentUser(ownerSession);
-        try {
-          localStorage.setItem('khodar_remembered_username', cleanUser);
-          localStorage.setItem('khodar_remembered_store_code', 'BRK-000');
-        } catch (e) {}
-        return { success: true, user: ownerSession };
-      } else {
-        return { success: false, error: 'كلمة المرور غير صحيحة لحساب مالك المنصة' };
-      }
-    }
-
-    // 1. If Store Code is specified, target that specific tenant
-    if (cleanStoreCode) {
-      let targetTenant = tenants.find(t => 
-        (t.storeCode || '').toUpperCase() === cleanStoreCode || 
-        t.id === cleanStoreCode.toLowerCase()
-      );
-
-      // Real-time Cloud Authentication & Sync (Cloud-First & Offline-First)
-      // Authenticates with Cloudflare D1 securely without leaking passwords, with instant offline fallback
-      if (typeof window !== 'undefined') {
-        try {
-          const baseUrl = getApiBaseUrl();
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 2500);
-
-          const authRes = await fetch(`${baseUrl}/api/tenants/lookup`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ storeCode: cleanStoreCode, username: cleanUser, password }),
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-
-          if (authRes.ok) {
-            const authData = await authRes.json();
-            if (authData.success && authData.authenticated) {
-              const activeTenant = authData.tenant;
-              targetTenant = activeTenant;
-              setTenants(prev => [activeTenant, ...prev.filter(t => t.id !== activeTenant.id && (t.storeCode || '').toUpperCase() !== cleanStoreCode)]);
-
-              if (authData.userType === 'owner') {
-                const adminSession = {
-                  ...authData.user,
-                  tenantId: activeTenant.id,
-                  storeCode: activeTenant.storeCode || cleanStoreCode,
-                  permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions }
-                };
-                if (activeTenant.companyName) {
-                  setSettings(prev => ({ ...prev, shopName: activeTenant.companyName }));
-                }
-                setCurrentUser(adminSession);
-                try {
-                  localStorage.setItem('khodar_remembered_username', cleanUser);
-                  localStorage.setItem('khodar_remembered_store_code', activeTenant.storeCode || cleanStoreCode);
-                } catch (e) {}
-                return { success: true, user: adminSession };
-              } else if (authData.userType === 'staff') {
-                const staffUser = authData.user;
-                if (staffUser.branchId && staffUser.branchId !== 'all') {
-                  setActiveBranchId(staffUser.branchId);
-                }
-                const rolePreset = ROLE_PERMISSIONS_PRESETS[staffUser.role] || ROLE_PERMISSIONS_PRESETS.cashier;
-                const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
-                const resolvedPerms = staffUser.role === 'custom'
-                  ? { ...DEFAULT_PERMISSIONS, ...(staffUser.permissions || {}) }
-                  : { ...defaultPerms, ...(staffUser.permissions || {}) };
-
-                const userSession = {
-                  ...staffUser,
-                  companyName: activeTenant.companyName || 'سوق ومحل الخضار والفواكه',
-                  tenantId: activeTenant.id,
-                  storeCode: activeTenant.storeCode || cleanStoreCode,
-                  permissions: resolvedPerms,
-                  isStaff: true
-                };
-                setUsers(prev => [staffUser, ...prev.filter(u => u.id !== staffUser.id)]);
-                setCurrentUser(userSession);
-                try {
-                  localStorage.setItem('khodar_remembered_username', cleanUser);
-                  localStorage.setItem('khodar_remembered_store_code', activeTenant.storeCode || cleanStoreCode);
-                } catch (e) {}
-                return { success: true, user: userSession };
-              }
-            }
-          }
-        } catch (netErr) {
-          console.warn('Cloud server authentication offline or timed out (falling back to local cache):', netErr.message);
-        }
-      }
-
-      if (!targetTenant) {
-        return { success: false, error: `كود المتجر (${cleanStoreCode}) غير موجود بالنظام، يرجى التحقق من الكود المعتمد` };
-      }
-
-      if (targetTenant.status === 'suspended') {
-        return { success: false, error: 'تم تعليق هذا المتجر مؤقتاً، يرجى مراجعة إدارة المنصة', isSuspended: true };
-      }
-
-      // Check expiry if not super admin
-      if (targetTenant.role !== 'super_admin' && targetTenant.expiresAt) {
-        const today = new Date().toISOString().split('T')[0];
-        if (today > targetTenant.expiresAt) {
-          return { 
-            success: false, 
-            error: `انتهت فترة اشتراك متجر (${targetTenant.companyName}) بتاريخ ${targetTenant.expiresAt}`,
-            isExpired: true,
-            phone: targetTenant.phone
-          };
-        }
-      }
-
-      // A) Check Staff within this Tenant
-      const staffUser = users.find(u => u.username.toLowerCase() === cleanUser && u.tenantId === targetTenant.id);
-      if (staffUser) {
-        if (staffUser.password !== password) {
-          return { success: false, error: 'كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى' };
-        }
-        if (staffUser.status === 'inactive') {
-          return { success: false, error: 'تم تعطيل هذا الحساب من قبل إدارة المتجر' };
-        }
-
-        if (staffUser.branchId && staffUser.branchId !== 'all') {
-          setActiveBranchId(staffUser.branchId);
-        }
-
-        const rolePreset = ROLE_PERMISSIONS_PRESETS[staffUser.role] || ROLE_PERMISSIONS_PRESETS.cashier;
-        const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
-        
-        let resolvedPerms;
-        if (staffUser.role === 'custom') {
-          resolvedPerms = staffUser.permissions ? { ...DEFAULT_PERMISSIONS, ...staffUser.permissions } : { ...DEFAULT_PERMISSIONS };
-        } else {
-          resolvedPerms = { ...defaultPerms, ...(staffUser.permissions || {}) };
-        }
-
-        const userSession = {
-          ...staffUser,
-          companyName: targetTenant.companyName || 'سوق ومحل الخضار والفواكه',
-          tenantId: targetTenant.id,
-          storeCode: targetTenant.storeCode || cleanStoreCode,
-          permissions: resolvedPerms,
-          isStaff: true
-        };
-
-        try {
-          localStorage.setItem('khodar_remembered_username', cleanUser);
-          localStorage.setItem('khodar_remembered_store_code', targetTenant.storeCode || cleanStoreCode);
-        } catch (e) {}
-
-        setCurrentUser(userSession);
-        return { success: true, user: userSession };
-      }
-
-      // B) Check Owner of this Tenant
-      if (targetTenant.username.toLowerCase() === cleanUser) {
-        if (targetTenant.password !== password) {
-          return { success: false, error: 'كلمة المرور غير صحيحة لحساب مالك المتجر' };
-        }
-
-        if (targetTenant.companyName && targetTenant.role !== 'super_admin') {
-          setSettings(prev => ({ ...prev, shopName: targetTenant.companyName }));
-        }
-
-        const adminSession = {
-          ...targetTenant,
-          tenantId: targetTenant.id,
-          storeCode: targetTenant.storeCode || cleanStoreCode,
-          permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions }
-        };
-
-        try {
-          localStorage.setItem('khodar_remembered_username', cleanUser);
-          localStorage.setItem('khodar_remembered_store_code', targetTenant.storeCode || cleanStoreCode);
-        } catch (e) {}
-
-        setCurrentUser(adminSession);
-        return { success: true, user: adminSession };
-      }
-
-      return { 
-        success: false, 
-        error: `المستخدم (${cleanUser}) غير مسجل في متجر (${targetTenant.companyName}) [كود: ${cleanStoreCode}]` 
-      };
-    }
-
-    // 2. Global fallback if no Store Code provided:
-    // First, check staff
-    const matchingStaff = users.filter(u => u.username.toLowerCase() === cleanUser);
-    if (matchingStaff.length > 1) {
-      return { 
-        success: false, 
-        error: 'يوجد أكثر من متجر مسجل بهذا الاسم، يرجى كتابة كود المتجر (Store Code) لتحديد المنشأة التابع لها' 
-      };
-    }
-
-    if (matchingStaff.length === 1) {
-      const staffUser = matchingStaff[0];
-      if (staffUser.password !== password) {
-        return { success: false, error: 'كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى' };
-      }
-      if (staffUser.status === 'inactive') {
-        return { success: false, error: 'تم تعطيل هذا الحساب من قبل إدارة المتجر' };
-      }
-
-      const parentTenant = tenants.find(t => t.id === staffUser.tenantId) || tenants[1];
-      if (parentTenant && parentTenant.status === 'suspended') {
-        return { success: false, error: 'تم تعليق اشتراك المتجر، يرجى مراجعة إدارة المنصة' };
-      }
-
-      if (staffUser.branchId && staffUser.branchId !== 'all') {
-        setActiveBranchId(staffUser.branchId);
-      }
-
-      const rolePreset = ROLE_PERMISSIONS_PRESETS[staffUser.role] || ROLE_PERMISSIONS_PRESETS.cashier;
-      const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
-      
-      let resolvedPerms;
-      if (staffUser.role === 'custom') {
-        resolvedPerms = staffUser.permissions ? { ...DEFAULT_PERMISSIONS, ...staffUser.permissions } : { ...DEFAULT_PERMISSIONS };
-      } else {
-        resolvedPerms = { ...defaultPerms, ...(staffUser.permissions || {}) };
-      }
-
-      const userSession = {
-        ...staffUser,
-        companyName: parentTenant?.companyName || 'سوق ومحل الخضار والفواكه',
-        tenantId: staffUser.tenantId || parentTenant?.id || 'tenant-demo',
-        storeCode: parentTenant?.storeCode || 'BRK-101',
-        permissions: resolvedPerms,
-        isStaff: true
-      };
-
-      try {
-        localStorage.setItem('khodar_remembered_username', cleanUser);
-        if (parentTenant?.storeCode) {
-          localStorage.setItem('khodar_remembered_store_code', parentTenant.storeCode);
-        }
-      } catch (e) {}
-
-      setCurrentUser(userSession);
-      return { success: true, user: userSession };
-    }
-
-    // Fallback to Tenant / Owner accounts
-    let target = tenants.find(t => t.username.toLowerCase() === cleanUser);
-    if (!target && typeof window !== 'undefined') {
-      try {
-        const baseUrl = getApiBaseUrl();
-        const res = await fetch(`${baseUrl}/api/tenants/lookup?username=${encodeURIComponent(cleanUser)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.tenant) {
-            target = data.tenant;
-            setTenants(prev => [target, ...prev.filter(t => t.id !== target.id)]);
-            if (Array.isArray(data.users) && data.users.length > 0) {
-              setUsers(prev => {
-                const existingIds = new Set(data.users.map(u => u.id));
-                return [...data.users, ...prev.filter(u => !existingIds.has(u.id))];
-              });
-            }
-          }
-        }
-      } catch (e) {}
-    }
-
-    if (!target) {
-      return { success: false, error: 'اسم المستخدم أو كود المتجر غير صحيح، يرجى التأكد من البيانات' };
-    }
-
-    if (target.password !== password) {
-      return { success: false, error: 'كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى' };
-    }
-
-    if (target.status === 'suspended') {
-      return { success: false, error: 'تم تعليق هذا الحساب مؤقتاً، يرجى التواصل مع إدارة المنصة', isSuspended: true };
-    }
-
-    if (target.role !== 'super_admin' && target.expiresAt) {
-      const today = new Date().toISOString().split('T')[0];
-      if (today > target.expiresAt) {
-        return { 
-          success: false, 
-          error: `انتهت فترة اشتراك حسابكم بتاريخ ${target.expiresAt}. يرجى التواصل لتجديد الباقة ومتابعة العمل.`,
-          isExpired: true,
-          phone: target.phone
-        };
-      }
-    }
-
-    if (target.companyName && target.role !== 'super_admin') {
-      setSettings(prev => ({ ...prev, shopName: target.companyName }));
-    }
-
-    const adminSession = {
-      ...target,
-      tenantId: target.id,
-      storeCode: target.storeCode || 'BRK-101',
-      permissions: { ...ROLE_PERMISSIONS_PRESETS.admin.permissions }
-    };
-
+    const cleanUser = String(username || '').trim().toLowerCase();
+    const storeCode = explicitStoreCode.trim() || localStorage.getItem('khodar_remembered_store_code') || '';
     try {
+      const response = await fetch(`${getApiBaseUrl()}/api/tenants/lookup`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: cleanUser, password, storeCode }),
+        signal: AbortSignal.timeout(15000)
+      });
+      const result = await response.json();
+      if (!response.ok || !result.session?.token) return { success: false, error: result.error || 'تعذر تسجيل الدخول' };
+      setSessionToken(result.session.token);
+      const user = { ...result.user, isStaff: result.userType === 'staff', status: 'active', sessionExpiresAt: result.session.expiresAt };
+      user.permissions = resolveUserPermissions(user);
+      setSessionUser(user);
+      // The old store must not receive the new identity before the remount.
+      writeTenantLoginContext(result.tenant, user, result.branches);
+      localStorage.setItem('khodar_remembered_store_code', result.tenant.storeCode || storeCode);
       localStorage.setItem('khodar_remembered_username', cleanUser);
-      if (target.storeCode) {
-        localStorage.setItem('khodar_remembered_store_code', target.storeCode);
-      }
-    } catch (e) {}
-
-    setCurrentUser(adminSession);
-    return { success: true, user: adminSession };
+      window.location.reload(); // Remount every store slice under the authenticated tenant/user namespace.
+      return { success: true, user };
+    } catch {
+      return { success: false, error: 'تعذر الاتصال بخدمة تسجيل الدخول. العمليات المحلية المحفوظة لم تُحذف.' };
+    }
   };
 
   const logout = () => {
-    // Keep khodar_remembered_store_code and khodar_remembered_username in localStorage for fast password-only cashier login
+    // Preserve unsent transactions and caches. Erasing business storage on logout
+    // can destroy the only copy of offline financial records.
+    const token = getSessionToken();
+    if (token) void fetch(`${getApiBaseUrl()}/api/auth/logout`, {
+      method: 'POST', keepalive: true, headers: { Authorization: `Bearer ${token}` }
+    }).catch(() => {});
+    cloudflareSync.stopAutoSync();
+    cloudflareSync.currentTenantId = null;
+    cloudflareSync.setUpdateHandler(null);
+    setSessionToken(null);
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
     setCurrentUser(null);
+    window.location.reload();
   };
 
-  const changePassword = (newPassword) => {
-    if (!currentUser) return false;
-    const cleanPass = (newPassword || '').trim();
-    if (!cleanPass) return false;
-
-    setTenants(prev => prev.map(t => t.id === currentUser.id ? { ...t, password: cleanPass } : t));
-    setCurrentUser(prev => ({ ...prev, password: cleanPass }));
+  const requestAccountChange = async (path, method, body) => {
+    const response = await fetch(`${getApiBaseUrl()}${path}`, {
+      method, headers: { 'Content-Type': 'application/json' },
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) throw new Error(result.error || 'تعذر حفظ التغيير في الخادم');
+    return result;
+  };
+  const changePassword = async (newPassword, currentPassword) => {
+    await requestAccountChange('/api/auth/password', 'POST', { currentPassword, newPassword });
+    logout();
     return true;
   };
-
-  const createTenantAccount = ({
-    companyName,
-    username,
-    password,
-    storeCode = '',
-    phone = '',
-    durationMonths = 12,
-    allowedBranches = 1,
-    notes = ''
-  }) => {
-    const cleanUser = (username || '').trim().toLowerCase();
-    if (!cleanUser) throw new Error('يرجى كتابة اسم مستخدم ثابت للحساب');
-
-    const existing = tenants.find(t => t.username.toLowerCase() === cleanUser);
-    if (existing) throw new Error(`اسم المستخدم (${username}) مسجل مسبقاً، يرجى اختيار اسم مستخدم آخر`);
-
-    // Determine unique Store Code
-    let cleanStoreCode = (storeCode || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
-    if (!cleanStoreCode) {
-      let codeNum = 100 + tenants.length;
-      while (tenants.some(t => (t.storeCode || '').toUpperCase() === `BRK-${codeNum}`)) {
-        codeNum++;
-      }
-      cleanStoreCode = `BRK-${codeNum}`;
-    } else {
-      const codeExists = tenants.find(t => (t.storeCode || '').toUpperCase() === cleanStoreCode);
-      if (codeExists) throw new Error(`كود المتجر (${cleanStoreCode}) مستخدم بالفعل لمتجر آخر، يرجى اختيار كود آخر`);
-    }
-
-    let expiresAt = '2099-12-31';
-    if (Number(durationMonths) > 0) {
-      const d = new Date();
-      d.setMonth(d.getMonth() + Number(durationMonths));
-      expiresAt = d.toISOString().split('T')[0];
-    }
-
-    const newTenant = {
-      id: `tenant-${Date.now()}`,
-      storeCode: cleanStoreCode,
-      companyName: companyName.trim() || 'متجر مشترك جديد',
-      username: cleanUser,
-      password: password || '123456',
-      role: 'company_owner',
-      status: 'active',
-      expiresAt,
-      allowedBranches: Number(allowedBranches) || 1,
-      phone: phone.trim(),
-      notes: notes.trim(),
-      createdAt: new Date().toISOString().split('T')[0]
-    };
-
-    setTenants(prev => [newTenant, ...prev]);
-
-    // Asynchronously synchronize new tenant to Cloudflare D1 central database
-    if (typeof window !== 'undefined') {
-      const baseUrl = getApiBaseUrl();
-      fetch(`${baseUrl}/api/tenants`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser?.password || 'A20101993f'}`
-        },
-        body: JSON.stringify(newTenant)
-      }).catch(err => console.warn('Cloud tenant sync warning:', err));
-    }
-
-    return newTenant;
+  const createTenantAccount = async (data) => {
+    const expiry = new Date();
+    expiry.setMonth(expiry.getMonth() + Number(data.durationMonths || 12));
+    const result = await requestAccountChange('/api/tenants', 'POST', {
+      ...data, id: crypto.randomUUID(), expiresAt: expiry.toISOString().slice(0, 10)
+    });
+    await commitRemoteCache(() => setTenants(prev => [result.tenant, ...prev]));
+    return result.tenant;
   };
-
-  const updateTenantAccount = (tenantId, updates) => {
-    // Validate uniqueness if username is being changed
-    if (updates.username) {
-      const cleanUser = updates.username.trim().toLowerCase();
-      const existingUser = tenants.find(t => t.id !== tenantId && t.username.toLowerCase() === cleanUser);
-      if (existingUser) {
-        throw new Error(`اسم المستخدم (${updates.username}) مسجل مسبقاً لمشترك آخر`);
-      }
-    }
-
-    // Validate uniqueness if storeCode is being changed
-    if (updates.storeCode) {
-      const cleanCode = updates.storeCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
-      const existingCode = tenants.find(t => t.id !== tenantId && (t.storeCode || '').toUpperCase() === cleanCode);
-      if (existingCode) {
-        throw new Error(`كود المتجر (${updates.storeCode}) مسجل مسبقاً لمتجر آخر`);
-      }
-    }
-
-    setTenants(prev => prev.map(t => {
-      if (t.id === tenantId) {
-        const updated = {
-          ...t,
-          ...updates,
-          ...(updates.username ? { username: updates.username.trim().toLowerCase() } : {}),
-          ...(updates.storeCode ? { storeCode: updates.storeCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') } : {}),
-          ...(updates.password ? { password: updates.password.trim() } : {}),
-          ...(updates.companyName ? { companyName: updates.companyName.trim() } : {}),
-          ...(updates.phone !== undefined ? { phone: updates.phone.trim() } : {}),
-          ...(updates.notes !== undefined ? { notes: updates.notes.trim() } : {}),
-          ...(updates.allowedBranches ? { allowedBranches: Number(updates.allowedBranches) || 1 } : {})
-        };
-        if (currentUser && currentUser.id === tenantId) {
-          setCurrentUser(updated);
-        }
-        return updated;
-      }
-      return t;
-    }));
-
-    // Synchronize tenant updates to Cloudflare D1
-    if (typeof window !== 'undefined') {
-      const baseUrl = getApiBaseUrl();
-      fetch(`${baseUrl}/api/tenants`, {
-        method: 'PATCH',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${currentUser?.password || 'A20101993f'}`
-        },
-        body: JSON.stringify({ id: tenantId, ...updates })
-      }).catch(err => console.warn('Cloud tenant update sync warning:', err));
-    }
-  };
-
-  const deleteTenantAccount = (tenantId) => {
-    if (tenantId === 'tenant-super-admin') {
-      alert('لا يمكن حذف حساب مالك المنصة الرئيسي');
-      return;
-    }
-    setTenants(prev => prev.filter(t => t.id !== tenantId));
-
-    // Delete tenant from Cloudflare D1
-    if (typeof window !== 'undefined') {
-      const baseUrl = getApiBaseUrl();
-      fetch(`${baseUrl}/api/tenants?id=${encodeURIComponent(tenantId)}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${currentUser?.password || 'A20101993f'}`
-        }
-      }).catch(err => console.warn('Cloud tenant delete sync warning:', err));
-    }
-  };
-
-  const resetPassword = (identifier, newPassword) => {
-    const cleanId = (identifier || '').trim().toLowerCase();
-    if (!cleanId || !newPassword) return false;
-
-    setTenants(prev => prev.map(t => {
-      const match = (t.email && t.email.toLowerCase() === cleanId) ||
-                    (t.username && t.username.toLowerCase() === cleanId) ||
-                    (t.phone && t.phone === cleanId) ||
-                    (cleanId === 'amerfathi123@gmail.com' && t.role === 'super_admin');
-      if (match) {
-        return { ...t, password: newPassword };
-      }
-      return t;
-    }));
-
-    setUsers(prev => prev.map(u => {
-      const match = (u.username && u.username.toLowerCase() === cleanId) ||
-                    (u.phone && u.phone === cleanId);
-      if (match) {
-        return { ...u, password: newPassword };
-      }
-      return u;
-    }));
-
+  const updateTenantAccount = async (tenantId, updates) => {
+    const clean = { ...updates };
+    if (!clean.password) delete clean.password;
+    await requestAccountChange('/api/tenants', 'PATCH', { id: tenantId, ...clean });
+    delete clean.password;
+    await commitRemoteCache(() => setTenants(prev => prev.map(t => t.id === tenantId ? { ...t, ...clean } : t)));
     return true;
   };
-
-  const adminResetTenantPassword = (tenantId, newPassword) => {
-    if (!tenantId || !newPassword) return false;
-    setTenants(prev => prev.map(t => {
-      if (t.id === tenantId) {
-        return { ...t, password: newPassword };
-      }
-      return t;
-    }));
-    return true;
+  const deleteTenantAccount = async (tenantId) => {
+    await requestAccountChange(`/api/tenants?id=${encodeURIComponent(tenantId)}`, 'DELETE');
+    await commitRemoteCache(() => setTenants(prev => prev.filter(t => t.id !== tenantId)));
   };
+  const resetPassword = async (resetToken, newPassword) => {
+    return requestAccountChange('/api/auth/reset', 'POST', { resetToken, newPassword });
+  };
+  const adminResetTenantPassword = (tenantId, newPassword) =>
+    updateTenantAccount(tenantId, { password: newPassword });
 
   const broadcastAuthEvent = (type, payload) => {
     try {
@@ -2905,163 +2258,28 @@ export function useAppStore() {
     return Boolean(perms?.[permissionKey]);
   };
 
-  const addUser = ({ name, username, password, role = 'cashier', branchId = 'all', permissions, phone = '' }) => {
-    const cleanUser = (username || '').trim().toLowerCase();
-    if (!cleanUser) throw new Error('يرجى إدخال اسم مستخدم صحيح');
-    if (!name || !name.trim()) throw new Error('يرجى إدخال الاسم الكامل للمستخدم');
-
-    const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-
-    // Check duplicate username within same tenant
-    const duplicate = users.some(u => u.tenantId === activeTenantId && u.username.toLowerCase() === cleanUser);
-    if (duplicate) throw new Error(`اسم المستخدم (${username}) مسجل مسبقاً لموظف آخر في متجركم`);
-
-    const rolePreset = ROLE_PERMISSIONS_PRESETS[role] || ROLE_PERMISSIONS_PRESETS.cashier;
-    const defaultPerms = rolePreset?.permissions || DEFAULT_PERMISSIONS;
-    const finalPerms = role === 'custom' 
-      ? (permissions ? { ...DEFAULT_PERMISSIONS, ...permissions } : { ...DEFAULT_PERMISSIONS })
-      : (permissions ? { ...defaultPerms, ...permissions } : { ...defaultPerms });
-
-    const newUser = {
-      id: `user-${Date.now()}`,
-      tenantId: activeTenantId,
-      name: name.trim(),
-      username: cleanUser,
-      password: password || '123456',
-      role,
-      branchId: branchId || 'all',
-      phone: phone.trim(),
-      status: 'active',
-      permissions: finalPerms,
-      createdAt: getCurrentDateFormatted()
-    };
-    newUser.permissions = resolveUserPermissions(newUser);
-
-    setUsers(prev => [newUser, ...prev]);
-    broadcastAuthEvent('USER_UPDATED', newUser);
-
-    // 1. Central Cloudflare D1 Persistence (Cloud-First)
-    if (typeof window !== 'undefined') {
-      try {
-        const baseUrl = getApiBaseUrl();
-        fetch(`${baseUrl}/api/users`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentUser?.password || '123'}`
-          },
-          body: JSON.stringify(newUser)
-        }).catch(e => console.warn('Central cloud user create error:', e));
-      } catch (e) {}
-    }
-
-    // 2. Record sync mutation for Cloudflare Edge offline queue (Offline-First)
-    try {
-      cloudflareSync.recordMutation(activeTenantId, branchId, 'user', newUser.id, 'create', newUser);
-    } catch (e) {
-      console.warn('Sync user failed:', e);
-    }
-
-    return newUser;
+  const addUser = async (data) => {
+    const result = await requestAccountChange('/api/users', 'POST', {
+      ...data, id: crypto.randomUUID(), tenantId: currentUser.tenantId
+    });
+    await commitRemoteCache(() => setUsers(prev => [result.user, ...prev]));
+    broadcastAuthEvent('USER_UPDATED', result.user);
+    return result.user;
   };
-
-  const updateUser = (userId, updates) => {
-    let updatedObj = null;
-
-    setUsers(prev => prev.map(u => {
-      if (u.id === userId) {
-        let newPerms = updates.permissions !== undefined ? updates.permissions : u.permissions;
-        if (updates.role && updates.role !== u.role && !updates.permissions && ROLE_PERMISSIONS_PRESETS[updates.role]) {
-          newPerms = { ...ROLE_PERMISSIONS_PRESETS[updates.role].permissions };
-        }
-
-        const updated = { 
-          ...u, 
-          ...updates,
-          permissions: newPerms
-        };
-        updated.permissions = resolveUserPermissions(updated);
-        updatedObj = updated;
-
-        if (currentUser && (currentUser.id === userId || (currentUser.username?.toLowerCase() === u.username?.toLowerCase() && currentUser.tenantId === u.tenantId))) {
-          setCurrentUser(prevUser => {
-            const next = { ...prevUser, ...updated, permissions: updated.permissions };
-            try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(next)); } catch (e) {}
-            return next;
-          });
-        }
-        return updated;
-      }
-      return u;
-    }));
-
-    if (updatedObj) {
-      broadcastAuthEvent('USER_UPDATED', updatedObj);
-    }
-
-    const activeTenantId = currentUser?.tenantId || updatedObj?.tenantId || 'tenant-demo';
-
-    // 1. Central Cloudflare D1 Update (Cloud-First)
-    if (typeof window !== 'undefined' && updatedObj) {
-      try {
-        const baseUrl = getApiBaseUrl();
-        fetch(`${baseUrl}/api/users`, {
-          method: 'PATCH',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentUser?.password || '123'}`
-          },
-          body: JSON.stringify({
-            id: userId,
-            tenantId: activeTenantId,
-            ...updatedObj
-          })
-        }).catch(e => console.warn('Central cloud user update error:', e));
-      } catch (e) {}
-    }
-
-    // 2. Offline Queue Mutation
-    try {
-      cloudflareSync.recordMutation(activeTenantId, updates.branchId || null, 'user', userId, 'update', updates);
-    } catch (e) {
-      console.warn('Sync user failed:', e);
-    }
+  const updateUser = async (userId, updates) => {
+    const clean = { ...updates };
+    if (!clean.password) delete clean.password;
+    const result = await requestAccountChange('/api/users', 'PATCH', { ...clean, id: userId, tenantId: currentUser.tenantId });
+    await commitRemoteCache(() => setUsers(prev => prev.map(u => u.id === userId ? result.user : u)));
+    broadcastAuthEvent('USER_UPDATED', result.user);
+    return result.user;
   };
-
-  const deleteUser = (userId) => {
-    const target = users.find(u => u.id === userId);
-    if (!target) return;
-    if (target.id === currentUser?.id) {
-      throw new Error('لا يمكنك حذف الحساب الذي قمت بتسجيل الدخول به حالياً');
-    }
-
-    setUsers(prev => prev.filter(u => u.id !== userId));
+  const deleteUser = async (userId) => {
+    await requestAccountChange(`/api/users?id=${encodeURIComponent(userId)}&tenantId=${encodeURIComponent(currentUser.tenantId)}`, 'DELETE');
+    await commitRemoteCache(() => setUsers(prev => prev.filter(u => u.id !== userId)));
     broadcastAuthEvent('USER_DELETED', { id: userId });
-
-    const activeTenantId = currentUser?.tenantId || target.tenantId || 'tenant-demo';
-
-    // 1. Central Cloudflare D1 Delete (Cloud-First)
-    if (typeof window !== 'undefined') {
-      try {
-        const baseUrl = getApiBaseUrl();
-        fetch(`${baseUrl}/api/users?id=${encodeURIComponent(userId)}&tenantId=${encodeURIComponent(activeTenantId)}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${currentUser?.password || '123'}`
-          }
-        }).catch(e => console.warn('Central cloud user delete error:', e));
-      } catch (e) {}
-    }
-
-    // 2. Offline Queue Mutation
-    try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'user', userId, 'delete', { id: userId });
-    } catch (e) {
-      console.warn('Sync user failed:', e);
-    }
   };
 
-  // Multi-Branch Actions (نظام إدارة الفروع المتعددة ومناقلات المخزون)
   const activeBranch = branches.find(b => b.id === activeBranchId) || branches[0] || {
     id: 'branch-main',
     name: 'الفرع الرئيسي (السوق المركزي)',
@@ -3076,6 +2294,7 @@ export function useAppStore() {
   };
 
   const addBranch = (branchData) => {
+    if (!['company_owner','admin','super_admin'].includes(currentUser?.role) || (currentUser?.branchId && currentUser.branchId !== 'all')) throw new Error('لا تملك صلاحية إدارة الفروع');
     // Check allowed branches limit for tenant
     let allowed = 1;
     if (currentUser?.role === 'super_admin') {
@@ -3090,8 +2309,8 @@ export function useAppStore() {
     }
 
     const newBranch = {
-      id: `branch-${Date.now()}`,
-      tenantId: currentUser?.id || 'tenant-demo',
+      id: `branch-${crypto.randomUUID()}`,
+      tenantId: currentUser?.tenantId || 'tenant-demo',
       name: (branchData.name || '').trim() || `فرع ${branches.length + 1}`,
       code: (branchData.code || '').trim() || `BR-${String(branches.length + 1).padStart(2, '0')}`,
       phone: (branchData.phone || '').trim(),
@@ -3103,14 +2322,21 @@ export function useAppStore() {
     };
 
     setBranches(prev => [...prev, newBranch]);
+    local.enqueue(branchCreateEvent(newBranch.tenantId, newBranch));
     return newBranch;
   };
 
   const updateBranch = (branchId, updates) => {
-    setBranches(prev => prev.map(b => b.id === branchId ? { ...b, ...updates } : b));
+    if (!['company_owner','admin','super_admin'].includes(currentUser?.role) || (currentUser?.branchId && currentUser.branchId !== 'all')) throw new Error('لا تملك صلاحية إدارة الفروع');
+    const target = branches.find(b => b.id === branchId);
+    if (!target) throw new Error('الفرع غير موجود');
+    const next = { ...target, ...updates, id: target.id, tenantId: currentUser.tenantId };
+    setBranches(prev => prev.map(b => b.id === branchId ? next : b));
+    cloudflareSync.recordMutation(currentUser.tenantId, null, 'branch', branchId, 'update', next);
   };
 
   const deleteBranch = (branchId) => {
+    if (!['company_owner','admin','super_admin'].includes(currentUser?.role) || (currentUser?.branchId && currentUser.branchId !== 'all')) throw new Error('لا تملك صلاحية إدارة الفروع');
     const target = branches.find(b => b.id === branchId);
     if (!target) return;
     if (target.isMain) {
@@ -3125,7 +2351,8 @@ export function useAppStore() {
       }
       return;
     }
-    setBranches(prev => prev.filter(b => b.id !== branchId));
+    // Keep the branch identity for historic invoices, stock and transfers.
+    updateBranch(branchId, { status: 'inactive' });
     if (activeBranchId === branchId) {
       const mainB = branches.find(b => b.isMain) || branches[0];
       setActiveBranchId(mainB?.id || 'branch-main');
@@ -3133,13 +2360,13 @@ export function useAppStore() {
   };
 
   const setMainBranch = (branchId) => {
-    setBranches(prev => prev.map(b => ({
-      ...b,
-      isMain: b.id === branchId
-    })));
+    if (!branches.some(b => b.id === branchId)) throw new Error('الفرع الرئيسي غير موجود');
+    for (const branch of branches) if (branch.isMain !== (branch.id === branchId))
+      updateBranch(branch.id, { isMain: branch.id === branchId });
   };
 
   const transferStockBetweenBranches = ({ fromBranchId, toBranchId, productId, productName, quantityKg, notes = '' }) => {
+    if (!['company_owner','admin','super_admin'].includes(currentUser?.role) || (currentUser?.branchId && currentUser.branchId !== 'all')) throw new Error('لا تملك صلاحية المناقلة بين الفروع');
     const numQty = Math.round(Number(quantityKg) * 100) / 100;
     if (!numQty || numQty <= 0) throw new Error('يرجى إدخال وزن صحيح للمناقلة');
     if (fromBranchId === toBranchId) throw new Error('لا يمكن مناقلة المخزون لنفس الفرع');
@@ -3148,32 +2375,13 @@ export function useAppStore() {
     const toB = branches.find(b => b.id === toBranchId);
     if (!fromB || !toB) throw new Error('الفرع المصدر أو المستلم غير موجود');
 
-    // Update product branchStock
-    setProducts(prev => prev.map(p => {
-      const isMatch = (productId && p.id === productId) || (p.name.trim() === (productName || '').trim());
-      if (isMatch) {
-        const curBStock = p.branchStock || {};
-        const totalStock = Number(p.currentStockKg) || 0;
-        const fromStock = Number(curBStock[fromBranchId] !== undefined ? curBStock[fromBranchId] : totalStock);
-        const toStock = Number(curBStock[toBranchId] !== undefined ? curBStock[toBranchId] : 0);
-
-        const newFromStock = Math.round((fromStock - numQty) * 100) / 100;
-        const newToStock = Math.round((toStock + numQty) * 100) / 100;
-
-        return {
-          ...p,
-          branchStock: {
-            ...curBStock,
-            [fromBranchId]: newFromStock,
-            [toBranchId]: newToStock
-          }
-        };
-      }
-      return p;
-    }));
+    const matches = products.filter(p => productId ? p.id === productId : p.name.trim() === (productName || '').trim());
+    if (matches.length !== 1) throw new Error('صنف المناقلة غير موجود أو غير محدد');
+    productId = matches[0].id;
+    productName = matches[0].name;
 
     const transferRecord = {
-      id: `trans-${Date.now()}`,
+      id: `trans-${crypto.randomUUID()}`,
       fromBranchId,
       fromBranchName: fromB.name,
       toBranchId,
@@ -3187,7 +2395,9 @@ export function useAppStore() {
       timestamp: Date.now()
     };
 
+    setProducts(prev => applyStockTransfer(prev, branches, transferRecord));
     setStockTransfers(prev => [transferRecord, ...prev]);
+    cloudflareSync.recordMutation(currentUser.tenantId, null, 'stock_transfer', transferRecord.id, 'create', transferRecord);
     return transferRecord;
   };
 
@@ -3217,10 +2427,11 @@ export function useAppStore() {
   };
 
   return {
+    persistence,
     trialRequests,
-    addTrialRequest,
-    updateTrialRequest,
-    deleteTrialRequest,
+    addTrialRequest: atomicAction(addTrialRequest),
+    updateTrialRequest: atomicAction(updateTrialRequest),
+    deleteTrialRequest: atomicAction(deleteTrialRequest),
     tenants,
     setTenants,
     syncCloudTenants,
@@ -3230,12 +2441,12 @@ export function useAppStore() {
     activeBranchId,
     activeBranch,
     stockTransfers,
-    changeActiveBranch,
-    addBranch,
-    updateBranch,
-    deleteBranch,
-    setMainBranch,
-    transferStockBetweenBranches,
+    changeActiveBranch: atomicAction(changeActiveBranch),
+    addBranch: atomicAction(addBranch),
+    updateBranch: atomicAction(updateBranch),
+    deleteBranch: atomicAction(deleteBranch),
+    setMainBranch: atomicAction(setMainBranch),
+    transferStockBetweenBranches: atomicAction(transferStockBetweenBranches),
     login,
     logout,
     changePassword,
@@ -3267,56 +2478,58 @@ export function useAppStore() {
     partners,
     partnerDrawings,
     profitDistributions,
-    addProduct,
-    updateProduct,
-    updateProductPrice,
-    deleteProduct,
-    addCustomer,
-    updateCustomer,
-    deleteCustomer,
-    recordCustomerPayment,
-    deleteCustomerPayment,
-    saveInvoice,
-    updateInvoiceNotes,
-    voidInvoice,
-    deleteInvoice,
-    recordSalesReturn,
-    deleteSalesReturn,
-    addExpense,
-    deleteExpense,
-    addExpenseCategory,
-    deleteExpenseCategory,
-    addDamagedItem,
-    deleteDamagedItem,
-    addWorker,
-    updateWorker,
-    deleteWorker,
-    addWorkerTransaction,
-    deleteWorkerTransaction,
-    addPurchase,
-    deletePurchase,
-    recordPurchaseReturn,
-    deletePurchaseReturn,
-    addSupplier,
-    updateSupplier,
-    deleteSupplier,
-    recordSupplierPayment,
-    deleteSupplierPayment,
-    addPartner,
-    updatePartner,
-    deletePartner,
-    recordPartnerDrawing,
-    deletePartnerDrawing,
-    recordProfitDistribution,
-    deleteProfitDistribution,
-    getFinancialPosition,
-    updateSettings,
-    resetToSampleData,
+    addProduct: atomicAction(addProduct),
+    updateProduct: atomicAction(updateProduct),
+    updateProductPrice: atomicAction(updateProductPrice),
+    deleteProduct: atomicAction(deleteProduct),
+    addCustomer: atomicAction(addCustomer),
+    updateCustomer: atomicAction(updateCustomer),
+    deleteCustomer: atomicAction(deleteCustomer),
+    recordCustomerPayment: atomicAction(recordCustomerPayment),
+    deleteCustomerPayment: atomicAction(deleteCustomerPayment),
+    saveInvoice: atomicAction(saveInvoice),
+    updateInvoiceNotes: atomicAction(updateInvoiceNotes),
+    voidInvoice: atomicAction(voidInvoice),
+    deleteInvoice: atomicAction(deleteInvoice),
+    recordSalesReturn: atomicAction(recordSalesReturn),
+    deleteSalesReturn: atomicAction(deleteSalesReturn),
+    addExpense: atomicAction(addExpense),
+    deleteExpense: atomicAction(deleteExpense),
+    addExpenseCategory: atomicAction(addExpenseCategory),
+    deleteExpenseCategory: atomicAction(deleteExpenseCategory),
+    addDamagedItem: atomicAction(addDamagedItem),
+    deleteDamagedItem: atomicAction(deleteDamagedItem),
+    addWorker: atomicAction(addWorker),
+    updateWorker: atomicAction(updateWorker),
+    deleteWorker: atomicAction(deleteWorker),
+    addWorkerTransaction: atomicAction(addWorkerTransaction),
+    recordWorkerTransactionWithUpdate: atomicAction(recordWorkerTransactionWithUpdate),
+    deleteWorkerTransaction: atomicAction(deleteWorkerTransaction),
+    addPurchase: atomicAction(addPurchase),
+    deletePurchase: atomicAction(deletePurchase),
+    recordPurchaseReturn: atomicAction(recordPurchaseReturn),
+    deletePurchaseReturn: atomicAction(deletePurchaseReturn),
+    addSupplier: atomicAction(addSupplier),
+    updateSupplier: atomicAction(updateSupplier),
+    deleteSupplier: atomicAction(deleteSupplier),
+    recordSupplierPayment: atomicAction(recordSupplierPayment),
+    deleteSupplierPayment: atomicAction(deleteSupplierPayment),
+    addPartner: atomicAction(addPartner),
+    updatePartner: atomicAction(updatePartner),
+    deletePartner: atomicAction(deletePartner),
+    recordPartnerDrawing: atomicAction(recordPartnerDrawing),
+    deletePartnerDrawing: atomicAction(deletePartnerDrawing),
+    recordProfitDistribution: atomicAction(recordProfitDistribution),
+    deleteProfitDistribution: atomicAction(deleteProfitDistribution),
+    getFinancialPosition, getAccountingSnapshot,
+    updateSettings: atomicAction(updateSettings),
+    resetToSampleData: atomicAction(resetToSampleData),
     syncStatus,
+    backupStatus,
     syncNow,
     syncService: cloudflareSync,
+    getBackupSnapshot,
     exportBackupJSON,
-    importBackupJSON
+    importBackupJSON: atomicAction(importBackupJSON),
   };
 }
-

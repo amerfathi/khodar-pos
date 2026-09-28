@@ -126,6 +126,7 @@ const TAB_TITLES = {
 };
 
 // Natural mobile transition animations (iOS / Android style)
+/** @type {import('framer-motion').Variants} */
 const pageVariants = {
   initial: (direction) => ({
     opacity: 0,
@@ -195,6 +196,7 @@ export default function App() {
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [initialReportType, setInitialReportType] = useState('sales');
+  const [initialPartnerReportId, setInitialPartnerReportId] = useState('');
 
   // Multi-Platform Release & Update Center State
   const [isWebLoginModalOpen, setIsWebLoginModalOpen] = useState(() => {
@@ -209,10 +211,10 @@ export default function App() {
   const [isDesktopDownloadModalOpen, setIsDesktopDownloadModalOpen] = useState(false);
 
   // Cloudflare D1 real-time sync status subscription
-  const [syncStatus, setSyncStatus] = useState({ isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true, queueLength: 0 });
+  const [syncStatus, setSyncStatus] = useState({ status: 'idle', error: '', isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true, queueLength: 0 });
   useEffect(() => {
     if (store.syncService?.subscribe) {
-      const unsub = store.syncService.subscribe(setSyncStatus);
+      const unsub = store.syncService.subscribe(update => setSyncStatus(previous => ({ ...previous, ...update })));
       return unsub;
     }
   }, [store.syncService]);
@@ -452,6 +454,16 @@ export default function App() {
     );
   }
 
+  if (!store.persistence.ready || store.persistence.error) {
+    return <main dir="rtl" className="min-h-screen flex flex-col items-center justify-center gap-4 p-8 bg-slate-50">
+      <h1 className="text-xl font-bold">حماية بيانات براكه</h1>
+      <p role="alert">{store.persistence.error || 'جارٍ فتح التخزين الآمن…'}</p>
+      <p>لا تحذف بيانات المتصفح. عند فشل الحفظ لم تُعتمد تغييرات جزئية للحركة.</p>
+      <button className="px-4 py-2 bg-emerald-700 text-white rounded" onClick={() => window.location.reload()}>إعادة الفتح والمحاولة</button>
+      <button onClick={store.logout}>تسجيل الخروج</button>
+    </main>;
+  }
+
   const isSubPageOnMobile = currentTab !== 'home';
 
   return (
@@ -554,9 +566,11 @@ export default function App() {
                             <button
                               key={b.id}
                               type="button"
-                              onClick={() => {
-                                changeActiveBranch(b.id);
-                                setIsBranchDropdownOpen(false);
+                              onClick={async () => {
+                                try {
+                                  await changeActiveBranch(b.id);
+                                  setIsBranchDropdownOpen(false);
+                                } catch (error) { alert('تعذر تغيير الفرع النشط: ' + error.message); }
                               }}
                               className={`w-full text-right px-2.5 py-1.5 rounded-xl text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
                                 isSel 
@@ -594,17 +608,18 @@ export default function App() {
 
             {/* Middle: Cloud Sync Indicator Pill */}
             <div 
+              role={syncStatus.status === 'error' ? 'alert' : 'status'}
               className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border shrink-0"
               style={{
-                backgroundColor: !syncStatus.isOnline ? '#fef2f2' : (syncStatus.queueLength > 0 ? '#fefce8' : '#f0fdf4'),
-                borderColor: !syncStatus.isOnline ? '#fecaca' : (syncStatus.queueLength > 0 ? '#fef08a' : '#bbf7d0'),
-                color: !syncStatus.isOnline ? '#991b1b' : (syncStatus.queueLength > 0 ? '#854d0e' : '#166534')
+                backgroundColor: !syncStatus.isOnline || syncStatus.status === 'error' ? '#fef2f2' : (syncStatus.queueLength > 0 ? '#fefce8' : '#f0fdf4'),
+                borderColor: !syncStatus.isOnline || syncStatus.status === 'error' ? '#fecaca' : (syncStatus.queueLength > 0 ? '#fef08a' : '#bbf7d0'),
+                color: !syncStatus.isOnline || syncStatus.status === 'error' ? '#991b1b' : (syncStatus.queueLength > 0 ? '#854d0e' : '#166534')
               }}
-              title={!syncStatus.isOnline ? 'وضع عدم الاتصال (أوفلاين)' : (syncStatus.queueLength > 0 ? `جاري مزامنة ${syncStatus.queueLength} حركة معلقة...` : 'متصل ومزامن سحابياً')}
+              title={syncStatus.status === 'error' ? syncStatus.error : !syncStatus.isOnline ? 'وضع عدم الاتصال (أوفلاين)' : (syncStatus.queueLength > 0 ? `توجد ${syncStatus.queueLength} حركة محلية لم تُرفع؛ راجع حالة المزامنة` : 'متصل ومزامن سحابياً')}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${!syncStatus.isOnline ? 'bg-rose-500' : (syncStatus.queueLength > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500')}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${!syncStatus.isOnline || syncStatus.status === 'error' ? 'bg-rose-500' : (syncStatus.queueLength > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500')}`} />
               <span className="hidden sm:inline">
-                {!syncStatus.isOnline ? 'أوفلاين' : (syncStatus.queueLength > 0 ? `${syncStatus.queueLength} معلق` : 'سحابي')}
+                {syncStatus.status === 'error' ? (syncStatus.error?.includes('تعارض') ? 'تعارض مزامنة' : 'خطأ مزامنة') : !syncStatus.isOnline ? 'أوفلاين' : (syncStatus.queueLength > 0 ? `${syncStatus.queueLength} معلق` : 'سحابي')}
               </span>
             </div>
 
@@ -832,7 +847,10 @@ export default function App() {
                     {currentTab === 'partners' && (
                       <PartnersEquityView 
                         store={store} 
-                        onOpenA4Report={handleOpenA4Report}
+                        onOpenPartnerStatement={(partnerId) => {
+                          setInitialPartnerReportId(partnerId);
+                          handleOpenA4Report('partners');
+                        }}
                       />
                     )}
 
@@ -862,6 +880,7 @@ export default function App() {
                       <ReportsCenterView 
                         store={store} 
                         initialReportType={initialReportType}
+                        initialPartnerId={initialPartnerReportId}
                       />
                     )}
 
@@ -934,6 +953,7 @@ export default function App() {
       <BranchesManagementModal
         isOpen={isBranchesOpen}
         onClose={() => setIsBranchesOpen(false)}
+        store={store}
       />
 
       {/* 7. Multi-Platform Update Notification Modal */}
