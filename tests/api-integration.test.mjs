@@ -41,8 +41,8 @@ async function call(path, method = 'GET', body, token, ip = 'local') {
     headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}) });
 }
-async function login(code, username, password = pass) {
-  const response = await call('/api/tenants/lookup', 'POST', { storeCode: code, username, password });
+async function login(code, username, password = pass, ip = 'local') {
+  const response = await call('/api/tenants/lookup', 'POST', { storeCode: code, username, password }, undefined, ip);
   const body = await response.json();
   assert.equal(response.status, 200, JSON.stringify(body));
   assert.ok(body.session.token);
@@ -644,7 +644,7 @@ test('platform owner securely initializes and changes email/password with audit 
   assert.equal((await call('/api/auth/reset','POST',{resetToken:initialReset.token,newPassword:initialPassword})).status,200);
   assert.equal((await call('/api/auth/me','GET',undefined,platform)).status,401);
   assert.equal((await call('/api/auth/reset','POST',{resetToken:initialReset.token,newPassword:initialPassword})).status,400);
-  platform=await login('PLATFORM','platform',initialPassword);
+  platform=await login('PLATFORM','platform',initialPassword,'platform-owner-initial-login');
   assert.equal((await call('/api/auth/password','POST',{currentPassword:initialPassword,newPassword:crypto.randomUUID()+'Aa!'},platform)).status,403);
   assert.equal((await call('/api/tenants','PATCH',{id:'PLATFORM',username:'bypass@example.test'},platform)).status,403);
 
@@ -677,8 +677,8 @@ test('platform owner securely initializes and changes email/password with audit 
   },platform);
   assert.equal(changed.status,200,await changed.text());
   assert.equal((await call('/api/auth/me','GET',undefined,platform)).status,401);
-  assert.equal((await call('/api/tenants/lookup','POST',{storeCode:'PLATFORM',username:'platform',password:initialPassword})).status,401);
-  platform=await login('PLATFORM','owner@example.test',replacementPassword);
+  assert.equal((await call('/api/tenants/lookup','POST',{storeCode:'PLATFORM',username:'platform',password:initialPassword},undefined,'platform-owner-old-login')).status,401);
+  platform=await login('PLATFORM','owner@example.test',replacementPassword,'platform-owner-replacement-login');
   const me=await call('/api/auth/me','GET',undefined,platform).then(response=>response.json());
   assert.equal(me.user.role,'super_admin');
   const events=await call('/api/auth/platform-owner','GET',undefined,platform).then(response=>response.json());
@@ -690,5 +690,5 @@ test('platform owner securely initializes and changes email/password with audit 
 });
 test('plaintext records never authenticate', async () => {
   await db.prepare("UPDATE tenants SET password_hash=? WHERE id='B'").bind(pass).run();
-  assert.equal((await call('/api/tenants/lookup','POST',{storeCode:'B',username:'ownerB',password:pass})).status,401);
+  assert.equal((await call('/api/tenants/lookup','POST',{storeCode:'B',username:'ownerB',password:pass},undefined,'plaintext-login-test')).status,401);
 });
