@@ -20,7 +20,7 @@ on:
       windows_staging_version:
         description: Higher semver for a non-publishing Windows upgrade test only
         required: true
-        default: ''
+        default: '0'
         type: string
 
 permissions:
@@ -84,7 +84,7 @@ jobs:
           PUBLISH: "${{ inputs.publish }}"
         run: |
           if ((Get-Content package.json | ConvertFrom-Json).version -ne $env:VERSION) { exit 1 }
-          if ($env:STAGING_VERSION -and ($env:STAGING_VERSION -notmatch '^\d+\.\d+\.\d+$' -or $env:PUBLISH -eq 'true')) { exit 1 }
+          if ($env:STAGING_VERSION -ne '0' -and ($env:STAGING_VERSION -notmatch '^\d+\.\d+\.\d+$' -or $env:PUBLISH -eq 'true')) { exit 1 }
       - name: Restore encrypted updater signing key
         shell: pwsh
         env:
@@ -96,7 +96,7 @@ jobs:
         shell: pwsh
         env: { STAGING_VERSION: "${{ inputs.windows_staging_version }}" }
         run: |
-          if ($env:STAGING_VERSION) {
+          if ($env:STAGING_VERSION -ne '0') {
             node scripts/verify-release-public-key.cjs
             npm run build
             npx electron-builder --win --publish never --config.extraMetadata.version=$env:STAGING_VERSION
@@ -108,7 +108,11 @@ jobs:
         env:
           BRRAKA_RELEASE_PRIVATE_KEY_FILE: "${{ runner.temp }}/release-private-key.pem"
           BRRAKA_RELEASE_PRIVATE_KEY_PASSPHRASE: "${{ secrets.BRRAKA_RELEASE_PRIVATE_KEY_PASSPHRASE }}"
-        run: npm run release:sign-windows -- '${{ inputs.windows_staging_version || inputs.version }}' 'dist-electron\KhodarPOS-Setup.exe' 'windows-manifest.json'
+          STAGING_VERSION: "${{ inputs.windows_staging_version }}"
+          RELEASE_VERSION: "${{ inputs.version }}"
+        run: |
+          if ($env:STAGING_VERSION -ne '0') { $env:RELEASE_VERSION = $env:STAGING_VERSION }
+          npm run release:sign-windows -- $env:RELEASE_VERSION 'dist-electron\KhodarPOS-Setup.exe' 'windows-manifest.json'
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release
