@@ -3,14 +3,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { validateDownloadUrl } = require('../electron/update-security.cjs');
 
-async function signWindowsRelease({ version, installer, privateKeyPath, publicKeyPath }) {
+async function signWindowsRelease({ version, installer, privateKeyPath, publicKeyPath,
+  privateKeyPassphrase = process.env.BRRAKA_RELEASE_PRIVATE_KEY_PASSPHRASE }) {
   if (!/^\d+\.\d+\.\d+$/.test(version || '')) throw new Error('Invalid release version');
   if (!installer || !privateKeyPath || !publicKeyPath) throw new Error('Installer and signing key paths are required');
   const url = `https://github.com/amerfathi/khodar-pos/releases/download/v${version}/KhodarPOS-Setup.exe`;
   validateDownloadUrl(url);
   const stat = await fs.promises.stat(installer);
   if (!stat.isFile() || stat.size < 1 || stat.size > 512 * 1024 * 1024) throw new Error('Invalid installer size');
-  const privateKey = crypto.createPrivateKey(await fs.promises.readFile(privateKeyPath));
+  const privateKey = crypto.createPrivateKey({
+    key: await fs.promises.readFile(privateKeyPath),
+    passphrase: privateKeyPassphrase || undefined
+  });
   const publicKey = crypto.createPublicKey(await fs.promises.readFile(publicKeyPath));
   if (privateKey.asymmetricKeyType !== 'ed25519' || publicKey.asymmetricKeyType !== 'ed25519')
     throw new Error('Ed25519 signing keys are required');

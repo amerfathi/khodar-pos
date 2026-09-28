@@ -38,3 +38,17 @@ test('release signing binds the installer to the pinned key, and rejects wrong k
     assert.throws(()=>verifyReleasePublicKey(publicPath));
   } finally { await fs.promises.rm(dir,{recursive:true,force:true}); }
 });
+
+test('release signing accepts an encrypted production private key only with its passphrase',async()=>{
+  const dir=await fs.promises.mkdtemp(path.join(os.tmpdir(),'braka-encrypted-release-test-'));
+  const installer=path.join(dir,'KhodarPOS-Setup.exe'),privatePath=path.join(dir,'private.pem'),publicPath=path.join(dir,'public.pem');
+  const passphrase=crypto.randomBytes(24).toString('base64url');
+  try {
+    await fs.promises.writeFile(installer,Buffer.from('encrypted signing payload'));
+    await fs.promises.writeFile(privatePath,privateKey.export({type:'pkcs8',format:'pem',cipher:'aes-256-cbc',passphrase}));
+    await fs.promises.writeFile(publicPath,pem);
+    await assert.rejects(signWindowsRelease({version:'3.0.0',installer,privateKeyPath:privatePath,publicKeyPath:publicPath}));
+    const manifest=await signWindowsRelease({version:'3.0.0',installer,privateKeyPath:privatePath,publicKeyPath:publicPath,privateKeyPassphrase:passphrase});
+    assert.equal(verifyManifest(manifest,pem,'2.6.4').version,'3.0.0');
+  } finally { await fs.promises.rm(dir,{recursive:true,force:true}); }
+});
