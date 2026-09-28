@@ -1,6 +1,8 @@
 const https = require('node:https');
 const fs = require('node:fs');
 
+const MINIMUM_SUPPORTED_VERSION = '2.2.0';
+
 function requestJson(url, token, body) {
   return new Promise((resolve, reject) => {
     const request = https.request(url, {
@@ -52,7 +54,7 @@ async function publishRelease({ platform, version, asset, manifestPath }) {
       signed_manifest=excluded.signed_manifest, published_at=datetime('now')`;
   await requestJson(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`, token, {
     sql,
-    params: [`rel-${platform}-${version.replaceAll('.', '-')}`, platform, version, version,
+    params: [`rel-${platform}-${version.replaceAll('.', '-')}`, platform, version, MINIMUM_SUPPORTED_VERSION,
       JSON.stringify([`BRAKA ${version}`]), downloadUrl, stat.size,
       signedManifest ? JSON.stringify(signedManifest) : null],
   });
