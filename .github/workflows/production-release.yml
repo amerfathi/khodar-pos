@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      android_staging_version_code:
+        description: Nonzero Android versionCode for a non-publishing upgrade test only
+        required: true
+        default: '0'
+        type: string
 
 permissions:
   contents: write
@@ -27,8 +32,11 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npm ci
       - name: Verify requested version
-        run: node -e "if(require('./package.json').version!==process.env.VERSION)process.exit(1)"
-        env: { VERSION: "${{ inputs.version }}" }
+        run: node -e "if(require('./package.json').version!==process.env.VERSION||!/^(0|[1-9][0-9]*)$/.test(process.env.STAGING_CODE)||(process.env.PUBLISH==='true'&&process.env.STAGING_CODE!=='0'))process.exit(1)"
+        env:
+          VERSION: "${{ inputs.version }}"
+          STAGING_CODE: "${{ inputs.android_staging_version_code }}"
+          PUBLISH: "${{ inputs.publish }}"
       - run: npm run build && npx cap sync android
       - name: Restore Android signing identity
         shell: bash
@@ -44,7 +52,14 @@ jobs:
             "$GITHUB_WORKSPACE/android/release.keystore" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/keystore.properties
       - name: Build signed direct-distribution APK
         working-directory: android
-        run: bash ./gradlew assembleRelease
+        shell: bash
+        env: { STAGING_CODE: "${{ inputs.android_staging_version_code }}" }
+        run: |
+          if [ "$STAGING_CODE" = "0" ]; then
+            bash ./gradlew assembleRelease
+          else
+            bash ./gradlew assembleRelease -PbrakaVersionCode="$STAGING_CODE"
+          fi
       - run: cp android/app/build/outputs/apk/release/app-release.apk Brraka-Android.apk
       - uses: actions/upload-artifact@v4
         with: { name: android-release, path: Brraka-Android.apk, if-no-files-found: error }

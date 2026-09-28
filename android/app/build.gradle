@@ -13,7 +13,7 @@ android {
         applicationId "com.khodar.pos"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2640
+        versionCode project.hasProperty('brakaVersionCode') ? project.property('brakaVersionCode').toInteger() : 2640
         versionName "2.6.4"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
