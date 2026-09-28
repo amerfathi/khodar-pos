@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:start": "electron .",
-    "electron:build": "node scripts/verify-release-public-key.cjs && vite build && electron-builder --win",
+    "electron:build": "node scripts/verify-release-public-key.cjs && vite build && electron-builder --win --publish never",
     "release:sign-windows": "node scripts/sign-windows-release.cjs",
     "legacy:prepare-reset": "node scripts/prepare-legacy-reset.cjs",
     "d1:prepare-clean-state": "node scripts/prepare-precommercial-cleanup.cjs",
@@ -33,7 +33,6 @@
     "directories": {
       "output": "dist-electron"
     },
-    "electronDist": "node_modules/electron/dist",
     "files": [
       "dist/**/*",
       "electron/**/*"
