@@ -71,7 +71,7 @@ jobs:
       - name: Sign update manifest
         shell: pwsh
         env:
-          BRRAKA_RELEASE_PRIVATE_KEY_FILE: "${{ runner.temp }}\release-private-key.pem"
+          BRRAKA_RELEASE_PRIVATE_KEY_FILE: "${{ runner.temp }}/release-private-key.pem"
           BRRAKA_RELEASE_PRIVATE_KEY_PASSPHRASE: "${{ secrets.BRRAKA_RELEASE_PRIVATE_KEY_PASSPHRASE }}"
         run: npm run release:sign-windows -- '${{ inputs.version }}' 'dist-electron\KhodarPOS-Setup.exe' 'windows-manifest.json'
       - uses: actions/upload-artifact@v4
