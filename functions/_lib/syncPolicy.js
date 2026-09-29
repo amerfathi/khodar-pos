@@ -25,6 +25,7 @@ export function canSync(principal, type, action = 'read') {
   let permission = permissions[type];
   if (type === 'invoice') permission = action === 'read' ? 'canViewInvoices' : action === 'create' ? 'canSell' : 'canVoidInvoices';
   if (type === 'product' && action === 'read') return effective.canSell === true || effective.canManageInventory === true || effective.canManagePurchases === true;
+  if (type === 'settings' && action === 'read') return effective.canAccessSettings === true || effective.canViewFinance === true;
   return effective[permission] === true;
 }
 export const SYNC_TYPES = Object.keys(permissions);

@@ -1,10 +1,21 @@
 const round = value => Math.round(value * 100) / 100;
+const belongsToBranch = (product, branchId) => !product.branchId || product.branchId === branchId;
 
 export function applyStockTransfer(products, branches, transfer) {
   const { fromBranchId, toBranchId, productId } = transfer;
   const quantity = Number(transfer.quantityKg);
   if (!Number.isFinite(quantity) || quantity <= 0 || round(quantity) !== quantity) throw new Error('كمية مناقلة غير صالحة');
   if (!fromBranchId || fromBranchId === toBranchId || !branches.some(b => b.id === fromBranchId) || !branches.some(b => b.id === toBranchId)) throw new Error('فروع المناقلة غير صالحة');
+  // New branch-owned products are moved by two branch-scoped product events in
+  // the same atomic group. The transfer event is the audit record, not a second
+  // inventory effect. Legacy shared products retain their original projection.
+  if (transfer.scopedProducts === true) {
+    if (!transfer.sourceProductId || !transfer.destinationProductId ||
+        transfer.sourceProductId !== productId ||
+        transfer.sourceProductId === transfer.destinationProductId)
+      throw new Error('ربط أصناف المناقلة غير صالح');
+    return products;
+  }
   if (products.filter(p => p.id === productId).length !== 1) throw new Error('صنف المناقلة غير موجود أو غير محدد');
   return products.map(product => {
     if (product.id !== productId) return product;
@@ -24,7 +35,7 @@ export function applySalesReturnInventory(products, invoice, returned, direction
   for (const item of returned.items || []) {
     const quantity=Number(item.returnedWeight);
     if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('كمية مردود مبيعات غير صالحة');
-    const matches=next.filter(product => item.productId ? product.id === item.productId : product.name?.trim() === item.name?.trim());
+    const matches=next.filter(product => belongsToBranch(product, branchId) && (item.productId ? product.id === item.productId : product.name?.trim() === item.name?.trim()));
     if (matches.length !== 1) throw new Error('صنف مردود المبيعات غير موجود أو غير محدد');
     next=next.map(product => {
       if (product.id !== matches[0].id) return product;
@@ -86,7 +97,7 @@ export function applyPurchaseInventory(products, purchase, direction) {
   if (direction === 1 && purchase.inventorySeededWithPurchase === true) return products;
   const quantity = Number(purchase.quantityKg), cost = Number(purchase.costPerKg);
   if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(cost) || cost < 0) throw new Error('كمية أو تكلفة شراء غير صالحة');
-  const matches = products.filter(product => purchase.productId ? product.id === purchase.productId : product.name?.trim() === purchase.productName?.trim());
+  const matches = products.filter(product => belongsToBranch(product, purchase.branchId || 'branch-main') && (purchase.productId ? product.id === purchase.productId : product.name?.trim() === purchase.productName?.trim()));
   if (matches.length !== 1) throw new Error('الصنف المرتبط بالشراء غير موجود أو غير محدد');
   const id = matches[0].id, branch = purchase.branchId || 'branch-main';
   return products.map(product => {
@@ -128,7 +139,7 @@ export function applyPurchaseReturnPurchase(purchases, returned, direction) {
 export function applyPurchaseReturnInventory(products, purchase, returned, direction) {
   const quantity=Number(returned.returnedKg);
   if(!Number.isFinite(quantity) || quantity<=0) throw new Error('كمية مردود المشتريات غير صالحة');
-  const matches=products.filter(row=>purchase.productId ? row.id===purchase.productId : row.name?.trim()===purchase.productName?.trim());
+  const matches=products.filter(row=>belongsToBranch(row, purchase.branchId || 'branch-main') && (purchase.productId ? row.id===purchase.productId : row.name?.trim()===purchase.productName?.trim()));
   if(matches.length!==1) throw new Error('صنف مردود المشتريات غير موجود أو غير محدد');
   return products.map(product=>{
     if(product.id!==matches[0].id) return product;
@@ -150,7 +161,7 @@ export function applyDamageInventory(products, damage, direction) {
   const cost=Number(damage.costPerKg);
   if(!Number.isFinite(quantity) || quantity<=0 || round(quantity)!==quantity || !damage.branchId ||
       !Number.isFinite(cost) || cost<0 || round(quantity*cost)!==Number(damage.totalLoss)) throw new Error('قيد هالك غير صالح');
-  const matches=products.filter(row=>damage.productId ? row.id===damage.productId : row.name?.trim()===(damage.productName||damage.name)?.trim());
+  const matches=products.filter(row=>belongsToBranch(row, damage.branchId) && (damage.productId ? row.id===damage.productId : row.name?.trim()===(damage.productName||damage.name)?.trim()));
   if(matches.length!==1) throw new Error('صنف الهالك غير موجود أو غير محدد');
   return products.map(product=>{
     if(product.id!==matches[0].id) return product;

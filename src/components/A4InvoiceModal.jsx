@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Printer, MessageCircle, X, Check, FileText, ArrowRight, ShieldCheck, Edit3, Save } from 'lucide-react';
 import { formatCurrency, formatWeight } from '../utils/formatters';
 import { openWhatsAppInvoice } from '../utils/whatsapp';
+import { displayInvoiceNumber } from '../services/invoiceIdentity';
 
 export default function A4InvoiceModal({ 
   isOpen, 
@@ -56,7 +57,7 @@ export default function A4InvoiceModal({
             </div>
             <div>
               <h3 className="font-bold text-sm">معاينة فاتورة رسمية بحجم A4</h3>
-              <p className="text-[11px] text-slate-300">فاتورة رقم #{invoice.id} - {invoice.customerName}</p>
+              <p className="text-[11px] text-slate-300">فاتورة رقم #{displayInvoiceNumber(invoice)} - {invoice.customerName}</p>
             </div>
           </div>
 
@@ -159,7 +160,7 @@ export default function A4InvoiceModal({
                   فاتورة بيع رسمية
                 </div>
                 <div className="font-mono text-base font-black text-slate-900 mt-1">
-                  NO: #{invoice.id}
+                  NO: #{displayInvoiceNumber(invoice)}
                 </div>
                 <div className="text-[11px] text-slate-600 font-medium">
                   التاريخ: <strong>{invoice.date}</strong> | الوقت: <strong>{invoice.time}</strong>

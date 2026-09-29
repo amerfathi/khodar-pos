@@ -1,4 +1,5 @@
 import { forbidden, unauthorized } from './http.js';
+import { assignedBranchIds } from '../../src/services/branchAccess.js';
 
 const encoder = new TextEncoder();
 
@@ -37,7 +38,7 @@ export async function authenticateRequest(request, env) {
     principal = await env.DB.prepare(`SELECT id, role, status, auth_version FROM tenants WHERE id = ? LIMIT 1`)
       .bind(session.principal_id).first();
   } else {
-    principal = await env.DB.prepare(`SELECT id, tenant_id, role, status, branch_id, permissions_json, auth_version FROM users WHERE id = ? LIMIT 1`)
+    principal = await env.DB.prepare(`SELECT id, tenant_id, role, status, branch_id, branch_ids_json, permissions_json, auth_version FROM users WHERE id = ? LIMIT 1`)
       .bind(session.principal_id).first();
   }
   const tenant = await env.DB.prepare('SELECT id, status, expires_at FROM tenants WHERE id = ?').bind(session.tenant_id).first();
@@ -47,9 +48,13 @@ export async function authenticateRequest(request, env) {
       principal.status !== 'active' || Number(principal.auth_version || 0) !== Number(session.credential_version || 0)) {
     return { error: unauthorized('Session is no longer valid') };
   }
+  const branchIds = session.principal_type === 'tenant' ? ['all'] : assignedBranchIds({
+    branchId: principal.branch_id,
+    branchIds: principal.branch_ids_json ? safeJson(principal.branch_ids_json) : undefined
+  });
   return { session, principal: {
     id: principal.id, tenantId: session.tenant_id, type: session.principal_type,
-    role: principal.role, branchId: principal.branch_id || 'all',
+    role: principal.role, branchId: branchIds.includes('all') ? 'all' : branchIds[0] || null, branchIds,
     credentialVersion: Number(principal.auth_version || 0),
     permissions: safeJson(principal.permissions_json), isSuperAdmin: session.principal_type === 'tenant' && principal.role === 'super_admin'
   }};

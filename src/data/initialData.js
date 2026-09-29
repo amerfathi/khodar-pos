@@ -130,7 +130,8 @@ export const DEFAULT_PERMISSIONS = {
   canManageExpenses: false,
   canManagePayroll: false,
   canViewFinance: false,
-  canAccessSettings: false
+  canAccessSettings: false,
+  canViewAllBranches: false
 };
 
 export const ROLE_PERMISSIONS_PRESETS = {

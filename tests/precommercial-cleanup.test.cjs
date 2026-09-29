@@ -27,6 +27,7 @@ test('pre-commercial cleanup emits a locked bcrypt12 owner and no demo credentia
     assert.match(sql, /DELETE FROM d1_migrations;/);
     assert.match(sql, /VALUES \('branch-platform-admin', 'tenant-super-admin', 'إدارة المنصة', 'PLATFORM'/);
     assert.match(sql, /0015_platform_owner_main_branch\.sql/);
+    assert.match(sql, /0016_staff_branch_grants\.sql/);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

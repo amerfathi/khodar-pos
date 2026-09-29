@@ -143,7 +143,7 @@ test('actual app hook with opt-in durable repository waits before publishing an 
   function Harness() { app = useAppStore(); return null; }
   try {
     setSessionToken('test-session');
-    setSessionUser({ id: 'u', tenantId: 'A', role: 'cashier', sessionExpiresAt: new Date(Date.now() + 60_000).toISOString() });
+    setSessionUser({ id: 'u', tenantId: 'A', role: 'cashier', branchId: 'branch-main', branchIds: ['branch-main'], isStaff: true, sessionExpiresAt: new Date(Date.now() + 60_000).toISOString() });
     seedBranchContext(localStorage,'u');
     await act(async () => { root = TestRenderer.create(React.createElement(Harness)); });
     const repo = cloudflareSync.repository;
@@ -237,7 +237,7 @@ test('actual app hook reopens from durable authority despite corrupt legacy cach
   function Harness() { app = useAppStore({ durableRepository }); return null; }
   try {
     setSessionToken('test-session');
-    setSessionUser({ id: 'u', tenantId: 'A', role: 'cashier', sessionExpiresAt: new Date(Date.now() + 60_000).toISOString() });
+    setSessionUser({ id: 'u', tenantId: 'A', role: 'cashier', branchId: 'branch-main', branchIds: ['branch-main'], isStaff: true, sessionExpiresAt: new Date(Date.now() + 60_000).toISOString() });
     await act(async () => { root = TestRenderer.create(React.createElement(Harness)); });
     assert.equal(app.persistence.ready, true);
     await act(async () => { await app.addExpense({ id: 'saved-expense', title: 'Rent', amount: 12, paymentMethod: 'cash' }); });

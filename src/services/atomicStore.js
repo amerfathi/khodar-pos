@@ -787,7 +787,7 @@ export class AtomicStore {
   acknowledgeDurable(ids) {
     return this.transactDurable(() => { this.draft.outbox = this.draft.outbox.filter(event => !ids.has(event.id)); });
   }
-  applyReceive(events, cursor, apply, serverHeads) {
+  applyReceive(events, cursor, apply, serverHeads, partialVisibility = false) {
     if (!Number.isSafeInteger(cursor) || cursor < this.draft.cursor) throw new Error('Invalid sync cursor');
     for (const event of events) {
       if (!event?.id || event.tenantId !== this.user.tenantId) throw new Error('Inbound tenant or identity mismatch');
@@ -800,7 +800,7 @@ export class AtomicStore {
         this.draft.state[SYNC_HEADS_STATE_KEY]={};
       if (Object.hasOwn(this.draft.state,SYNC_HEADS_STATE_KEY)) {
         const heads={...(this.draft.state[SYNC_HEADS_STATE_KEY] || {})};
-        applyAcceptedConflictEvent(event,heads);
+        if (!partialVisibility) applyAcceptedConflictEvent(event,heads);
         this.draft.state[SYNC_HEADS_STATE_KEY]=heads;
       }
       apply([event]);
@@ -813,16 +813,16 @@ export class AtomicStore {
           Object.entries(serverHeads).some(([key,value])=>!key || typeof value!=='string' || !value))
         throw new Error('رؤوس تعارض الخادم غير صالحة؛ لم يتقدم مؤشر المزامنة');
       const localHeads=this.draft.state[SYNC_HEADS_STATE_KEY] || {};
-      if (Object.entries(localHeads).some(([key,value])=>serverHeads[key]!==value))
+      if (!partialVisibility && Object.entries(localHeads).some(([key,value])=>serverHeads[key]!==value))
         throw new Error('تغيرت رؤوس تعارض الخادم أثناء السحب؛ أعد المزامنة');
       this.draft.state[SYNC_HEADS_STATE_KEY]=clone(serverHeads);
     }
     this.draft.cursor = cursor;
   }
-  receive(events, cursor, apply, serverHeads) {
-    return this.transact(() => this.applyReceive(events, cursor, apply, serverHeads));
+  receive(events, cursor, apply, serverHeads, partialVisibility = false) {
+    return this.transact(() => this.applyReceive(events, cursor, apply, serverHeads, partialVisibility));
   }
-  receiveDurable(events, cursor, apply, serverHeads) {
-    return this.transactDurable(() => this.applyReceive(events, cursor, apply, serverHeads));
+  receiveDurable(events, cursor, apply, serverHeads, partialVisibility = false) {
+    return this.transactDurable(() => this.applyReceive(events, cursor, apply, serverHeads, partialVisibility));
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "khodar-pos",
   "private": true,
-  "version": "2.6.5",
+  "version": "2.6.6",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -25,7 +25,7 @@
     "lint": "eslint src functions electron tests",
     "typecheck:core": "tsc --project tsconfig.core.json --pretty false",
     "typecheck": "tsc --project tsconfig.json --pretty false",
-    "test:integration": "node --test --test-concurrency=1 tests/api-integration.test.mjs tests/storage.test.mjs tests/update-security.test.cjs tests/store-sync.test.mjs tests/store-business.test.mjs tests/store-durable.test.mjs tests/worker-atomic.test.mjs tests/atomic-store.test.mjs tests/backup-scheduler.test.mjs tests/backup-validation.test.mjs tests/sync-durable.test.mjs tests/financial-ui-await.test.mjs tests/desktop-update-ui.test.mjs tests/accounting-reconciliation.test.mjs tests/precommercial-cleanup.test.cjs"
+    "test:integration": "node --test --test-concurrency=1 tests/api-integration.test.mjs tests/branch-isolation.test.mjs tests/branch-store.test.mjs tests/storage.test.mjs tests/update-security.test.cjs tests/store-sync.test.mjs tests/store-business.test.mjs tests/store-durable.test.mjs tests/worker-atomic.test.mjs tests/atomic-store.test.mjs tests/backup-scheduler.test.mjs tests/backup-validation.test.mjs tests/sync-durable.test.mjs tests/financial-ui-await.test.mjs tests/desktop-update-ui.test.mjs tests/accounting-reconciliation.test.mjs tests/precommercial-cleanup.test.cjs tests/invoice-identity.test.mjs"
   },
   "build": {
     "appId": "com.brraka.pos",

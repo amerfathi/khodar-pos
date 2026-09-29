@@ -18,7 +18,7 @@ test('absence and salary worker updates share one aggregate/outbox commit and ro
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, location: { origin: 'https://test.invalid' } } });
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, visibilityState: 'hidden' } });
   const seedWorker = target => seedAggregate(target, { id: 'u', tenantId: 'A' }, {
-    workers_v3: [{ id: 'w', name: 'Worker', medicalAbsenceDays: 0, unexcusedAbsenceDays: 0, currentAdvance: 0 }]
+    workers_v3: [{ id: 'w', branchId: 'branch-main', name: 'Worker', medicalAbsenceDays: 0, unexcusedAbsenceDays: 0, currentAdvance: 0 }]
   });
   seedWorker(sender); seedWorker(receiver);
   const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: { 'import.meta.env': '{}' }, format: 'cjs', platform: 'node', packages: 'external' });
@@ -29,7 +29,7 @@ test('absence and salary worker updates share one aggregate/outbox commit and ro
   function Harness() { app = useAppStore(); return null; }
   try {
     setSessionToken('test-session');
-    setSessionUser({ id: 'u', tenantId: 'A', role: 'cashier', sessionExpiresAt: new Date(Date.now() + 60_000).toISOString() });
+    setSessionUser({ id: 'u', tenantId: 'A', role: 'cashier', branchId: 'branch-main', branchIds: ['branch-main'], isStaff: true, sessionExpiresAt: new Date(Date.now() + 60_000).toISOString() });
     await act(async () => { root = TestRenderer.create(React.createElement(Harness)); });
     const repo = cloudflareSync.repository;
     const before = JSON.stringify(repo.value), originalEnqueue = repo.enqueue;

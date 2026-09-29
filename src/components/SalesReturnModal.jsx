@@ -4,6 +4,7 @@ import {
   Package, DollarSign, ArrowDownLeft, Scale, Info
 } from 'lucide-react';
 import { formatCurrency, formatWeight } from '../utils/formatters';
+import { displayInvoiceNumber } from '../services/invoiceIdentity';
 
 export default function SalesReturnModal({ invoice, store, onClose, onSuccess }) {
   const { recordSalesReturn, settings, customers } = store;
@@ -124,7 +125,7 @@ export default function SalesReturnModal({ invoice, store, onClose, onSuccess })
               <h3 className="font-bold text-sm sm:text-base flex items-center gap-2">
                 <span>تسجيل مردود مبيعات</span>
                 <span className="text-xs bg-slate-800 text-amber-300 font-mono px-2 py-0.5 rounded-md border border-slate-700">
-                  فاتورة #{invoice.id}
+                  فاتورة #{displayInvoiceNumber(invoice)}
                 </span>
               </h3>
               <p className="text-[11px] text-slate-300">

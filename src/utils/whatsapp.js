@@ -1,4 +1,5 @@
 import { formatCurrency, formatWeight } from './formatters';
+import { displayInvoiceNumber } from '../services/invoiceIdentity';
 
 export const generateWhatsAppInvoiceMessage = (invoice, settings) => {
   const line = '━━━━━━━━━━━━━━━━━━━━━━';
@@ -7,7 +8,7 @@ export const generateWhatsAppInvoiceMessage = (invoice, settings) => {
   msg += `📍 ${settings.address || 'تجارة الخضار والفواكه بالجملة'}\n`;
   msg += `📞 هاتف: ${settings.phone}\n`;
   msg += `${line}\n`;
-  msg += `📄 *فاتورة مبيعات رقم:* #${invoice.id}\n`;
+  msg += `📄 *فاتورة مبيعات رقم:* #${displayInvoiceNumber(invoice)}\n`;
   msg += `📅 التاريخ: ${invoice.date} - ${invoice.time}\n`;
   msg += `👤 العميل: *${invoice.customerName}*\n`;
   msg += `💳 طريقة الدفع: ${invoice.saleType === 'cash' ? 'نقدي 💵' : 'آجل (على الحساب) 📝'}\n`;

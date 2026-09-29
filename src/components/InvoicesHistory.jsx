@@ -6,11 +6,13 @@ import {
 } from 'lucide-react';
 import { formatCurrency, formatWeight } from '../utils/formatters';
 import { openWhatsAppInvoice } from '../utils/whatsapp';
+import { displayInvoiceNumber } from '../services/invoiceIdentity';
 import SalesReturnModal from './SalesReturnModal';
 import { Button, Badge, Table, TableHeader, TableHead, TableBody, TableRow, TableCell, EmptyState } from './ui';
 
 export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice }) {
   const { invoices, settings, voidInvoice, deleteInvoice, salesReturns = [], deleteSalesReturn, branches = [] } = store;
+  const isBranchScoped = Array.isArray(store.currentUser?.branchIds);
   
   const [activeView, setActiveView] = useState('invoices'); // 'invoices' | 'returns'
   const [searchTerm, setSearchTerm] = useState('');
@@ -27,7 +29,7 @@ export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice 
     }
 
     const matchSearch = 
-      inv.id?.includes(searchTerm) || 
+      inv.id?.includes(searchTerm) || displayInvoiceNumber(inv).includes(searchTerm) ||
       (inv.customerName && inv.customerName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (inv.customerPhone && inv.customerPhone.includes(searchTerm));
 
@@ -175,7 +177,10 @@ export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice 
             </div>
 
             <div className="flex gap-1.5 overflow-x-auto pb-1 items-center">
-              {branches.length > 1 && (
+              {isBranchScoped && <span className="px-2.5 py-1.5 rounded-lg bg-primary-50 text-primary-700 text-xs font-bold">
+                {store.activeBranch?.name || 'الفرع المحدد'}
+              </span>}
+              {!isBranchScoped && branches.length > 1 && (
                 <select
                   value={selectedBranchFilter}
                   onChange={(e) => setSelectedBranchFilter(e.target.value)}
@@ -274,7 +279,7 @@ export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice 
                         return (
                           <TableRow key={invoice.id} className={isVoided ? 'opacity-60 bg-rose-50/20' : ''}>
                             <TableCell isNumeric align="right" className="font-bold text-navy-850">
-                              #{invoice.id}
+                              #{displayInvoiceNumber(invoice)}
                             </TableCell>
                             <TableCell align="right" className="text-slate-500 text-[11px]">
                               {invoice.date} {invoice.time && <span className="font-mono text-slate-400">• {invoice.time}</span>}
@@ -401,7 +406,7 @@ export default function InvoicesHistory({ store, onViewReceipt, onViewA4Invoice 
                     <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2.5">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono font-bold text-sm text-navy-850 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
-                          #{invoice.id}
+                          #{displayInvoiceNumber(invoice)}
                         </span>
 
                         <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${

@@ -3,7 +3,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTenantStorage, scopedStorageKey, withoutCredentials, readTenantStorage, writeTenantStorage, writeTenantLoginContext,
   prepareAccessScope, readAccessScopeTransition, clearAccessScopeTransition } from '../src/services/tenantStorage.js';
-import { setSessionToken, setSessionUser } from '../src/services/authSession.js';
+import { getSessionUser, setSessionToken, setSessionUser } from '../src/services/authSession.js';
 // Storage harness exercises namespacing independently of a specific browser.
 const storage=()=>({values:new Map(),getItem(k){return this.values.get(k) ?? null;},setItem(k,v){this.values.set(k,String(v));},removeItem(k){this.values.delete(k);},
   clear(){this.values.clear();},key(index){return [...this.values.keys()][index]??null;},get length(){return this.values.size;}});
@@ -12,6 +12,13 @@ const user=(tenantId,id)=>({tenantId,id,sessionExpiresAt:new Date(Date.now()+600
 test('tenant and user caches have disjoint namespaces',()=>{
   assert.notEqual(scopedStorageKey('invoices',user('A','one')),scopedStorageKey('invoices',user('B','one')));
   assert.notEqual(scopedStorageKey('invoices',user('A','one')),scopedStorageKey('invoices',user('A','two')));
+});
+test('an old real login without branch grants requires reauthentication without erasing its storage',()=>{
+  setSessionToken('legacy-session');
+  setSessionUser({...user('A','owner'),role:'company_owner',storeCode:'BRK-000',branchId:'all'});
+  localStorage.setItem('old-ledger','preserved');
+  assert.equal(getSessionUser(),null);
+  assert.equal(localStorage.getItem('old-ledger'),'preserved');
 });
 test('authorization scope changes start a new namespace and quarantine the prior aggregate',()=>{
   const original={...user('A','staff'),syncScopeVersion:0};

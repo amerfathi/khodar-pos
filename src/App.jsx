@@ -479,6 +479,7 @@ export default function App() {
         activeBranch={activeBranch}
         branches={branches}
         onChangeBranch={changeActiveBranch}
+        canViewAllBranches={store.canViewAllBranches}
         onOpenBranchesModal={() => setIsBranchesOpen(true)}
         onOpenChangePassword={() => setIsChangePasswordOpen(true)}
         onOpenSuperAdmin={() => setIsSuperAdminOpen(true)}
@@ -560,6 +561,12 @@ export default function App() {
                       </div>
 
                       <div className="max-h-48 overflow-y-auto space-y-1">
+                        {store.canViewAllBranches && <button type="button"
+                          onClick={async () => { try { await changeActiveBranch('all'); setIsBranchDropdownOpen(false); }
+                            catch (error) { alert('تعذر عرض الفروع: ' + error.message); } }}
+                          className="w-full text-right px-2.5 py-1.5 rounded-xl text-xs font-bold text-primary-700 hover:bg-primary-50">
+                          كل الفروع — عرض مجمع فقط
+                        </button>}
                         {branches.map(b => {
                           const isSel = b.id === activeBranchId;
                           return (

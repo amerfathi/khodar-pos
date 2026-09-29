@@ -2,6 +2,7 @@ import { authenticateRequest, requireTenant } from '../../_lib/auth.js';
 import { badRequest, json, options, readJson } from '../../_lib/http.js';
 import { canSync, validateTenantPayload } from '../../_lib/syncPolicy.js';
 import { conflictKeysForEvent } from '../../../src/services/syncConflictPolicy.js';
+import { canAccessBranch } from '../../../src/services/branchAccess.js';
 
 export const onRequestOptions = options;
 export async function onRequestPost({ request, env }) {
@@ -15,6 +16,16 @@ export async function onRequestPost({ request, env }) {
     const now = Date.now();
     const statements = [];
     const creatingBranches = new Set();
+    const entityBranches = new Map();
+    const knownEntityBranch = async (type, id) => {
+      const key = `${type}:${id}`;
+      if (entityBranches.has(key)) return entityBranches.get(key);
+      const row = await env.DB.prepare('SELECT branch_id FROM sync_events_v2 WHERE tenant_id = ? AND entity_type = ? AND entity_id = ? ORDER BY sequence LIMIT 1')
+        .bind(tenantId, type, id).first();
+      const result = row ? row.branch_id : undefined;
+      entityBranches.set(key, result);
+      return result;
+    };
     const groupCounts = new Map();
     for (const event of events) if (typeof event?.groupId === 'string')
       groupCounts.set(event.groupId, (groupCounts.get(event.groupId) || 0) + 1);
@@ -46,7 +57,42 @@ export async function onRequestPost({ request, env }) {
       validateTenantPayload(event.payload, tenantId);
       if (event.payload.id && event.payload.id !== event.entityId) return badRequest('Entity ID mismatch');
       const branch = event.branchId ?? branchId ?? null;
-      if (auth.principal.branchId !== 'all' && branch !== auth.principal.branchId) return json({ success: false, error: 'Branch access denied' }, 403);
+      if (branch === 'all') return badRequest('Aggregate branch view is read-only');
+      const tenantWideEvent = ['branch', 'stock_transfer', 'restore_snapshot', 'settings'].includes(event.entityType);
+      if (!tenantWideEvent && !branch) return badRequest('Financial mutations require an explicit branch');
+      if (!tenantWideEvent && event.action === 'create' && event.payload.branchId !== branch)
+        return badRequest('Created financial record must belong to the selected branch');
+      if (!canAccessBranch(auth.principal, branch)) return json({ success: false, error: 'Branch access denied' }, 403);
+      if (!['branch', 'stock_transfer', 'restore_snapshot', 'settings'].includes(event.entityType)) {
+        const existingBranch = await knownEntityBranch(event.entityType, event.entityId);
+        if (existingBranch !== undefined && existingBranch !== branch)
+          return json({ success: false, error: 'Entity belongs to another branch' }, 403);
+        entityBranches.set(`${event.entityType}:${event.entityId}`, branch);
+        if (branch) {
+          const p = event.payload;
+          const references = [];
+          const ref = (type, id) => { if (typeof id === 'string' && id && id !== 'walk_in') references.push([type, id]); };
+          if (event.entityType === 'invoice') {
+            ref('customer', p.customerId);
+            for (const item of p.items || []) ref('product', item.productId);
+          } else if (event.entityType === 'purchase') { ref('supplier', p.supplierId); ref('product', p.productId); }
+          else if (event.entityType === 'customer_payment') ref('customer', p.customerId);
+          else if (event.entityType === 'supplier_payment') ref('supplier', p.supplierId);
+          else if (event.entityType === 'worker_transaction') ref('worker', p.workerId);
+          else if (event.entityType === 'sales_return') ref('invoice', p.invoiceId);
+          else if (event.entityType === 'purchase_return') ref('purchase', p.purchaseId);
+          else if (event.entityType === 'partner_drawing') ref('partner', p.partnerId);
+          else if (event.entityType === 'profit_distribution')
+            for (const share of p.shares || []) ref('partner', share.partnerId);
+          else if (event.entityType === 'damaged_item') ref('product', p.productId);
+          if (references.length > 100) return badRequest('Too many entity references');
+          for (const [type, id] of references) {
+            const referenceBranch = await knownEntityBranch(type, id);
+            if (referenceBranch !== undefined && referenceBranch !== branch)
+              return json({ success: false, error: 'Related record belongs to another branch' }, 403);
+          }
+        }
+      }
       if (event.entityType === 'branch') {
         if (branch || !['create', 'update'].includes(event.action) || event.payload.tenantId !== tenantId) return badRequest('Invalid branch event');
       } else if (event.entityType === 'stock_transfer') {

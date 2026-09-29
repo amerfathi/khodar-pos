@@ -55,7 +55,7 @@ export default function SettingsView({
     password: '',
     phone: '',
     role: 'cashier',
-    branchId: 'all',
+    branchIds: [],
     status: 'active',
     permissions: { ...(ROLE_PERMISSIONS_PRESETS.cashier?.permissions || DEFAULT_PERMISSIONS) }
   });
@@ -191,7 +191,7 @@ export default function SettingsView({
       password: '',
       phone: '',
       role: 'cashier',
-      branchId: activeBranchId || 'branch-main',
+      branchIds: activeBranchId ? [activeBranchId] : [],
       status: 'active',
       permissions: { ...(ROLE_PERMISSIONS_PRESETS.cashier?.permissions || DEFAULT_PERMISSIONS) }
     });
@@ -209,7 +209,7 @@ export default function SettingsView({
       password: u.password || '',
       phone: u.phone || '',
       role: u.role || 'cashier',
-      branchId: u.branchId || 'all',
+      branchIds: u.branchIds || (u.branchId && u.branchId !== 'all' ? [u.branchId] : []),
       status: u.status || 'active',
       permissions: resolveUserPermissions(u)
     });
@@ -252,6 +252,7 @@ export default function SettingsView({
       if (!userForm.name.trim()) throw new Error('يرجى كتابة الاسم الكامل للمستخدم');
       if (!userForm.username.trim()) throw new Error('يرجى كتابة اسم المستخدم للدخول');
       if (!editingUser && !userForm.password.trim()) throw new Error('يرجى تعيين كلمة المرور');
+      if (!userForm.branchIds.length) throw new Error('اختر فرعًا واحدًا على الأقل للمستخدم');
 
       if (editingUser) {
         await updateUser(editingUser.id, userForm);
@@ -318,6 +319,7 @@ export default function SettingsView({
     { key: 'canManageExpenses', title: 'المصروفات اليومية والنثريات', desc: 'تسجيل المصروفات التشغيلية وسندات الصرف', icon: DollarSign },
     { key: 'canManagePayroll', title: 'الموظفون ومسيرات الرواتب', desc: 'إدارة بيانات العمال وصرف الرواتب والسلف', icon: UserCheck },
     { key: 'canViewFinance', title: 'المالية والجرد وأرباح الشركاء', desc: 'الاطلاع على مطابقة الخزينة والسيولة والأرباح والتقارير A4', icon: Scale, danger: true },
+    { key: 'canViewAllBranches', title: 'عرض مجمع للفروع المصرح بها', desc: 'عرض مجموع الفروع المحددة لهذا الموظف دون السماح بالتسجيل في وضع الجمع', icon: Layers, danger: true },
     { key: 'canAccessSettings', title: 'إعدادات وضبط النظام الشامل', desc: 'تعديل إعدادات المتجر والطباعة والمستخدمين والنسخ', icon: Lock, danger: true },
   ];
 
@@ -368,7 +370,7 @@ export default function SettingsView({
               أقسام الضبط
             </div>
             <div className="flex lg:flex-col overflow-x-auto lg:overflow-visible gap-1.5 scrollbar-none pb-1 lg:pb-0 touch-action-manipulation">
-              {subTabs.map((tab) => {
+              {subTabs.filter(tab => tab.id !== 'users' || !currentUser?.isStaff).map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeSubTab === tab.id;
                 return (
@@ -1152,7 +1154,7 @@ export default function SettingsView({
             )}
 
             {/* TAB 5: Users and Granular Permissions Management (NEW!) */}
-            {activeSubTab === 'users' && (
+            {activeSubTab === 'users' && !currentUser?.isStaff && (
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1266,7 +1268,8 @@ export default function SettingsView({
                     tenantUsers.map((u) => {
                       const isMe = u.id === currentUser?.id || u.username === currentUser?.username;
                       const rolePreset = ROLE_PERMISSIONS_PRESETS[u.role] || ROLE_PERMISSIONS_PRESETS.custom;
-                      const assignedBranch = branches.find(b => b.id === u.branchId);
+                      const assignedBranchNames = (u.branchIds || (u.branchId && u.branchId !== 'all' ? [u.branchId] : []))
+                        .map(id => branches.find(b => b.id === id)?.name || id);
 
                       return (
                         <div 
@@ -1311,7 +1314,7 @@ export default function SettingsView({
                                 <span className="font-medium text-slate-600">{rolePreset.label}</span>
                                 <span>•</span>
                                 <span className="text-slate-500">
-                                  الفرع: <strong>{u.branchId === 'all' || !u.branchId ? 'كافة الفروع' : (assignedBranch?.name || u.branchId)}</strong>
+                                  الفروع: <strong>{assignedBranchNames.length ? assignedBranchNames.join('، ') : 'بلا فرع — يلزم التخصيص'}</strong>
                                 </span>
                                 {u.phone && (
                                   <>
@@ -1897,18 +1900,18 @@ export default function SettingsView({
 
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">الفرع المخصص</label>
-                  <select
-                    value={userForm.branchId}
-                    onChange={(e) => setUserForm(prev => ({ ...prev, branchId: e.target.value }))}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-navy-850 font-bold focus:bg-white focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="all">كافة الفروع (وصول عام)</option>
+                  <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
                     {branches.map(b => (
-                      <option key={b.id} value={b.id}>
+                      <label key={b.id} className="flex items-center gap-2 text-sm text-navy-850">
+                        <input type="checkbox" checked={userForm.branchIds.includes(b.id)}
+                          onChange={e => setUserForm(prev => ({ ...prev,
+                            branchIds: e.target.checked ? [...prev.branchIds, b.id] : prev.branchIds.filter(id => id !== b.id)
+                          }))} />
                         {b.name} ({b.code || 'BR'})
-                      </option>
+                      </label>
                     ))}
-                  </select>
+                    <p className="text-xs text-slate-500">لا يمكن للموظف الوصول إلا إلى الفروع المحددة هنا.</p>
+                  </div>
                 </div>
 
                 <div>

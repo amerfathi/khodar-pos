@@ -98,6 +98,7 @@ export default function DesktopSidebar({
   isCollapsed,
   onToggleCollapse,
   currentUser,
+  canViewAllBranches = false,
   activeBranch,
   branches = [],
   onChangeBranch,
@@ -253,6 +254,11 @@ export default function DesktopSidebar({
                   </div>
 
                   <div className="max-h-40 overflow-y-auto space-y-1">
+                    {canViewAllBranches && <button type="button"
+                      onClick={() => { onChangeBranch('all'); setIsBranchDropdownOpen(false); }}
+                      className="w-full text-right px-2 py-1.5 rounded-lg text-xs font-bold text-primary-700 hover:bg-primary-50">
+                      كل الفروع — عرض مجمع فقط
+                    </button>}
                     {branches.map(b => {
                       const isSel = b.id === activeBranch?.id;
                       return (
@@ -276,7 +282,7 @@ export default function DesktopSidebar({
                     })}
                   </div>
 
-                  <div className="pt-1.5 mt-1 border-t border-slate-100">
+                  {!currentUser?.isStaff && <div className="pt-1.5 mt-1 border-t border-slate-100">
                     <button
                       type="button"
                       onClick={() => {
@@ -288,7 +294,7 @@ export default function DesktopSidebar({
                       <Building2 size={13} className="text-primary-500" />
                       <span>إدارة ومناقلات الفروع</span>
                     </button>
-                  </div>
+                  </div>}
                 </div>
               </>
             )}

@@ -32,3 +32,19 @@ test('business relationships, branches and monetary values fail closed', () => {
   ];
   for (const change of cases) assert.throws(() => validateBackup({ ...fixture(), ...change }, 'A'));
 });
+test('backup accepts walk-in invoices but rejects relationships crossing branches', () => {
+  const data = {...fixture(), products: [], customers: [], invoices: [], customerPayments: []};
+  data.branches.push({id:'other',tenantId:'A'});
+  data.products.push({id:'p-main',branchId:'main'}, {id:'p-other',branchId:'other'});
+  data.customers.push({id:'c-other',branchId:'other'});
+  data.invoices.push({id:'walk-in',branchId:'main',customerId:'walk_in',items:[{productId:'p-main'}]});
+  assert.equal(validateBackup(data,'A'),data);
+  data.invoices.push({id:'cross-item',branchId:'main',customerId:'walk_in',items:[{productId:'p-other'}]});
+  assert.throws(() => validateBackup(data,'A'),/فرعين مختلفين/);
+  data.invoices.pop();
+  data.invoices.push({id:'cross-customer',branchId:'main',customerId:'c-other',items:[]});
+  assert.throws(() => validateBackup(data,'A'),/فرعين مختلفين/);
+  data.invoices.pop();
+  data.customerPayments.push({id:'cross-receipt',branchId:'main',customerId:'c-other',amount:1});
+  assert.throws(() => validateBackup(data,'A'),/فرعين مختلفين/);
+});

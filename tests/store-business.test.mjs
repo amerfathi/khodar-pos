@@ -25,7 +25,7 @@ test('explicit inventory adjustment synchronizes, replays, reverses and rolls ba
     branches_v1:[{id:'main',name:'Main',tenantId:'A',isMain:true}],active_branch_id_v1:'main'});return target;};
   let app,root;function Harness(){app=useAppStore();return null;}
   const mount=async target=>{globalThis.localStorage=target;globalThis.sessionStorage=storage();setSessionToken('test');
-    setSessionUser({id:'u',tenantId:'A',role:'admin',branchId:'main',allowedBranches:2,sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
+    setSessionUser({id:'u',tenantId:'A',role:'company_owner',branchId:'main',allowedBranches:2,sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
     await act(async()=>{root=TestRenderer.create(React.createElement(Harness));await Promise.resolve();});};
   const unmount=()=>act(async()=>{root?.unmount();});const sender=seed(),receiver=seed();
   try{
@@ -61,7 +61,7 @@ test('expense, payroll, profit distribution and opening float reconcile across r
     branches_v1:[{id:'main',name:'Main',tenantId:'A',isMain:true}],active_branch_id_v1:'main'});return target;};
   let app,root;function Harness(){app=useAppStore();return null;}
   const mount=async target=>{globalThis.localStorage=target;globalThis.sessionStorage=storage();setSessionToken('test');
-    setSessionUser({id:'u',tenantId:'A',role:'admin',branchId:'main',allowedBranches:2,sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
+    setSessionUser({id:'u',tenantId:'A',role:'company_owner',branchId:'main',allowedBranches:2,sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
     await act(async()=>{root=TestRenderer.create(React.createElement(Harness));await Promise.resolve();});};
   const unmount=()=>act(async()=>{root?.unmount();});
   const sender=seed(),receiver=seed();

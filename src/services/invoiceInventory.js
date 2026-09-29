@@ -4,14 +4,16 @@ export function applyInvoiceInventory(products, invoice, direction) {
   for (const item of invoice.items || []) {
     const weight = Number(item.netWeight ?? item.grossWeight ?? 0);
     if (!Number.isFinite(weight) || weight <= 0) continue;
-    const matches = products.filter(product => item.productId ? item.productId === product.id :
-      String(item.name || '').trim() === String(product.name || '').trim());
+    const matches = products.filter(product => (!product.branchId || product.branchId === branchId) &&
+      (item.productId ? item.productId === product.id :
+      String(item.name || '').trim() === String(product.name || '').trim()));
     if (matches.length !== 1) throw new Error('صنف الفاتورة غير موجود أو غير محدد؛ لم تتغير كمية المخزون');
   }
   return products.map(product => {
     const quantity = (invoice.items || []).reduce((sum, item) => {
-      const matches = item.productId ? item.productId === product.id
-        : String(item.name || '').trim() === String(product.name || '').trim();
+      const matches = (!product.branchId || product.branchId === branchId) &&
+        (item.productId ? item.productId === product.id
+        : String(item.name || '').trim() === String(product.name || '').trim());
       const weight = Number(item.netWeight ?? item.grossWeight ?? 0);
       return matches && Number.isFinite(weight) && weight > 0 ? sum + Math.round(weight * 100) : sum;
     }, 0) / 100;

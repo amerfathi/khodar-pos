@@ -30,7 +30,7 @@ test('actual application records reconcile independently across money, stock, de
   const {useAppStore,cloudflareSync,setSessionToken,setSessionUser,buildReportSnapshot,buildReceivableAging,REPORT_REGISTRY,ReportsCenterView}=loaded.exports;
   let app,root;function Harness(){app=useAppStore();return null;}
   try{
-    setSessionToken('test');setSessionUser({id:'accountant',tenantId:'A',role:'admin',branchId:'main',allowedBranches:2,sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
+    setSessionToken('test');setSessionUser({id:'accountant',tenantId:'A',role:'company_owner',branchId:'main',allowedBranches:2,sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
     await act(async()=>{root=TestRenderer.create(React.createElement(Harness));await Promise.resolve();});
     let purchase,invoice;
     await act(async()=>{
@@ -110,7 +110,7 @@ test('actual application records reconcile independently across money, stock, de
         let reportRoot;
         await act(async()=>{reportRoot=TestRenderer.create(React.createElement(ReportsCenterView,{store:app,initialReportType:reportType}));});
         const visible=renderedText(reportRoot.toJSON());
-        assert.ok(visible.includes('جميع الفروع المتاحة لهذا الحساب'),`${reportType} lacks branch scope`);
+        assert.ok(visible.replace(/\s+/g,'').includes('النطاق:Main'),`${reportType} lacks branch scope`);
         for(const text of required) assert.ok(visible.replace(/\s+/g,'').includes(text.replace(/\s+/g,'')),`${reportType} missing ${text}`);
         for(const [label,value] of ({
           executive:[['النقدية المحصلة فعلياً','20.00']],

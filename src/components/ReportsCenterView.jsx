@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency, formatWeight, getCurrentDateFormatted } from '../utils/formatters';
 import { buildReportSnapshot, buildReceivableAging } from '../services/reportRegistry';
+import { displayInvoiceNumber } from '../services/invoiceIdentity';
 
 export default function ReportsCenterView({ store, initialReportType = 'executive', initialPartnerId = '' }) {
   const { 
@@ -277,7 +278,7 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
       date: inv.date,
       time: inv.time,
       type: 'invoice',
-      docName: `فاتورة بيع #${inv.id}`,
+      docName: `فاتورة بيع #${displayInvoiceNumber(inv)}`,
       description: inv.items.map(i => `${i.name} (${i.netWeight}كجم)`).join('، '),
       netWeight: inv.totalNetWeight,
       debit: inv.finalTotal,
@@ -819,7 +820,9 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                 الفترة: {['audit', 'partners', 'aging', 'shift'].includes(reportType) ? 'المركز الحالي من كامل السجلات' : dateFilter === 'all' ? 'كامل السجلات' : dateFilter === 'today' ? 'اليوم فقط' : dateFilter === 'yesterday' ? 'يوم أمس' : dateFilter === 'week' ? 'آخر 7 أيام' : 'هذا الشهر'}
               </div>
               <div className="text-[10px] text-slate-500">
-                النطاق: جميع الفروع المتاحة لهذا الحساب؛ لا يغيّره الفرع النشط
+                النطاق: {store.activeBranchId === 'all'
+                  ? 'جميع الفروع المخوّل بها — إجمالي مستقل، وليس رصيد فرع'
+                  : store.activeBranch?.name || 'الفرع المحدد'}
               </div>
             </div>
           </div>
@@ -935,7 +938,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                     <tbody className="divide-y divide-slate-100">
                       {filteredInvoices.slice(-5).reverse().map((inv, idx) => (
                         <tr key={idx}>
-                          <td className="p-2 font-mono font-bold">#{inv.id}</td>
+                          <td className="p-2 font-mono font-bold">#{displayInvoiceNumber(inv)}</td>
                           <td className="p-2 truncate max-w-[120px]">{inv.customerName}</td>
                           <td className="p-2 text-center">
                             <span className={`px-1 rounded text-[9px] font-bold ${inv.saleType === 'cash' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
@@ -1464,7 +1467,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
                     {filteredInvoices.map((inv, idx) => (
                       <tr key={inv.id} className="hover:bg-slate-50">
                         <td className="p-2 border border-slate-200 text-center font-bold text-slate-600">{idx + 1}</td>
-                        <td className="p-2 border border-slate-200 text-center font-mono font-black">#{inv.id}</td>
+                        <td className="p-2 border border-slate-200 text-center font-mono font-black">#{displayInvoiceNumber(inv)}</td>
                         <td className="p-2 border border-slate-200 text-slate-600">{inv.date} {inv.time}</td>
                         <td className="p-2 border border-slate-200 font-bold text-slate-900">{inv.customerName}</td>
                         <td className="p-2 border border-slate-200 text-center">

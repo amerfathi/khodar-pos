@@ -29,6 +29,26 @@ const post = (store, phase) => store.transact(() => {
   store.enqueue(event(store.user)); if(phase===4) throw new Error('Injected stop');
 });
 
+test('partial branch visibility accepts authorized events after hidden causal gaps and adopts server heads', async () => {
+  const identity = user(), backend = storage();
+  const store = new AtomicStore(identity, { marker: 0, [SYNC_HEADS_STATE_KEY]: {} }, backend);
+  await store.acquire();
+  try {
+    const heads = { 'domain:inventory': 'hidden-other-branch-event' };
+    const visible = attachConflictPreconditions({ id: 'visible-product-event', tenantId: identity.tenantId,
+      entityType: 'product', entityId: 'branch-product', action: 'update',
+      payload: { id: 'branch-product', branchId: 'assigned' } }, heads);
+    assert.throws(() => store.receive([visible], 2, () => store.set('marker', 1), heads), /تعارض سببي/);
+    assert.equal(store.read('marker'), 0);
+    store.receive([visible], 2, () => store.set('marker', 1), heads, true);
+    assert.equal(store.read('marker'), 1);
+    assert.deepEqual(store.read(SYNC_HEADS_STATE_KEY), heads);
+    const saved = JSON.stringify(store.value);
+    store.receive([visible], 2, () => { throw Error('duplicate applied twice'); }, heads, true);
+    assert.equal(JSON.stringify(store.value), saved);
+  } finally { await store.close(); }
+});
+
 test('default durable acquire migrates an existing aggregate only after cloud and branch checks',async()=>{
   const backend=storage(),identity=user(),legacy=new AtomicStore(identity,migrationState(identity),backend);
   await legacy.acquire();

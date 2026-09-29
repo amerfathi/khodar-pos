@@ -256,7 +256,7 @@ export class CloudflareSyncService {
         // NEVER use Date.now() fallback — it jumps the cursor into the future and
         // causes any events pushed from Desktop/Mobile to be permanently skipped.
         if (typeof callback !== 'function') throw new Error('No durable sync receiver');
-        await callback(data.events, data.nextCursor, data.conflictHeads);
+        await callback(data.events, data.nextCursor, data.conflictHeads, data.fullTenantVisibility === false);
         if (token !== getSessionToken() || generation !== this.generation) return 0;
         if (!this.repository && Number.isSafeInteger(data.nextCursor)) localStorage.setItem(syncKey, String(data.nextCursor));
         this.notifyListeners('synced_inbound', { count: data.events.length });

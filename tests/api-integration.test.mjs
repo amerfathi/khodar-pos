@@ -21,10 +21,20 @@ const memoryStorage = () => ({ items: new Map(),
 
 let mf, db, a, b, staff, platform;
 const pass = crypto.randomUUID() + 'Aa!'; // ephemeral fixture, never production credentials
-async function call(path, method = 'GET', body, token, ip = 'local') {
+async function call(path, method = 'GET', body, token, ip = 'local', scopeEvents = true) {
   if (path === '/api/sync/push' && method === 'POST' && Array.isArray(body?.events) && db) {
     const heads=new Map();
     for (const event of body.events) {
+      if (scopeEvents && !['branch','stock_transfer','restore_snapshot','settings'].includes(event.entityType) &&
+          event.branchId == null) {
+        const main=await db.prepare('SELECT id FROM branches WHERE tenant_id = ? AND is_main = 1 ORDER BY id LIMIT 1')
+          .bind(body.tenantId).first();
+        if (main) {
+          event.branchId=main.id;
+        }
+      }
+      if (scopeEvents && event.action==='create' && event.branchId && event.payload && !event.payload.branchId)
+        event.payload.branchId=event.branchId;
       if (event.conflictPolicyVersion === 1) continue;
       const keys=conflictKeysForEvent(event);
       const preconditions={};
@@ -69,6 +79,7 @@ before(async () => {
     .bind(id, id, 'Fixture ' + id, 'owner' + id, hashed, 'active', 'company_owner').run();
   await db.prepare("UPDATE tenants SET allowed_branches = 10 WHERE id = 'A'").run();
   await db.prepare("INSERT INTO branches (id,tenant_id,name,code,is_main,status) VALUES ('fixture-a-main','A','Fixture main','MAIN',1,'active')").run();
+  await db.prepare("INSERT INTO branches (id,tenant_id,name,code,is_main,status) VALUES ('fixture-b-main','B','Fixture B main','MAIN',1,'active')").run();
   await db.prepare('INSERT INTO tenants (id,store_code,company_name,username,password_hash,status,role) VALUES (?,?,?,?,?,?,?)')
     .bind('PLATFORM','PLATFORM','Platform fixture','platform',hashed,'active','super_admin').run();
   await db.prepare("INSERT INTO users (id,tenant_id,name,username,password_hash,role,status,permissions_json) VALUES ('staff','A','Cashier','cashier',?,'cashier','active','{}')").bind(hashed).run();
@@ -706,4 +717,81 @@ test('platform owner securely initializes and changes email/password with audit 
 test('plaintext records never authenticate', async () => {
   await db.prepare("UPDATE tenants SET password_hash=? WHERE id='B'").bind(pass).run();
   assert.equal((await call('/api/tenants/lookup','POST',{storeCode:'B',username:'ownerB',password:pass},undefined,'plaintext-login-test')).status,401);
+});
+test('owner grants specific branches; staff cannot see other branch events or administer users', async () => {
+  a=await login('A','ownerA');
+  const aggregateWrite=await call('/api/sync/push','POST',{tenantId:'A',events:[{
+    id:'aggregate-write-denied',tenantId:'A',branchId:'all',entityType:'expense',entityId:'aggregate-write-denied',
+    action:'create',payload:{id:'aggregate-write-denied',tenantId:'A',branchId:'all',amount:1}
+  }]},a);
+  assert.equal(aggregateWrite.status,400);
+  const unscopedWrite=await call('/api/sync/push','POST',{tenantId:'A',events:[{
+    id:'unscoped-write-denied',tenantId:'A',entityType:'expense',entityId:'unscoped-write-denied',
+    action:'create',payload:{id:'unscoped-write-denied',tenantId:'A',amount:1}
+  }]},a,'unscoped-write',false);
+  assert.equal(unscopedWrite.status,400);
+  const second='fixture-a-second-grants';
+  await db.prepare('INSERT INTO branches (id,tenant_id,name,code,is_main,status) VALUES (?,?,?,?,0,?)')
+    .bind(second,'A','Second branch','SECOND','active').run();
+  const username='grant-' + crypto.randomUUID();
+  const createdResponse=await call('/api/users','POST',{tenantId:'A',name:'Branch accountant',username,
+    password:pass,role:'custom',status:'active',branchIds:['fixture-a-main',second],
+    permissions:{canViewInvoices:true,canManageInventory:true}},a);
+  const createdBody=await createdResponse.json();
+  assert.equal(createdResponse.status,201,JSON.stringify(createdBody));
+  const created=createdBody.user;
+  const loginResponse=await call('/api/tenants/lookup','POST',{storeCode:'A',username,password:pass},undefined,'branch-grant-first-login');
+  assert.equal(loginResponse.status,200);
+  const signed=await loginResponse.json();
+  assert.deepEqual(signed.user.branchIds,['fixture-a-main',second]);
+  assert.deepEqual(signed.branches.map(row=>row.id).sort(),['fixture-a-main',second].sort());
+  const cursor=(await db.prepare("SELECT COALESCE(MAX(sequence),0) AS n FROM sync_events_v2 WHERE tenant_id='A'").first()).n;
+  for(const [suffix,branch] of [['one','fixture-a-main'],['two',second],['global',null]])
+    await db.prepare('INSERT INTO sync_events_v2 (id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp) VALUES (?,?,?,?,?,?,?,?,?)')
+      .bind(`grants-${suffix}`,'A',branch,'invoice',`grants-${suffix}`,'create',JSON.stringify({id:`grants-${suffix}`,tenantId:'A',branchId:branch}),1,1).run();
+  const pull=await call(`/api/sync/pull?tenantId=A&cursor=${cursor}`,'GET',undefined,signed.session.token);
+  assert.equal(pull.status,200);
+  assert.deepEqual((await pull.json()).events.map(event=>event.entityId),['grants-one','grants-two']);
+  assert.equal((await call('/api/users','POST',{tenantId:'A'},signed.session.token)).status,403);
+  const changed=await call('/api/users','PATCH',{tenantId:'A',id:created.id,branchIds:[second]},a);
+  assert.equal(changed.status,200);
+  assert.equal((await call(`/api/sync/pull?tenantId=A&cursor=${cursor}`,'GET',undefined,signed.session.token)).status,401);
+  const narrowedResponse=await call('/api/tenants/lookup','POST',{storeCode:'A',username,password:pass},undefined,'branch-grant-second-login');
+  assert.equal(narrowedResponse.status,200,JSON.stringify(await narrowedResponse.clone().json()));
+  const narrowed=await narrowedResponse.json();
+  assert.deepEqual(narrowed.branches.map(row=>row.id),[second]);
+  const narrowPull=await call(`/api/sync/pull?tenantId=A&cursor=${cursor}`,'GET',undefined,narrowed.session.token);
+  assert.deepEqual((await narrowPull.json()).events.map(event=>event.entityId),['grants-two']);
+  const forbiddenWrite=await call('/api/sync/push','POST',{tenantId:'A',events:[{
+    id:'grant-forbidden-write',tenantId:'A',branchId:'fixture-a-main',entityType:'invoice',entityId:'grant-forbidden-write',
+    action:'create',payload:{id:'grant-forbidden-write',tenantId:'A',branchId:'fixture-a-main'}
+  }]},narrowed.session.token);
+  assert.equal(forbiddenWrite.status,403);
+  const crossBranchEdit=await call('/api/sync/push','POST',{tenantId:'A',events:[{
+    id:'grant-cross-branch-edit',tenantId:'A',branchId:second,entityType:'invoice',entityId:'grants-one',
+    action:'update',payload:{id:'grants-one',tenantId:'A',branchId:second,notes:'wrong branch'}
+  }]},a);
+  assert.equal(crossBranchEdit.status,403);
+  await db.prepare('INSERT INTO sync_events_v2 (id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp) VALUES (?,?,?,?,?,?,?,?,?)')
+    .bind('grant-customer-event','A','fixture-a-main','customer','grant-customer','create',
+      JSON.stringify({id:'grant-customer',tenantId:'A',branchId:'fixture-a-main'}),1,1).run();
+  const crossBranchCustomer=await call('/api/sync/push','POST',{tenantId:'A',events:[{
+    id:'grant-cross-customer',tenantId:'A',branchId:second,entityType:'invoice',entityId:'grant-new-invoice',
+    action:'create',payload:{id:'grant-new-invoice',tenantId:'A',branchId:second,customerId:'grant-customer'}
+  }]},a);
+  assert.equal(crossBranchCustomer.status,403);
+  const transferCursor=(await db.prepare("SELECT COALESCE(MAX(sequence),0) AS n FROM sync_events_v2 WHERE tenant_id='A'").first()).n;
+  const transferGroup=crypto.randomUUID();
+  for (const [id,branch,type] of [
+    ['grant-transfer-source','fixture-a-main','product'],
+    ['grant-transfer-destination',second,'product'],
+    ['grant-transfer-audit',null,'stock_transfer']
+  ]) await db.prepare('INSERT INTO sync_events_v2 (id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp,group_id) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .bind(id,'A',branch,type,id,'create',JSON.stringify({id,...(branch ? {branchId:branch} : {})}),1,1,transferGroup).run();
+  const transferPull=await call(`/api/sync/pull?tenantId=A&cursor=${transferCursor}`,'GET',undefined,narrowed.session.token);
+  assert.equal(transferPull.status,200);
+  const transferPage=await transferPull.json();
+  assert.equal(transferPage.fullTenantVisibility,false);
+  assert.deepEqual(transferPage.events.map(event=>event.id),['grant-transfer-destination']);
+  assert.equal(transferPage.nextCursor > transferCursor,true);
 });

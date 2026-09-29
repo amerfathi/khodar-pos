@@ -26,7 +26,7 @@ test('receiving the same sale twice changes stock and debt exactly once', async 
   try {
     // Connect the real store receiver under a scoped offline session.
     setSessionToken('test-session');
-    setSessionUser({id:'u',tenantId:'A',role:'admin',branchId:'main',sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
+    setSessionUser({id:'u',tenantId:'A',role:'company_owner',branchId:'main',sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
     seedAggregate(localStorage,{id:'u',tenantId:'A'},{
       products_v3:[{id:'p',name:'Tomato',currentStockKg:20,branchStock:{main:20}}],
       customers_v3:[{id:'c',balance:0}]

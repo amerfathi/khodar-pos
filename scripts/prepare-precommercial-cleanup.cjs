@@ -35,13 +35,13 @@ const dropOrder = [
   'customer_payments', 'customers', 'branch_inventory', 'products', 'branches',
   'app_releases', 'trial_requests', 'tenants',
 ];
-const migrations = Array.from({ length: 15 }, (_, index) =>
+const migrations = Array.from({ length: 16 }, (_, index) =>
   `${String(index + 1).padStart(4, '0')}_${[
     'initial_schema', 'create_app_releases', 'security_and_runtime_schema',
     'session_revocation', 'sync_sequence', 'recovery_tokens', 'signed_releases',
     'sync_immutable_retry', 'sync_commit_groups', 'sync_group_registry',
     'branch_limit', 'sync_conflict_heads', 'platform_security_audit', 'platform_owner_email_guards',
-    'platform_owner_main_branch',
+    'platform_owner_main_branch', 'staff_branch_grants',
   ][index]}.sql`
 );
 

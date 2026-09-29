@@ -8,6 +8,9 @@ export function setSessionToken(token) {
 export function getSessionUser() {
   try {
     const user = JSON.parse(sessionStorage.getItem(USER_KEY) || 'null');
+    // A pre-branch-grants login cannot prove its local visibility scope. Keep
+    // its saved data untouched, but require a fresh authenticated login.
+    if (user?.storeCode && !Array.isArray(user.branchIds)) return null;
     return getSessionToken() && Date.parse(user?.sessionExpiresAt) > Date.now() ? user : null;
   } catch { return null; }
 }

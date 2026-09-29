@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   INITIAL_PRODUCTS, 
   INITIAL_CUSTOMERS, 
@@ -40,6 +40,7 @@ import { createTenantStorage, writeTenantLoginContext, readAccessScopeTransition
 import { acquireWithCheckedLegacyMigration } from '../services/checkedLegacyMigration.js';
 import { fetchCloudCheckpointPage, fetchServerBranchManifest } from '../services/cloudMigrationApi.js';
 import { buildAccountingSnapshot } from '../services/accountingReconciliation.js';
+import { assignedBranchIds, canAccessBranch, visibleBranches, visibleBranchRecords } from '../services/branchAccess.js';
 import { getApiBaseUrl } from '../config/appVersion';
 
 const STORAGE_KEYS = {
@@ -106,7 +107,8 @@ export function useAppStore(options = {}) {
       ? { branches: storedBranches, activeBranchId: storedActiveBranchId } : null);
     if (branchContext && (!Array.isArray(branchContext.branches) ||
         branchContext.branches.some(branch => branch?.tenantId !== getSessionUser()?.tenantId) ||
-        !branchContext.branches.some(branch => branch.id === branchContext.activeBranchId)))
+        (!branchContext.branches.some(branch => branch.id === branchContext.activeBranchId) &&
+          !(branchContext.activeBranchId === 'all' && canAccessBranch(getSessionUser(), 'all')))))
       throw new Error('بيانات فروع الخادم الأولية غير صالحة');
     const readInitial = (key, fallback) => {
       if (!durableRepository) return storage.read(key, fallback);
@@ -182,10 +184,23 @@ export function useAppStore(options = {}) {
   const setTenants = update => local.set(STORAGE_KEYS.TENANTS, update);
   let users = local.read(STORAGE_KEYS.USERS);
   const setUsers = update => local.set(STORAGE_KEYS.USERS, update);
-  let branches = local.read(STORAGE_KEYS.BRANCHES);
+  let branches = visibleBranches(currentUser, local.read(STORAGE_KEYS.BRANCHES));
   const setBranches = update => local.set(STORAGE_KEYS.BRANCHES, update);
   let activeBranchId = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
   const setActiveBranchId = update => local.set(STORAGE_KEYS.ACTIVE_BRANCH_ID, update);
+  const requireWorkingBranch = () => {
+    if (!Array.isArray(currentUser?.branchIds)) return null;
+    if (!activeBranchId || !branches.some(branch => branch.id === activeBranchId) ||
+        !canAccessBranch(currentUser, activeBranchId))
+      throw new Error('اختر فرعًا مصرحًا به قبل تسجيل الحركة');
+    return activeBranchId;
+  };
+  const requireSameBranch = row => {
+    const branchId = requireWorkingBranch();
+    if (branchId && row?.branchId !== branchId)
+      throw new Error('السجل لا ينتمي إلى الفرع النشط');
+    return branchId;
+  };
   let stockTransfers = local.read(STORAGE_KEYS.STOCK_TRANSFERS);
   const setStockTransfers = update => local.set(STORAGE_KEYS.STOCK_TRANSFERS, update);
   let trialRequests = local.read(STORAGE_KEYS.TRIAL_REQUESTS);
@@ -219,7 +234,8 @@ export function useAppStore(options = {}) {
           const selected = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
           if (!Array.isArray(ownedBranches) || !ownedBranches.length ||
               ownedBranches.some(branch => branch?.tenantId !== currentUser.tenantId) ||
-              !ownedBranches.some(branch => branch.id === selected)) {
+              (!ownedBranches.some(branch => branch.id === selected) &&
+                !(selected === 'all' && canAccessBranch(currentUser, 'all')))) {
             await local.close();
             if (!disposed) setPersistence({ ready: false, error: 'تعذر التحقق من فروع الشركة أو الفرع النشط؛ لم تُفتح العمليات المالية. يلزم مراجعة بيانات الفروع.' });
             return;
@@ -265,13 +281,19 @@ export function useAppStore(options = {}) {
     purchaseReturns = local.read(STORAGE_KEYS.PURCHASE_RETURNS);
     tenants = local.read(STORAGE_KEYS.TENANTS);
     users = local.read(STORAGE_KEYS.USERS);
-    branches = local.read(STORAGE_KEYS.BRANCHES);
+    branches = visibleBranches(currentUser, local.read(STORAGE_KEYS.BRANCHES));
     activeBranchId = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
     stockTransfers = local.read(STORAGE_KEYS.STOCK_TRANSFERS);
     trialRequests = local.read(STORAGE_KEYS.TRIAL_REQUESTS);
     refreshInboundRecords();
   };
   const atomicAction = action => (...args) => {
+    if (activeBranchId === 'all' && !new Set([
+      'changeActiveBranch', 'addBranch', 'updateBranch', 'deleteBranch', 'setMainBranch',
+      'transferStockBetweenBranches', 'importBackupJSON', 'addTrialRequest',
+      'updateTrialRequest', 'deleteTrialRequest'
+    ]).has(action.name))
+      throw new Error('عرض كل الفروع للقراءة فقط؛ اختر فرعًا قبل تسجيل حركة');
     if (currentUser?.tenantId && currentUser.tenantId !== 'tenant-demo' &&
         !Object.hasOwn(local.value.state,SYNC_HEADS_STATE_KEY))
       throw new Error('انتظر اكتمال مزامنة سياسة تعارض الأجهزة قبل تسجيل حركة جديدة');
@@ -344,7 +366,9 @@ export function useAppStore(options = {}) {
 
     try {
       const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/api/users?tenantId=${encodeURIComponent(tid)}`);
+      const res = await fetch(`${baseUrl}/api/users?tenantId=${encodeURIComponent(tid)}`, {
+        headers: { 'Authorization': `Bearer ${getSessionToken()}` }
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
@@ -674,21 +698,24 @@ export function useAppStore(options = {}) {
         setStockTransfers(prev => [payload, ...prev]);
       } else if (entityType === 'settings') {
         if (action === 'update') {
-          setSettings(prev => ({ ...prev, ...payload }));
+          setSettings(prev => ({ ...prev, ...payload,
+            ...(payload.openingCashDrawerFloatByBranch ? { openingCashDrawerFloatByBranch: {
+              ...prev.openingCashDrawerFloatByBranch, ...payload.openingCashDrawerFloatByBranch
+            } } : {}) }));
         }
       }
     });
   };
 
   const inboundRef = useRef(null);
-  inboundRef.current = (events, cursor, serverHeads) => {
+  inboundRef.current = (events, cursor, serverHeads, partialVisibility = false) => {
     const apply = batch => {
       refreshBindings();
       applyInboundSyncEvents(batch);
     };
-    if (local.durable) return local.receiveDurable(events, cursor, apply, serverHeads).finally(refreshBindings);
+    if (local.durable) return local.receiveDurable(events, cursor, apply, serverHeads, partialVisibility).finally(refreshBindings);
     try {
-      return local.receive(events, cursor, apply, serverHeads);
+      return local.receive(events, cursor, apply, serverHeads, partialVisibility);
     } finally { refreshBindings(); }
   };
   const handleInboundSyncEvents = useCallback((...args) => inboundRef.current(...args), []);
@@ -746,48 +773,57 @@ export function useAppStore(options = {}) {
   // Product Actions (with real-time cloud mutation broadcasting)
   const addProduct = (prod) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireWorkingBranch();
+    if (branchId && prod.branchId && prod.branchId !== branchId) throw new Error('الصنف لا ينتمي إلى الفرع النشط');
     const newProd = {
       ...prod,
-      id: prod.id || `prod-${Date.now()}`
+      ...(branchId ? { branchId } : {}),
+      id: prod.id || `prod-${crypto.randomUUID()}`
     };
     setProducts(prev => [newProd, ...prev]);
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'product', newProd.id, 'create', newProd);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'product', newProd.id, 'create', newProd);
     } catch (e) { throw e; }
     return newProd;
   };
 
   const updateProduct = (id, updates) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(products.find(p => p.id === id));
+    if (branchId && updates.branchId && updates.branchId !== branchId) throw new Error('لا يمكن نقل الصنف إلى فرع آخر بالتعديل');
     setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'product', id, 'update', updates);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'product', id, 'update', updates);
     } catch (e) { throw e; }
   };
 
   const updateProductPrice = (id, newPrice) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(products.find(p => p.id === id));
     const priceNum = Number(newPrice);
     setProducts(prev => prev.map(p => p.id === id ? { ...p, defaultPricePerKg: priceNum } : p));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'product', id, 'update', { defaultPricePerKg: priceNum });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'product', id, 'update', { defaultPricePerKg: priceNum });
     } catch (e) { throw e; }
   };
 
   const deleteProduct = (id) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(products.find(p => p.id === id));
     setProducts(prev => prev.filter(p => p.id !== id));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'product', id, 'delete', { id });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'product', id, 'delete', { id });
     } catch (e) { throw e; }
   };
 
   // Customer Actions (with real-time cloud mutation broadcasting)
   const addCustomer = (cust) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireWorkingBranch();
     const newCust = {
-      id: `cust-${Date.now()}`,
+      id: `cust-${crypto.randomUUID()}`,
       tenantId: activeTenantId,
+      ...(branchId ? { branchId } : {}),
       name: cust.name,
       phone: cust.phone || '',
       balance: Number(cust.initialBalance || 0),
@@ -796,24 +832,27 @@ export function useAppStore(options = {}) {
     };
     setCustomers(prev => [newCust, ...prev]);
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'customer', newCust.id, 'create', newCust);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'customer', newCust.id, 'create', newCust);
     } catch (e) { throw e; }
     return newCust;
   };
 
   const updateCustomer = (id, updates) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(customers.find(c => c.id === id));
+    if (branchId && updates.branchId && updates.branchId !== branchId) throw new Error('لا يمكن نقل العميل إلى فرع آخر بالتعديل');
     setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'customer', id, 'update', updates);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'customer', id, 'update', updates);
     } catch (e) { throw e; }
   };
 
   const deleteCustomer = (id) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(customers.find(c => c.id === id));
     setCustomers(prev => prev.filter(c => c.id !== id));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'customer', id, 'delete', { id });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'customer', id, 'delete', { id });
     } catch (e) { throw e; }
   };
 
@@ -834,6 +873,7 @@ export function useAppStore(options = {}) {
     }
 
     const targetCustomer = customers.find(c => c.id === customerId);
+    const branchId = requireSameBranch(targetCustomer);
     const customerName = targetCustomer ? targetCustomer.name : 'عميل';
     const activeTenantId = currentUser?.tenantId || targetCustomer?.tenantId || 'tenant-demo';
 
@@ -848,9 +888,10 @@ export function useAppStore(options = {}) {
     }));
 
     const newPayment = {
-      id: paymentId || `pay-${Date.now()}`,
-      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      id: paymentId || `pay-${crypto.randomUUID()}`,
+      clientTransactionId: clientTxId || `tx_${crypto.randomUUID()}`,
       tenantId: activeTenantId,
+      ...(branchId ? { branchId } : {}),
       customerId,
       customerName,
       amount: numAmount,
@@ -863,7 +904,7 @@ export function useAppStore(options = {}) {
     setCustomerPayments(prev => [newPayment, ...prev]);
 
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'customer_payment', newPayment.id, 'create', newPayment);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'customer_payment', newPayment.id, 'create', newPayment);
     } catch (e) { throw e; }
 
     return newPayment;
@@ -872,6 +913,7 @@ export function useAppStore(options = {}) {
   const deleteCustomerPayment = (paymentId) => {
     const target = customerPayments.find(p => p.id === paymentId);
     if (target) {
+      const branchId = requireSameBranch(target);
       setCustomers(prev => prev.map(c => {
         if (c.id === target.customerId) {
           return {
@@ -884,13 +926,22 @@ export function useAppStore(options = {}) {
       setCustomerPayments(prev => prev.filter(p => p.id !== paymentId));
       try {
         const activeTenantId = currentUser?.tenantId || target.tenantId || 'tenant-demo';
-        cloudflareSync.recordMutation(activeTenantId, null, 'customer_payment', paymentId, 'delete', { id: paymentId });
+        cloudflareSync.recordMutation(activeTenantId, branchId, 'customer_payment', paymentId, 'delete', { id: paymentId });
       } catch (e) { throw e; }
     }
   };
 
   // Invoice Actions
   const saveInvoice = (invoiceData) => {
+    const scopedBranchId = requireWorkingBranch();
+    if (scopedBranchId && invoiceData.branchId && invoiceData.branchId !== scopedBranchId)
+      throw new Error('لا يمكن تسجيل فاتورة في فرع غير نشط');
+    if (scopedBranchId) {
+      for (const item of invoiceData.items || []) if (item.productId)
+        requireSameBranch(products.find(product => product.id === item.productId));
+      if (invoiceData.customerId && invoiceData.customerId !== 'walk_in')
+        requireSameBranch(customers.find(customer => customer.id === invoiceData.customerId));
+    }
     // 0. Idempotency Guard: prevent duplicate invoice creation and duplicate stock deductions
     const clientTxId = invoiceData.clientTransactionId || invoiceData.idempotencyKey || invoiceData.id;
     if (clientTxId) {
@@ -906,7 +957,9 @@ export function useAppStore(options = {}) {
     }
 
     const newInvoiceNumber = settings.nextInvoiceNumber || (invoices.length + 126);
-    const invoiceId = invoiceData.id || String(newInvoiceNumber).padStart(6, '0');
+    const invoiceId = invoiceData.id || (Array.isArray(currentUser?.branchIds)
+      ? `${String(newInvoiceNumber).padStart(6, '0')}-${crypto.randomUUID()}`
+      : String(newInvoiceNumber).padStart(6, '0'));
 
     // Credit / remaining debt calculation for credit or split payments
     let creditDebt = 0;
@@ -926,10 +979,11 @@ export function useAppStore(options = {}) {
     const newInvoice = {
       ...invoiceData,
       id: invoiceId,
+      invoiceNumber: newInvoiceNumber,
       date: invoiceData.date || getCurrentDateFormatted(),
       time: invoiceData.time || getCurrentTimeFormatted(),
-      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-      idempotencyKey: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      clientTransactionId: clientTxId || `tx_${crypto.randomUUID()}`,
+      idempotencyKey: clientTxId || `tx_${crypto.randomUUID()}`,
       tenantId: activeTenantId,
       branchId: targetBranchId,
       branchName: targetBranchName,
@@ -976,6 +1030,7 @@ export function useAppStore(options = {}) {
   const updateInvoiceNotes = (invoiceId, notes) => {
     const target = invoices.find(inv => inv.id === invoiceId);
     if (!target) throw new Error('الفاتورة غير موجودة');
+    requireSameBranch(target);
     if (typeof notes !== 'string') throw new Error('ملاحظات الفاتورة غير صالحة');
     setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, notes } : inv));
     cloudflareSync.recordMutation(currentUser?.tenantId || 'tenant-demo', target.branchId || null,
@@ -985,6 +1040,7 @@ export function useAppStore(options = {}) {
   const voidInvoice = (invoiceId) => {
     const target = inboundRecords.current.invoice.get(invoiceId);
     if (!target || target.status === 'voided') return;
+    requireSameBranch(target);
     if (salesReturns.some(row=>row.invoiceId===invoiceId)) throw new Error('لا يمكن إلغاء فاتورة لها مردود قائم');
     inboundRecords.current.invoice.set(invoiceId, { ...target, status: 'voided' });
 
@@ -1014,6 +1070,7 @@ export function useAppStore(options = {}) {
 
   const deleteInvoice = (invoiceId) => {
     const target = invoices.find(i => i.id === invoiceId);
+    requireSameBranch(target);
     if (salesReturns.some(row=>row.invoiceId===invoiceId)) throw new Error('لا يمكن حذف فاتورة لها مردود قائم');
     if (target && target.status !== 'voided') {
       if (target.customerId && target.remainingDebt > 0) {
@@ -1049,6 +1106,7 @@ export function useAppStore(options = {}) {
   }) => {
     const originalInvoice = invoices.find(inv => inv.id === invoiceId);
     if (!originalInvoice) throw new Error('الفاتورة الأصلية غير موجودة');
+    requireSameBranch(originalInvoice);
 
     let totalRefund = 0;
     const processedItems = returnedItems.map(retItem => {
@@ -1086,9 +1144,10 @@ export function useAppStore(options = {}) {
       setCustomers(prev => adjustBalance(prev, originalInvoice.customerId, -totalRefund));
     }
 
-    const returnId = `ret-sale-${Date.now()}`;
+    const returnId = `ret-sale-${crypto.randomUUID()}`;
     const newReturn = {
       id: returnId,
+      branchId: originalInvoice.branchId,
       invoiceId,
       customerId: originalInvoice.customerId,
       customerName: originalInvoice.customerName || 'عميل نقدي',
@@ -1118,6 +1177,7 @@ export function useAppStore(options = {}) {
   const deleteSalesReturn = (returnId) => {
     const target = salesReturns.find(r => r.id === returnId);
     if (!target) return;
+    const branchId = requireSameBranch(target);
 
     // Reverse customer balance if credit_deduction
     if (target.refundMethod === 'credit_deduction' && target.customerId && target.customerId !== 'walk_in') {
@@ -1133,7 +1193,7 @@ export function useAppStore(options = {}) {
     setSalesReturns(prev => prev.filter(r => r.id !== returnId));
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, null, 'sales_return', returnId, 'delete', { id: returnId });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'sales_return', returnId, 'delete', { id: returnId });
     } catch (e) { throw e; }
   };
 
@@ -1150,6 +1210,9 @@ export function useAppStore(options = {}) {
 
   // Expenses Actions
   const addExpense = (exp) => {
+    const scopedBranchId = requireWorkingBranch();
+    if (scopedBranchId && exp.branchId && exp.branchId !== scopedBranchId)
+      throw new Error('لا يمكن تسجيل مصروف في فرع غير نشط');
     const clientTxId = exp.clientTransactionId || exp.idempotencyKey || exp.id;
     if (clientTxId) {
       const existing = expenses.find(e => 
@@ -1171,9 +1234,9 @@ export function useAppStore(options = {}) {
     const activeTenantId = exp.tenantId || currentUser?.tenantId || 'tenant-demo';
     const newExp = {
       ...exp,
-      id: exp.id || `exp-${Date.now()}`,
-      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-      idempotencyKey: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      id: exp.id || `exp-${crypto.randomUUID()}`,
+      clientTransactionId: clientTxId || `tx_${crypto.randomUUID()}`,
+      idempotencyKey: clientTxId || `tx_${crypto.randomUUID()}`,
       tenantId: activeTenantId,
       branchId: activeB?.id || 'branch-main',
       branchName: activeB?.name || 'الفرع الرئيسي',
@@ -1192,6 +1255,7 @@ export function useAppStore(options = {}) {
 
   const deleteExpense = (id) => {
     const target = expenses.find(e => e.id === id);
+    requireSameBranch(target);
     setExpenses(prev => prev.filter(e => e.id !== id));
     try {
       const activeTenantId = currentUser?.tenantId || target?.tenantId || 'tenant-demo';
@@ -1201,6 +1265,11 @@ export function useAppStore(options = {}) {
 
   // Damaged / Spoiled Items Actions (التوالف والإعدامات)
   const addDamagedItem = (item) => {
+    const scopedBranchId = requireWorkingBranch();
+    if (scopedBranchId && item.branchId && item.branchId !== scopedBranchId)
+      throw new Error('لا يمكن تسجيل هالك في فرع غير نشط');
+    if (scopedBranchId && item.productId)
+      requireSameBranch(products.find(product => product.id === item.productId));
     const qtyKg = Number(item.quantityKg);
     const costPerKg = Number(item.costPerKg);
     if (!Number.isFinite(costPerKg) || costPerKg < 0) throw new Error('تكلفة الهالك غير صالحة');
@@ -1233,53 +1302,61 @@ export function useAppStore(options = {}) {
   const deleteDamagedItem = (id) => {
     const target = damagedItems.find(d => d.id === id);
     if (!target) return;
+    const branchId = requireSameBranch(target);
     setProducts(prev=>applyDamageInventory(prev,target,-1));
     setDamagedItems(prev => prev.filter(d => d.id !== id));
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, null, 'damaged_item', id, 'delete', { id });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'damaged_item', id, 'delete', { id });
     } catch (e) { throw e; }
   };
 
   // Workers & Payroll Actions (العمال والرواتب مع المزامنة السحابية اللحظية)
   const addWorker = (worker) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireWorkingBranch();
     const newWorker = {
       ...worker,
-      id: `work-${Date.now()}`,
+      ...(branchId ? { branchId } : {}),
+      id: `work-${crypto.randomUUID()}`,
       baseSalary: Number(worker.baseSalary) || 0,
       currentAdvance: 0,
       startDate: worker.startDate || new Date().toISOString().split('T')[0]
     };
     setWorkers(prev => [newWorker, ...prev]);
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'worker', newWorker.id, 'create', newWorker);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'worker', newWorker.id, 'create', newWorker);
     } catch (e) { throw e; }
     return newWorker;
   };
 
   const updateWorker = (id, updates) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(workers.find(worker => worker.id === id));
+    if (branchId && updates.branchId && updates.branchId !== branchId) throw new Error('لا يمكن نقل العامل إلى فرع آخر بالتعديل');
     setWorkers(prev => prev.map(w => w.id === id ? { ...w, ...updates } : w));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'worker', id, 'update', updates);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'worker', id, 'update', updates);
     } catch (e) { throw e; }
   };
 
   const deleteWorker = (id) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(workers.find(worker => worker.id === id));
     setWorkers(prev => prev.filter(w => w.id !== id));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'worker', id, 'delete', { id });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'worker', id, 'delete', { id });
     } catch (e) { throw e; }
   };
 
   // Worker Transactions (سلفيات ورواتب)
   const addWorkerTransaction = (transaction) => {
+    const branchId = requireSameBranch(workers.find(worker => worker.id === transaction.workerId));
     const amount = Number(transaction.amount) || 0;
     const paymentMethod = transaction.paymentMethod || 'cash';
     const newTx = {
       ...transaction,
+      ...(branchId ? { branchId } : {}),
       id: transaction.id || `wt-${crypto.randomUUID()}`,
       amount,
       paymentMethod,
@@ -1311,7 +1388,7 @@ export function useAppStore(options = {}) {
     // Cloudflare sync
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, null, 'worker_transaction', newTx.id, 'create', newTx);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'worker_transaction', newTx.id, 'create', newTx);
     } catch (e) { throw e; }
 
     return newTx;
@@ -1320,6 +1397,7 @@ export function useAppStore(options = {}) {
   const recordWorkerTransactionWithUpdate = (workerId, updates, transaction, updateBefore = false) => {
     if (!workers.some(worker => worker.id === workerId) || transaction.workerId !== workerId)
       throw new Error('العامل المرتبط بالحركة غير صالح');
+    requireSameBranch(workers.find(worker => worker.id === workerId));
     if (updateBefore) updateWorker(workerId, updates);
     const saved = addWorkerTransaction(transaction);
     if (!updateBefore) updateWorker(workerId, updates);
@@ -1329,6 +1407,7 @@ export function useAppStore(options = {}) {
   const deleteWorkerTransaction = (id) => {
     const target = workerTransactions.find(t => t.id === id);
     if (target) {
+      const branchId = requireSameBranch(target);
       if (target.type === 'absence_record') {
         const field = target.absenceType === 'medical' ? 'medicalAbsenceDays' :
           target.absenceType === 'unexcused' ? 'unexcusedAbsenceDays' : null;
@@ -1343,7 +1422,7 @@ export function useAppStore(options = {}) {
       setExpenses(prev => prev.filter(e => e.workerTransactionId !== id && e.id !== `exp-${id}`));
       try {
         const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-        cloudflareSync.recordMutation(activeTenantId, null, 'worker_transaction', id, 'delete', { id });
+        cloudflareSync.recordMutation(activeTenantId, branchId, 'worker_transaction', id, 'delete', { id });
       } catch (e) { throw e; }
     }
     setWorkerTransactions(prev => prev.filter(t => t.id !== id));
@@ -1352,10 +1431,29 @@ export function useAppStore(options = {}) {
   // Settings Actions (مع المزامنة السحابية اللحظية)
   const updateSettings = (updates) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = Array.isArray(currentUser?.branchIds) ? requireWorkingBranch() : null;
     setSettings(prev => {
-      const nextSettings = { ...prev, ...updates };
-      try {
+      if (!branchId) {
+        const nextSettings = { ...prev, ...updates };
         cloudflareSync.recordMutation(activeTenantId, null, 'settings', 'settings', 'update', nextSettings);
+        return nextSettings;
+      }
+      const { openingCashDrawerFloat, openingCashDrawerFloatByBranch: _ignored, ...globalUpdates } = updates;
+      if (currentUser?.isStaff && Object.entries(globalUpdates).some(([key, value]) =>
+        JSON.stringify(value) !== JSON.stringify(prev[key])))
+        throw new Error('إعدادات الشركة العامة يغيرها مالك الشركة فقط');
+      const nextSettings = { ...prev, ...globalUpdates,
+        openingCashDrawerFloatByBranch: { ...prev.openingCashDrawerFloatByBranch,
+          [branchId]: openingCashDrawerFloat === undefined
+            ? Number(prev.openingCashDrawerFloatByBranch?.[branchId]) || 0
+            : Number(openingCashDrawerFloat) || 0 } };
+      try {
+        if (!currentUser?.isStaff && Object.keys(globalUpdates).length)
+          cloudflareSync.recordMutation(activeTenantId, null, 'settings', 'settings', 'update', globalUpdates);
+        if (openingCashDrawerFloat !== undefined)
+          cloudflareSync.recordMutation(activeTenantId, branchId, 'settings', `settings:${branchId}`, 'update', {
+            branchId, openingCashDrawerFloatByBranch: { [branchId]: nextSettings.openingCashDrawerFloatByBranch[branchId] }
+          });
       } catch (e) { throw e; }
       return nextSettings;
     });
@@ -1376,9 +1474,11 @@ export function useAppStore(options = {}) {
     }
 
     const activeTenantId = sup.tenantId || currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireWorkingBranch();
     const newSup = {
-      id: `sup-${Date.now()}`,
+      id: `sup-${crypto.randomUUID()}`,
       tenantId: activeTenantId,
+      ...(branchId ? { branchId } : {}),
       name: (sup.name || '').trim(),
       phone: (sup.phone || '').trim(),
       marketOrFarm: (sup.marketOrFarm || '').trim(),
@@ -1387,28 +1487,31 @@ export function useAppStore(options = {}) {
     };
     setSuppliers(prev => [newSup, ...prev]);
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'supplier', newSup.id, 'create', newSup);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'supplier', newSup.id, 'create', newSup);
     } catch (e) { throw e; }
     return newSup;
   };
 
   const updateSupplier = (id, updates) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(suppliers.find(s => s.id === id));
+    if (branchId && updates.branchId && updates.branchId !== branchId) throw new Error('لا يمكن نقل المورد إلى فرع آخر بالتعديل');
     setSuppliers(prev => prev.map(s => s.id === id ? { 
       ...s, 
       ...updates,
       balance: updates.balance !== undefined ? Math.round(Number(updates.balance) * 100) / 100 : s.balance
     } : s));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'supplier', id, 'update', updates);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'supplier', id, 'update', updates);
     } catch (e) { throw e; }
   };
 
   const deleteSupplier = (id) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(suppliers.find(s => s.id === id));
     setSuppliers(prev => prev.filter(s => s.id !== id));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'supplier', id, 'delete', { id });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'supplier', id, 'delete', { id });
     } catch (e) { throw e; }
   };
 
@@ -1430,6 +1533,7 @@ export function useAppStore(options = {}) {
     }
 
     const targetSupplier = suppliers.find(s => s.id === supplierId);
+    const branchId = requireSameBranch(targetSupplier);
     const supplierName = targetSupplier ? targetSupplier.name : 'مورد';
 
     // Deduct payment from supplier balance:
@@ -1447,10 +1551,11 @@ export function useAppStore(options = {}) {
     }));
 
     const newPayment = {
-      id: id || `supp-pay-${Date.now()}`,
-      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-      idempotencyKey: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      id: id || `supp-pay-${crypto.randomUUID()}`,
+      clientTransactionId: clientTxId || `tx_${crypto.randomUUID()}`,
+      idempotencyKey: clientTxId || `tx_${crypto.randomUUID()}`,
       supplierId,
+      ...(branchId ? { branchId } : {}),
       supplierName,
       amount: numAmount,
       paymentMethod, // 'cash' (من درج المحل) | 'bank' (تحويل بنكي)
@@ -1479,7 +1584,7 @@ export function useAppStore(options = {}) {
 
     try {
       const activeTenantId = currentUser?.tenantId || targetSupplier?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, null, 'supplier_payment', newPayment.id, 'create', newPayment);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'supplier_payment', newPayment.id, 'create', newPayment);
     } catch (e) { throw e; }
 
     return newPayment;
@@ -1488,6 +1593,7 @@ export function useAppStore(options = {}) {
   const deleteSupplierPayment = (paymentId) => {
     const target = supplierPayments.find(p => p.id === paymentId);
     if (target) {
+      const branchId = requireSameBranch(target);
       // Re-add the amount back to the supplier balance
       setSuppliers(prev => prev.map(s => {
         if (s.id === target.supplierId) {
@@ -1503,13 +1609,20 @@ export function useAppStore(options = {}) {
       setExpenses(prev => prev.filter(e => e.supplierPaymentId !== paymentId));
       try {
         const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-        cloudflareSync.recordMutation(activeTenantId, null, 'supplier_payment', paymentId, 'delete', { id: paymentId });
+        cloudflareSync.recordMutation(activeTenantId, branchId, 'supplier_payment', paymentId, 'delete', { id: paymentId });
       } catch (e) { throw e; }
     }
   };
 
   // Purchases Actions (المشتريات وتوريد البضاعة من الموردين)
   const addPurchase = (purData) => {
+    const scopedBranchId = requireWorkingBranch();
+    if (scopedBranchId && purData.branchId && purData.branchId !== scopedBranchId)
+      throw new Error('لا يمكن تسجيل شراء في فرع غير نشط');
+    if (scopedBranchId && purData.supplierId)
+      requireSameBranch(suppliers.find(supplier => supplier.id === purData.supplierId));
+    if (scopedBranchId && purData.productId)
+      requireSameBranch(products.find(product => product.id === purData.productId));
     // 0. Idempotency Guard: prevent duplicate purchase creation, double stock additions & double supplier balances
     const clientTxId = purData.clientTransactionId || purData.idempotencyKey || purData.id;
     if (clientTxId) {
@@ -1553,9 +1666,9 @@ export function useAppStore(options = {}) {
 
     const newPurchase = {
       ...purData,
-      id: purData.id || `pur-${Date.now()}`,
-      clientTransactionId: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-      idempotencyKey: clientTxId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      id: purData.id || `pur-${crypto.randomUUID()}`,
+      clientTransactionId: clientTxId || `tx_${crypto.randomUUID()}`,
+      idempotencyKey: clientTxId || `tx_${crypto.randomUUID()}`,
       branchId: targetBranchId,
       branchName: targetBranchName,
       date: purData.date || getCurrentDateFormatted(),
@@ -1594,7 +1707,8 @@ export function useAppStore(options = {}) {
       } else if (newPurchase.supplierName && newPurchase.supplierName !== 'سوق الجملة المركزي') {
         // The supplier's opening event must precede the purchase. Its opening
         // balance is zero: the purchase event applies the debt on every replica.
-        const match = suppliers.find(s => s.name.trim() === newPurchase.supplierName.trim());
+        const match = suppliers.find(s => (!scopedBranchId || s.branchId === scopedBranchId) &&
+          s.name.trim() === newPurchase.supplierName.trim());
         const supplier = match || addSupplier({
           name: newPurchase.supplierName.trim(), balance: 0,
           notes: 'تم إنشاؤه تلقائياً من فاتورة توريد آجل'
@@ -1610,7 +1724,7 @@ export function useAppStore(options = {}) {
     const prodName = (purData.productName || '').trim();
 
     if (purData.isNewProduct && prodName) {
-      const existing = products.find(p => p.name.trim() === prodName);
+      const existing = products.find(p => (!scopedBranchId || p.branchId === scopedBranchId) && p.name.trim() === prodName);
       if (!existing) {
         const createdProduct = addProduct({
           name: prodName,
@@ -1629,7 +1743,7 @@ export function useAppStore(options = {}) {
       } else {
         // If already exists, update existing product stock and average cost
         setProducts(prev => prev.map(p => {
-          if (p.name.trim() === prodName) {
+          if ((!scopedBranchId || p.branchId === scopedBranchId) && p.name.trim() === prodName) {
             const oldStock = Math.max(0, Number(p.currentStockKg) || 0);
             const newStock = Math.round((oldStock + purQty) * 100) / 100;
             const oldCost = Number(p.costPerKg) || 0;
@@ -1657,8 +1771,8 @@ export function useAppStore(options = {}) {
     } else if (purQty > 0) {
       // Existing product selected from list or entered
       setProducts(prev => prev.map(p => {
-        const isMatch = (purData.productId && p.id === purData.productId) || 
-                        (prodName && p.name.trim() === prodName);
+        const isMatch = (!scopedBranchId || p.branchId === scopedBranchId) &&
+          ((purData.productId && p.id === purData.productId) || (prodName && p.name.trim() === prodName));
         if (isMatch) {
           const oldStock = Math.max(0, Number(p.currentStockKg) || 0);
           const newStock = Math.round((oldStock + purQty) * 100) / 100;
@@ -1730,15 +1844,17 @@ export function useAppStore(options = {}) {
   }) => {
     const originalPurchase = (purchases || []).find(p => p.id === purchaseId);
     if (!originalPurchase) throw new Error('شحنة المشتريات الأصلية غير موجودة');
+    requireSameBranch(originalPurchase);
 
     const retKg = Number(returnedKg) || 0;
     // CRITICAL: Strictly lock to historical costPerKg from that purchase bill!
     const historicalCostPerKg = Number(originalPurchase.costPerKg) || 0;
     const totalRefund = Math.round(retKg * historicalCostPerKg * 100) / 100;
 
-    const returnId = `ret-pur-${Date.now()}`;
+    const returnId = `ret-pur-${crypto.randomUUID()}`;
     const newReturn = {
       id: returnId,
+      branchId: originalPurchase.branchId,
       purchaseId,
       productId: originalPurchase.productId,
       productName: originalPurchase.productName,
@@ -1771,6 +1887,7 @@ export function useAppStore(options = {}) {
   const deletePurchaseReturn = (returnId) => {
     const target = purchaseReturns.find(r => r.id === returnId);
     if (!target) return;
+    const branchId = requireSameBranch(target);
 
     const originalPurchase=purchases.find(p=>p.id===target.purchaseId);
     if(!originalPurchase) throw new Error('شحنة المشتريات الأصلية للمردود غير موجودة');
@@ -1781,7 +1898,7 @@ export function useAppStore(options = {}) {
     setPurchaseReturns(prev => prev.filter(r => r.id !== returnId));
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, null, 'purchase_return', returnId, 'delete', { id: returnId });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'purchase_return', returnId, 'delete', { id: returnId });
     } catch (e) { throw e; }
   };
 
@@ -1832,7 +1949,7 @@ export function useAppStore(options = {}) {
       partnerDrawings,
       profitDistributions,
       branches,
-      activeBranchId,
+      activeBranchId: activeBranchId === 'all' ? branches[0]?.id : activeBranchId,
       stockTransfers
     };
   };
@@ -1851,22 +1968,26 @@ export function useAppStore(options = {}) {
   // Partner Actions (مع المزامنة السحابية اللحظية)
   const addPartner = (partnerData) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireWorkingBranch();
     const newPartner = {
       ...partnerData,
-      id: partnerData.id || `partner-${Date.now()}`,
+      ...(branchId ? { branchId } : {}),
+      id: partnerData.id || `partner-${crypto.randomUUID()}`,
       sharePercentage: Number(partnerData.sharePercentage) || 0,
       initialCapital: Number(partnerData.initialCapital) || 0,
       createdAt: partnerData.createdAt || getCurrentDateFormatted()
     };
     setPartners(prev => [...prev, newPartner]);
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'partner', newPartner.id, 'create', newPartner);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'partner', newPartner.id, 'create', newPartner);
     } catch (e) { throw e; }
     return newPartner;
   };
 
   const updatePartner = (id, updates) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(partners.find(partner => partner.id === id));
+    if (branchId && updates.branchId && updates.branchId !== branchId) throw new Error('لا يمكن نقل الشريك إلى فرع آخر بالتعديل');
     setPartners(prev => prev.map(p => p.id === id ? {
       ...p,
       ...updates,
@@ -1874,27 +1995,30 @@ export function useAppStore(options = {}) {
       initialCapital: updates.initialCapital !== undefined ? Number(updates.initialCapital) : p.initialCapital
     } : p));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'partner', id, 'update', updates);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'partner', id, 'update', updates);
     } catch (e) { throw e; }
   };
 
   const deletePartner = (id) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(partners.find(partner => partner.id === id));
     if (partnerDrawings.some(row=>row.partnerId===id) ||
         profitDistributions.some(row=>(row.shares||[]).some(share=>share.partnerId===id)))
       throw new Error('لا يمكن حذف شريك له مسحوبات أو توزيعات قائمة');
     setPartners(prev => prev.filter(p => p.id !== id));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'partner', id, 'delete', { id });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'partner', id, 'delete', { id });
     } catch (e) { throw e; }
   };
 
   // Partner Drawings (سحب الشركاء مع المزامنة السحابية)
   const recordPartnerDrawing = (drawingData) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(partners.find(partner => partner.id === drawingData.partnerId));
     const newDrawing = {
       ...drawingData,
-      id: drawingData.id || `draw-${Date.now()}`,
+      ...(branchId ? { branchId } : {}),
+      id: drawingData.id || `draw-${crypto.randomUUID()}`,
       amount: Number(drawingData.amount) || 0,
       method: drawingData.method || 'cash', // 'cash' | 'bank'
       date: drawingData.date || getCurrentDateFormatted(),
@@ -1904,25 +2028,30 @@ export function useAppStore(options = {}) {
     };
     setPartnerDrawings(prev => [newDrawing, ...prev]);
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'partner_drawing', newDrawing.id, 'create', newDrawing);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'partner_drawing', newDrawing.id, 'create', newDrawing);
     } catch (e) { throw e; }
     return newDrawing;
   };
 
   const deletePartnerDrawing = (id) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(partnerDrawings.find(drawing => drawing.id === id));
     setPartnerDrawings(prev => prev.filter(d => d.id !== id));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'partner_drawing', id, 'delete', { id });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'partner_drawing', id, 'delete', { id });
     } catch (e) { throw e; }
   };
 
   // Profit Distributions (توزيعات الأرباح مع المزامنة السحابية)
   const recordProfitDistribution = (distData) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireWorkingBranch();
+    if (branchId) for (const share of distData.shares || [])
+      requireSameBranch(partners.find(partner => partner.id === share.partnerId));
     const newDist = {
       ...distData,
-      id: distData.id || `dist-${Date.now()}`,
+      ...(branchId ? { branchId } : {}),
+      id: distData.id || `dist-${crypto.randomUUID()}`,
       totalDistributedAmount: Number(distData.totalDistributedAmount) || 0,
       date: distData.date || getCurrentDateFormatted(),
       time: distData.time || getCurrentTimeFormatted(),
@@ -1933,16 +2062,17 @@ export function useAppStore(options = {}) {
     };
     setProfitDistributions(prev => [newDist, ...prev]);
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'profit_distribution', newDist.id, 'create', newDist);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'profit_distribution', newDist.id, 'create', newDist);
     } catch (e) { throw e; }
     return newDist;
   };
 
   const deleteProfitDistribution = (id) => {
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
+    const branchId = requireSameBranch(profitDistributions.find(distribution => distribution.id === id));
     setProfitDistributions(prev => prev.filter(d => d.id !== id));
     try {
-      cloudflareSync.recordMutation(activeTenantId, null, 'profit_distribution', id, 'delete', { id });
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'profit_distribution', id, 'delete', { id });
     } catch (e) { throw e; }
   };
 
@@ -1950,8 +2080,12 @@ export function useAppStore(options = {}) {
   // Financial Position Engine ("أين الفلوس الآن؟")
   // --------------------------------------------------------------------------
   const getFinancialPosition = () => {
+    const scope = rows => visibleBranchRecords(currentUser, activeBranchId, rows);
+    const calculate = ({ invoices, customerPayments, expenses, purchases, supplierPayments,
+      workerTransactions, partnerDrawings, profitDistributions, salesReturns, purchaseReturns,
+      customers, suppliers }, openingCashFloatValue) => {
     // 0. Opening Cash Float (العهدة الافتتاحية للصندوق)
-    const openingCashFloat = Number(settings?.openingCashDrawerFloat) || 0;
+    const openingCashFloat = Number(openingCashFloatValue) || 0;
 
     // 1. Cash Inflows
     const validInvoices = invoices.filter(i => i.status !== 'voided');
@@ -2129,18 +2263,43 @@ export function useAppStore(options = {}) {
       totalSalesReturnsAmount,
       totalPurchaseReturnsAmount
     };
+    };
+    return calculate({
+      invoices: scope(invoices), customerPayments: scope(customerPayments), expenses: scope(expenses),
+      purchases: scope(purchases), supplierPayments: scope(supplierPayments),
+      workerTransactions: scope(workerTransactions), partnerDrawings: scope(partnerDrawings),
+      profitDistributions: scope(profitDistributions), salesReturns: scope(salesReturns),
+      purchaseReturns: scope(purchaseReturns), customers: scope(customers), suppliers: scope(suppliers)
+    }, Array.isArray(currentUser?.branchIds)
+      ? activeBranchId === 'all'
+        ? branches.reduce((sum, branch) => sum + (Number(settings?.openingCashDrawerFloatByBranch?.[branch.id]) || 0), 0)
+        : settings?.openingCashDrawerFloatByBranch?.[activeBranchId]
+      : settings?.openingCashDrawerFloat);
   };
 
   const getAccountingSnapshot = () => buildAccountingSnapshot({
-    products, customers, invoices, expenses, damagedItems, workers, workerTransactions,
-    purchases, suppliers, partnerDrawings, profitDistributions, salesReturns, purchaseReturns,
-    partners
+    products: visibleBranchRecords(currentUser, activeBranchId, products),
+    customers: visibleBranchRecords(currentUser, activeBranchId, customers),
+    invoices: visibleBranchRecords(currentUser, activeBranchId, invoices),
+    expenses: visibleBranchRecords(currentUser, activeBranchId, expenses),
+    damagedItems: visibleBranchRecords(currentUser, activeBranchId, damagedItems),
+    workers: visibleBranchRecords(currentUser, activeBranchId, workers),
+    workerTransactions: visibleBranchRecords(currentUser, activeBranchId, workerTransactions),
+    purchases: visibleBranchRecords(currentUser, activeBranchId, purchases),
+    suppliers: visibleBranchRecords(currentUser, activeBranchId, suppliers),
+    partnerDrawings: visibleBranchRecords(currentUser, activeBranchId, partnerDrawings),
+    profitDistributions: visibleBranchRecords(currentUser, activeBranchId, profitDistributions),
+    salesReturns: visibleBranchRecords(currentUser, activeBranchId, salesReturns),
+    purchaseReturns: visibleBranchRecords(currentUser, activeBranchId, purchaseReturns),
+    partners: visibleBranchRecords(currentUser, activeBranchId, partners)
   }, getFinancialPosition());
 
   const importBackupJSON = (jsonString) => {
     try {
       const data = validateBackup(JSON.parse(jsonString), currentUser?.tenantId);
-      if (!['company_owner','admin','super_admin'].includes(currentUser?.role)) throw new Error('الاستعادة تتطلب صلاحية مدير');
+      if (!['company_owner','admin','super_admin'].includes(currentUser?.role) ||
+          !assignedBranchIds(currentUser).includes('all'))
+        throw new Error('الاستعادة تتطلب صلاحية مدير على الشركة كاملة');
       const id=`restore-${crypto.randomUUID()}`;
       for (const [key,value] of Object.entries(backupToState(data))) local.set(key,value);
       local.replaceOutboxWithRestore({id,tenantId:currentUser.tenantId,entityType:'restore_snapshot',entityId:id,
@@ -2286,7 +2445,9 @@ export function useAppStore(options = {}) {
     broadcastAuthEvent('USER_DELETED', { id: userId });
   };
 
-  const activeBranch = branches.find(b => b.id === activeBranchId) || branches[0] || {
+  const activeBranch = activeBranchId === 'all' ? {
+    id: 'all', name: 'كل الفروع — عرض فقط', code: 'ALL', isMain: false
+  } : branches.find(b => b.id === activeBranchId) || branches[0] || {
     id: 'branch-main',
     name: 'الفرع الرئيسي (السوق المركزي)',
     code: 'BR-01',
@@ -2294,9 +2455,10 @@ export function useAppStore(options = {}) {
   };
 
   const changeActiveBranch = (branchId) => {
-    if (branches.some(b => b.id === branchId)) {
-      setActiveBranchId(branchId);
-    }
+    if (!canAccessBranch(currentUser, branchId) ||
+        (branchId !== 'all' && !branches.some(b => b.id === branchId)))
+      throw new Error('لا تملك صلاحية عرض هذا الفرع');
+    setActiveBranchId(branchId);
   };
 
   const addBranch = (branchData) => {
@@ -2381,10 +2543,22 @@ export function useAppStore(options = {}) {
     const toB = branches.find(b => b.id === toBranchId);
     if (!fromB || !toB) throw new Error('الفرع المصدر أو المستلم غير موجود');
 
-    const matches = products.filter(p => productId ? p.id === productId : p.name.trim() === (productName || '').trim());
+    const matches = products.filter(p => (!p.branchId || p.branchId === fromBranchId) &&
+      (productId ? p.id === productId : p.name.trim() === (productName || '').trim()));
     if (matches.length !== 1) throw new Error('صنف المناقلة غير موجود أو غير محدد');
     productId = matches[0].id;
     productName = matches[0].name;
+    const sourceProduct = matches[0];
+    const scopedProducts = Boolean(sourceProduct.branchId);
+    let destinationProduct = null;
+    if (scopedProducts) {
+      const available = Number(sourceProduct.branchStock?.[fromBranchId] ?? sourceProduct.currentStockKg);
+      if (!Number.isFinite(available) || available < numQty || Number(sourceProduct.currentStockKg) < numQty)
+        throw new Error('رصيد الفرع المصدر لا يكفي للمناقلة');
+      const destinationMatches = products.filter(p => p.branchId === toBranchId && p.name.trim() === productName.trim());
+      if (destinationMatches.length > 1) throw new Error('الصنف المستلم غير محدد في الفرع الآخر');
+      destinationProduct = destinationMatches[0] || null;
+    }
 
     const transferRecord = {
       id: `trans-${crypto.randomUUID()}`,
@@ -2394,6 +2568,8 @@ export function useAppStore(options = {}) {
       toBranchName: toB.name,
       productId,
       productName,
+      ...(scopedProducts ? { scopedProducts: true, sourceProductId: productId,
+        destinationProductId: destinationProduct?.id || `prod-${crypto.randomUUID()}` } : {}),
       quantityKg: numQty,
       notes,
       date: getCurrentDateFormatted(),
@@ -2401,7 +2577,31 @@ export function useAppStore(options = {}) {
       timestamp: Date.now()
     };
 
-    setProducts(prev => applyStockTransfer(prev, branches, transferRecord));
+    if (scopedProducts) {
+      const roundStock = value => Math.round((value + Number.EPSILON) * 100) / 100;
+      const sourceStock = roundStock(Number(sourceProduct.currentStockKg) - numQty);
+      const sourceBranchStock = roundStock(Number(sourceProduct.branchStock?.[fromBranchId] ?? sourceProduct.currentStockKg) - numQty);
+      const sourceUpdate = { currentStockKg: sourceStock,
+        branchStock: { ...sourceProduct.branchStock, [fromBranchId]: sourceBranchStock } };
+      const destinationStock = Number(destinationProduct?.currentStockKg || 0);
+      const destinationCost = Number(destinationProduct?.costPerKg || 0);
+      const sourceCost = Number(sourceProduct.costPerKg || 0);
+      const newDestinationStock = roundStock(destinationStock + numQty);
+      const destinationUpdate = { currentStockKg: newDestinationStock,
+        branchStock: { ...destinationProduct?.branchStock, [toBranchId]: newDestinationStock },
+        costPerKg: newDestinationStock > 0
+          ? roundStock((destinationStock * destinationCost + numQty * sourceCost) / newDestinationStock) : sourceCost };
+      const createdDestination = destinationProduct ? null : { ...sourceProduct,
+        id: transferRecord.destinationProductId, branchId: toBranchId,
+        ...destinationUpdate };
+      setProducts(prev => createdDestination
+        ? [createdDestination, ...prev.map(p => p.id === sourceProduct.id ? { ...p, ...sourceUpdate } : p)]
+        : prev.map(p => p.id === sourceProduct.id ? { ...p, ...sourceUpdate }
+          : p.id === destinationProduct.id ? { ...p, ...destinationUpdate } : p));
+      cloudflareSync.recordMutation(currentUser.tenantId, fromBranchId, 'product', sourceProduct.id, 'update', sourceUpdate);
+      cloudflareSync.recordMutation(currentUser.tenantId, toBranchId, 'product', transferRecord.destinationProductId,
+        createdDestination ? 'create' : 'update', createdDestination || destinationUpdate);
+    } else setProducts(prev => applyStockTransfer(prev, branches, transferRecord));
     setStockTransfers(prev => [transferRecord, ...prev]);
     cloudflareSync.recordMutation(currentUser.tenantId, null, 'stock_transfer', transferRecord.id, 'create', transferRecord);
     return transferRecord;
@@ -2432,6 +2632,12 @@ export function useAppStore(options = {}) {
     setTrialRequests(prev => prev.filter(r => r.id !== id));
   };
 
+  const visibleSettings = useMemo(() => Array.isArray(currentUser?.branchIds)
+    ? { ...settings, openingCashDrawerFloat: activeBranchId === 'all'
+      ? branches.reduce((sum, branch) => sum + (Number(settings?.openingCashDrawerFloatByBranch?.[branch.id]) || 0), 0)
+      : Number(settings?.openingCashDrawerFloatByBranch?.[activeBranchId]) || 0 }
+    : settings, [settings, activeBranchId, currentUser?.branchIds, branches]);
+
   return {
     persistence,
     trialRequests,
@@ -2443,6 +2649,7 @@ export function useAppStore(options = {}) {
     syncCloudTenants,
     syncCloudUsers,
     currentUser,
+    canViewAllBranches: canAccessBranch(currentUser, 'all'),
     branches,
     activeBranchId,
     activeBranch,
@@ -2466,24 +2673,24 @@ export function useAppStore(options = {}) {
     updateUser,
     deleteUser,
     hasPermission,
-    products,
-    customers,
-    invoices,
-    expenses,
+    products: visibleBranchRecords(currentUser, activeBranchId, products),
+    customers: visibleBranchRecords(currentUser, activeBranchId, customers),
+    invoices: visibleBranchRecords(currentUser, activeBranchId, invoices),
+    expenses: visibleBranchRecords(currentUser, activeBranchId, expenses),
     expenseCategories,
-    settings,
-    damagedItems,
-    workers,
-    workerTransactions,
-    customerPayments,
-    purchases,
-    suppliers,
-    supplierPayments,
-    salesReturns,
-    purchaseReturns,
-    partners,
-    partnerDrawings,
-    profitDistributions,
+    settings: visibleSettings,
+    damagedItems: visibleBranchRecords(currentUser, activeBranchId, damagedItems),
+    workers: visibleBranchRecords(currentUser, activeBranchId, workers),
+    workerTransactions: visibleBranchRecords(currentUser, activeBranchId, workerTransactions),
+    customerPayments: visibleBranchRecords(currentUser, activeBranchId, customerPayments),
+    purchases: visibleBranchRecords(currentUser, activeBranchId, purchases),
+    suppliers: visibleBranchRecords(currentUser, activeBranchId, suppliers),
+    supplierPayments: visibleBranchRecords(currentUser, activeBranchId, supplierPayments),
+    salesReturns: visibleBranchRecords(currentUser, activeBranchId, salesReturns),
+    purchaseReturns: visibleBranchRecords(currentUser, activeBranchId, purchaseReturns),
+    partners: visibleBranchRecords(currentUser, activeBranchId, partners),
+    partnerDrawings: visibleBranchRecords(currentUser, activeBranchId, partnerDrawings),
+    profitDistributions: visibleBranchRecords(currentUser, activeBranchId, profitDistributions),
     addProduct: atomicAction(addProduct),
     updateProduct: atomicAction(updateProduct),
     updateProductPrice: atomicAction(updateProductPrice),

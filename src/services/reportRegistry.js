@@ -16,7 +16,7 @@ export const REPORT_REGISTRY = Object.freeze([
   ['shift','ReportsCenterView.jsx','all cash movements/opening float','current cash drawer reconciliation, not historical shift close','current as-of'],
   ['expenses','ReportsCenterView.jsx','unlinked expenses','operating expenses','date'],
   ['payroll','ReportsCenterView.jsx','worker transactions','payroll and advances','date']
-].map(([id,source,dataSource,meaning,filters])=>Object.freeze({id,source,dataSource,meaning,filters,branchScope:'all locally visible branches; active branch is not a filter',tenantScope:'authenticated tenant'})));
+].map(([id,source,dataSource,meaning,filters])=>Object.freeze({id,source,dataSource,meaning,filters,branchScope:'active authorized branch, or explicitly authorized aggregate view',tenantScope:'authenticated tenant'})));
 
 const n=value=>Number.isFinite(Number(value))?Number(value):0;
 const sum=(rows,select)=>rows.reduce((total,row)=>total+n(select(row)),0);
@@ -77,7 +77,7 @@ function datePredicate(filter,asOfDate) {
 
 export function buildReportSnapshot(data,{dateFilter='all',asOfDate=new Date().toISOString().slice(0,10),branchId='all'}={}) {
   const byDate=datePredicate(dateFilter,asOfDate);
-  const scoped=row=>byDate(row)&&(branchId==='all'||!row.branchId||row.branchId===branchId);
+  const scoped=row=>byDate(row)&&(branchId==='all'||row.branchId===branchId);
   const invoices=(data.invoices||[]).filter(row=>row.status!=='voided'&&scoped(row));
   const purchases=(data.purchases||[]).filter(scoped);
   const salesReturns=(data.salesReturns||[]).filter(scoped);

@@ -26,6 +26,7 @@ android/app/*.jks
 *.aab
 
 # Desktop build & large installers
+dist-electron/
 *.exe
 *.dmg
 *.deb

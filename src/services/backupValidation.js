@@ -40,32 +40,54 @@ export function validateBackup(data, tenantId) {
     if (optional && (value === undefined || value === null || value === '')) return;
     if (typeof value !== 'string' || !ids[target].has(value)) throw new Error('علاقة مفقودة في النسخة: '+source+'.'+field);
   };
+  const byId = Object.fromEntries(BACKUP_ARRAY_FIELDS.filter(field => field !== 'expenseCategories')
+    .map(field => [field, new Map(data[field].map(row => [row.id, row]))]));
+  const sameBranch = (row, field, target, source) => {
+    const related = byId[target]?.get(row?.[field]);
+    if (row?.branchId && related?.branchId && row.branchId !== related.branchId)
+      throw new Error('علاقة بين فرعين مختلفين في النسخة: '+source+'.'+field);
+  };
   for (const [field,reference,target] of [
     ['customerPayments','customerId','customers'],['supplierPayments','supplierId','suppliers'],
     ['workerTransactions','workerId','workers'],['partnerDrawings','partnerId','partners'],
     ['salesReturns','invoiceId','invoices'],['purchaseReturns','purchaseId','purchases']
-  ]) for (const row of data[field]) if (!ids[target].has(row[reference])) throw new Error('علاقة مفقودة في النسخة: '+field);
+  ]) for (const row of data[field]) {
+    if (!ids[target].has(row[reference])) throw new Error('علاقة مفقودة في النسخة: '+field);
+    sameBranch(row, reference, target, field);
+  }
   for (const row of data.invoices) {
-    requireRef(row,'customerId','customers','invoices',true);
+    if (row.customerId !== 'walk_in') requireRef(row,'customerId','customers','invoices',true);
+    sameBranch(row,'customerId','customers','invoices');
     requireRef(row,'branchId','branches','invoices',true);
     if (!Array.isArray(row.items)) throw new Error('بنود فاتورة غير صالحة في النسخة');
-    for (const item of row.items) requireRef(item,'productId','products','invoices.items');
+    for (const item of row.items) {
+      requireRef(item,'productId','products','invoices.items');
+      if (row.branchId && byId.products.get(item.productId)?.branchId &&
+          row.branchId !== byId.products.get(item.productId).branchId)
+        throw new Error('علاقة بين فرعين مختلفين في النسخة: invoices.items.productId');
+    }
   }
   for (const row of data.purchases) {
     requireRef(row,'productId','products','purchases');
     requireRef(row,'supplierId','suppliers','purchases',true);
+    sameBranch(row,'productId','products','purchases');
+    sameBranch(row,'supplierId','suppliers','purchases');
     requireRef(row,'branchId','branches','purchases',true);
   }
   for (const row of data.salesReturns) {
     requireRef(row,'invoiceId','invoices','salesReturns');
+    sameBranch(row,'invoiceId','invoices','salesReturns');
     for (const item of row.returnedItems || []) requireRef(item,'productId','products','salesReturns.returnedItems');
   }
   for (const row of data.purchaseReturns) {
     requireRef(row,'purchaseId','purchases','purchaseReturns');
     requireRef(row,'productId','products','purchaseReturns',true);
+    sameBranch(row,'purchaseId','purchases','purchaseReturns');
+    sameBranch(row,'productId','products','purchaseReturns');
   }
   for (const row of data.damagedItems) {
     requireRef(row,'productId','products','damagedItems');
+    sameBranch(row,'productId','products','damagedItems');
     requireRef(row,'branchId','branches','damagedItems',true);
   }
   for (const row of data.stockTransfers) {
@@ -78,6 +100,8 @@ export function validateBackup(data, tenantId) {
     requireRef(row,'branchId','branches','expenses',true);
     requireRef(row,'workerId','workers','expenses',true);
     requireRef(row,'supplierId','suppliers','expenses',true);
+    sameBranch(row,'workerId','workers','expenses');
+    sameBranch(row,'supplierId','suppliers','expenses');
   }
   for (const row of data.profitDistributions) {
     if (!Array.isArray(row.shares)) throw new Error('توزيع أرباح بلا حصص صالحة');

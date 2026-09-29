@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Printer, MessageCircle, Copy, X, Check, FileText, ArrowRight, Edit3 } from 'lucide-react';
 import { formatCurrency, formatWeight } from '../utils/formatters';
 import { openWhatsAppInvoice, generateWhatsAppInvoiceMessage } from '../utils/whatsapp';
+import { displayInvoiceNumber } from '../services/invoiceIdentity';
 
 export default function InvoiceReceiptModal({ isOpen, onClose, invoice, settings, onUpdateInvoiceNotes }) {
   const receiptRef = useRef(null);
@@ -43,7 +44,7 @@ export default function InvoiceReceiptModal({ isOpen, onClose, invoice, settings
         <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white print:hidden">
           <div className="flex items-center gap-2">
             <FileText size={18} className="text-brand-400" />
-            <h3 className="font-bold text-sm">فاتورة رقم #{invoice.id}</h3>
+            <h3 className="font-bold text-sm">فاتورة رقم #{displayInvoiceNumber(invoice)}</h3>
           </div>
           <button 
             onClick={onClose}
@@ -86,7 +87,7 @@ export default function InvoiceReceiptModal({ isOpen, onClose, invoice, settings
             <div className="py-2.5 border-b border-dashed border-slate-300 space-y-1 text-[11px]">
               <div className="flex justify-between font-bold text-slate-800">
                 <span>فاتورة بيع رقم:</span>
-                <span className="font-mono text-xs">#{invoice.id}</span>
+                <span className="font-mono text-xs">#{displayInvoiceNumber(invoice)}</span>
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>التاريخ والوقت:</span>

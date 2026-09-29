@@ -1,6 +1,7 @@
 import { authenticateRequest, requireTenant } from '../../_lib/auth.js';
 import { json, options } from '../../_lib/http.js';
 import { canSync, SYNC_TYPES } from '../../_lib/syncPolicy.js';
+import { canAccessBranch } from '../../../src/services/branchAccess.js';
 
 export const onRequestOptions = options;
 export async function onRequestGet({ request, env }) {
@@ -23,7 +24,7 @@ export async function onRequestGet({ request, env }) {
   if (restoreIndex >= 0) count = restoreIndex + 1;
   const page = results.slice(0, count);
   const visible = page.filter(row => canSync(auth.principal, row.entity_type) &&
-    (auth.principal.branchId === 'all' || row.branch_id === auth.principal.branchId));
+    (auth.principal.branchIds?.includes('all') || (row.branch_id && canAccessBranch(auth.principal, row.branch_id))));
   const events = visible.map(row => ({
     id: row.id, tenantId: row.tenant_id, branchId: row.branch_id, sequence: row.sequence, groupId: row.group_id,
     entityType: row.entity_type, entityId: row.entity_id, action: row.action,
@@ -31,7 +32,7 @@ export async function onRequestGet({ request, env }) {
     preconditions: row.preconditions_json ? JSON.parse(row.preconditions_json) : null,
     clientTimestamp: row.client_timestamp, serverTimestamp: row.server_timestamp
   }));
-  const fullTenantVisibility = auth.principal.branchId === 'all' &&
+  const fullTenantVisibility = auth.principal.branchIds?.includes('all') &&
     SYNC_TYPES.every(type => canSync(auth.principal, type));
   const hasMore = results.length > count || results.length === maxRows;
   let conflictHeads;

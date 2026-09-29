@@ -2,6 +2,7 @@
 import { badRequest, json, options, readJson } from '../../_lib/http.js';
 import { createSession } from '../../_lib/auth.js';
 import { verifyPassword } from '../../_lib/passwords.js';
+import { assignedBranchIds, visibleBranches } from '../../../src/services/branchAccess.js';
 
 import { rateLimit } from '../../_lib/rateLimit.js';
 
@@ -50,14 +51,21 @@ export async function onRequestPost({ request, env }) {
       phone: row.phone || '', address: row.address || '', managerName: row.manager_name || '',
       isMain: Boolean(row.is_main), status: row.status, createdAt: row.created_at
     }));
-    return json({ success: true, authenticated: true, userType: principal.type === 'tenant' ? 'owner' : 'staff', session, user: {
-      id: principal.id, tenantId: tenant.id, branchId: staff?.branch_id || 'all', username: user,
+    const branchIds = principal.type === 'tenant' ? ['all'] : assignedBranchIds({
+      branchId: staff.branch_id,
+      branchIds: staff.branch_ids_json ? JSON.parse(staff.branch_ids_json) : undefined
+    });
+    const loginUser = {
+      id: principal.id, tenantId: tenant.id, branchId: branchIds.includes('all') ? 'all' : branchIds[0] || null,
+      branchIds, username: user,
       name: staff?.name || tenant.company_name, role: principal.role,
       syncScopeVersion: principal.type === 'user' ? principal.credentialVersion : 0,
       permissions: staff ? JSON.parse(staff.permissions_json || '{}') : {},
       storeCode: tenant.store_code, companyName: tenant.company_name
-    }, tenant: { id: tenant.id, storeCode: tenant.store_code, companyName: tenant.company_name, status: tenant.status,
-      expiresAt: tenant.expires_at, allowedBranches: tenant.allowed_branches }, branches });
+    };
+    return json({ success: true, authenticated: true, userType: principal.type === 'tenant' ? 'owner' : 'staff', session, user: loginUser,
+      tenant: { id: tenant.id, storeCode: tenant.store_code, companyName: tenant.company_name, status: tenant.status,
+        expiresAt: tenant.expires_at, allowedBranches: tenant.allowed_branches }, branches: visibleBranches(loginUser, branches) });
   } catch {
     return json({ success: false, error: 'Authentication failed' }, 500);
   }
