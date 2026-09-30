@@ -94,10 +94,10 @@ function createWindow() {
 // -------------------------------------------------------------
 const fs = require('node:fs');
 const https = require('node:https');
-const { spawn } = require('node:child_process');
 const { pipeline } = require('node:stream/promises');
 const { Transform } = require('node:stream');
 const { validateDownloadUrl, verifyManifest, verifyFile } = require('./update-security.cjs');
+const { launchVisibleInstaller } = require('./update-installer.cjs');
 let activeAbort = null;
 let verifiedUpdate = null;
 function trustedSender(event) {
@@ -160,10 +160,7 @@ ipcMain.handle('install-update', async event=>{
   try {
     await verifyFile(verifiedUpdate.installer,verifiedUpdate.manifest);
     // No renderer-controlled path, shell, batch file, or process-name termination.
-    const child=spawn(verifiedUpdate.installer,[],{detached:true,stdio:'ignore',windowsHide:true});
-    await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});
-    child.unref();
-    app.quit();
+    await launchVisibleInstaller(verifiedUpdate.installer);
     return {success:true};
   } catch(error) {return {success:false,error:error.message};}
 });

@@ -29,6 +29,7 @@ Object.defineProperty(navigator, 'onLine', { configurable: true, value: false })
 sessionStorage.setItem('khodar_pos_session_token', 'isolated-test-token');
 sessionStorage.setItem('khodar_verified_session_user', JSON.stringify({
   id: 'browser-hook-user', tenantId: 'browser-hook-tenant', role: 'cashier',
+  branchId: 'browser-hook-main', branchIds: ['browser-hook-main'],
   sessionExpiresAt: new Date(Date.now() + 3600000).toISOString()
 }));
 localStorage.setItem('braka:browser-hook-tenant:browser-hook-user:khodar_pos_branches_v1', JSON.stringify([{

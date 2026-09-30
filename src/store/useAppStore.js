@@ -144,6 +144,13 @@ export function useAppStore(options = {}) {
       [SYNC_HEADS_STATE_KEY]: {},
     }, globalThis.localStorage, { durableFirst: Boolean(durableRepository) });
   });
+  const archiveConflictingCache = async () => {
+    if (!['company_owner', 'admin', 'super_admin'].includes(currentUser?.role))
+      throw new Error('استرداد السجل متاح لمالك الشركة أو المسؤول فقط');
+    const archiveKey = await local.archiveConflictingCache(durableRepository);
+    window.location.reload();
+    return archiveKey;
+  };
   let products = local.read(STORAGE_KEYS.PRODUCTS);
   const setProducts = update => local.set(STORAGE_KEYS.PRODUCTS, update);
   let customers = local.read(STORAGE_KEYS.CUSTOMERS);
@@ -2640,6 +2647,7 @@ export function useAppStore(options = {}) {
 
   return {
     persistence,
+    archiveConflictingCache,
     trialRequests,
     addTrialRequest: atomicAction(addTrialRequest),
     updateTrialRequest: atomicAction(updateTrialRequest),

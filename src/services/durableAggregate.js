@@ -42,6 +42,37 @@ export class DurableAggregate {
     });
   }
 
+  // Preserve the exact compatibility record before allowing an administrator
+  // to continue with the already committed IndexedDB aggregate.
+  async archiveCache(key, raw, expectedRevision) {
+    if (!key || typeof raw !== 'string' || !Number.isSafeInteger(expectedRevision))
+      throw new Error('طلب أرشفة النسخة المحلية غير صالح');
+    const archiveKey = `${key}:recovery-cache:${crypto.randomUUID()}`;
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      let conflict = null;
+      const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' });
+      if (tx.durability !== 'strict') {
+        tx.abort();
+        reject(new Error('المتصفح لم يؤكد الحفظ الصارم لنسخة الاسترداد'));
+        return;
+      }
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.get(key);
+      request.onsuccess = () => {
+        if (request.result?.revision !== expectedRevision) {
+          conflict = new Error('تغير السجل الدائم أثناء الاسترداد؛ أعد المحاولة');
+          tx.abort();
+          return;
+        }
+        store.add({ kind: 'compatibility-cache-recovery', sourceKey: key, raw, createdAt: Date.now() }, archiveKey);
+      };
+      tx.oncomplete = () => resolve(archiveKey);
+      tx.onerror = () => reject(conflict || tx.error || new Error('تعذر أرشفة النسخة المحلية'));
+      tx.onabort = () => reject(conflict || tx.error || new Error('أُلغيت أرشفة النسخة المحلية'));
+    });
+  }
+
   // For forensic recovery, preserve the exact sanitized starting aggregate
   // independently of the compatibility cache and later durable revisions.
   readMigrationSource(key) { return this.read(migrationSourceKey(key)); }

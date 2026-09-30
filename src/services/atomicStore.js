@@ -537,6 +537,51 @@ export class AtomicStore {
     })().catch(error => { this.writable = false; rejectReady(error); });
     return ready;
   }
+  async archiveConflictingCache(durable, locks = globalThis.navigator?.locks) {
+    if (!this.durableFirst || this.writable || !this.key || !durable?.archiveCache || !locks)
+      throw new Error('استرداد السجل غير متاح الآن');
+    return locks.request(this.key, { ifAvailable: true }, async lock => {
+      if (!lock) throw new Error('هذا الحساب مفتوح في نافذة أخرى؛ أغلقها قبل الاسترداد');
+      const raw = this.storage.getItem(this.key);
+      if (raw === null) throw new Error('لا توجد نسخة محلية مختلفة لاستردادها');
+      const cache = JSON.parse(raw);
+      this.validate(cache);
+      if (cache.outbox.length || this.getLegacyTenantQueue().some(event =>
+        event.userId === this.user?.id && !cache.applied[event.id]))
+        throw new Error('توجد حركات مالية محلية معلقة؛ يلزم فحصها قبل المتابعة');
+      const saved = await durable.read(this.key);
+      this.validate(saved);
+      this.validateDurableOutbox(saved);
+      if (cache.cursor > saved.cursor || Object.keys(cache.applied).some(id =>
+        cache.applied[id] === true && saved.applied[id] !== true))
+        throw new Error('توجد حركات مستلمة في النسخة المحلية فقط؛ يلزم فحصها قبل المتابعة');
+      for (const key of Object.keys(DIRECT_RECORD_EVENT_BY_KEY)) {
+        const cachedRows = cache.state[key] ?? [];
+        const durableRows = saved.state[key] ?? [];
+        if (!Array.isArray(cachedRows) || !Array.isArray(durableRows))
+          throw new Error('شكل سجل مالي غير متوقع؛ يلزم فحصه قبل المتابعة');
+        const durableIds = new Set(durableRows.map(row => row?.id));
+        if (cachedRows.some(row => !row?.id || !durableIds.has(row.id)))
+          throw new Error('توجد سجلات مالية في النسخة المحلية فقط؛ يلزم فحصها قبل المتابعة');
+      }
+      let divergent = false;
+      try { this.checkDurableAgainstCache(saved, raw); }
+      catch (error) {
+        if (!error.message.includes('نسخة محلية أحدث أو مختلفة')) throw error;
+        divergent = true;
+      }
+      if (!divergent) throw new Error('لا يوجد تعارض يتطلب أرشفة');
+      if (this.storage.getItem(this.key) !== raw)
+        throw new Error('تغير السجل المحلي أثناء الفحص؛ أعد المحاولة');
+      const archiveKey = await durable.archiveCache(this.key, raw, saved.revision);
+      if (this.storage.getItem(this.key) !== raw)
+        throw new Error('تغير السجل المحلي بعد الأرشفة؛ لم يُزل من التخزين القديم');
+      this.storage.removeItem(this.key);
+      if (this.storage.getItem(this.key) !== null)
+        throw new Error('أُرشف السجل المحلي لكن تعذّر إخلاء النسخة القديمة');
+      return archiveKey;
+    });
+  }
   async close() {
     this.lifecycle++;
     this.writable = false;

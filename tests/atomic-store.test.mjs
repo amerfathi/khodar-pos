@@ -697,6 +697,50 @@ test('durable reopen preserves cache-only financial evidence even without a lega
     } finally {await store.close();}
   }
 });
+test('owner recovery archives a divergent cache before reopening the durable record',async()=>{
+  const backend=storage(),identity=user(),key=scopedStorageKey('atomic_v1',identity);
+  const cache={schema:1,identity,revision:10,state:{...initial,stock:20},outbox:[],cursor:3,
+    applied:{a:true,b:true,c:true}};
+  const saved={schema:1,identity,revision:8,state:{...initial,stock:17},outbox:[],cursor:5,
+    applied:{a:true,b:true,c:true,d:true,e:true}};
+  const raw=JSON.stringify(cache);
+  backend.setItem(key,raw);
+  const archives=[];
+  const durable={read:async()=>structuredClone(saved),archiveCache:async(k,bytes,revision)=>{
+    assert.equal(k,key);assert.equal(bytes,raw);assert.equal(revision,8);
+    archives.push(bytes);return 'archive-key';
+  }};
+  const blocked=new AtomicStore(identity,initial,backend,{durableFirst:true});
+  await assert.rejects(blocked.acquire(undefined,durable),/نسخة محلية أحدث/);
+  assert.equal(await blocked.archiveConflictingCache(durable),'archive-key');
+  assert.deepEqual(archives,[raw]);
+  assert.equal(backend.getItem(key),null);
+  await blocked.close();
+  const reopened=new AtomicStore(identity,initial,backend,{durableFirst:true});
+  assert.equal(await reopened.acquire(undefined,durable),true);
+  try{assert.equal(reopened.value.revision,8);assert.equal(reopened.read('stock'),17);}
+  finally{await reopened.close();}
+});
+test('recovery preserves the cache when archiving fails or financial events are pending',async()=>{
+  const backend=storage(),identity=user(),key=scopedStorageKey('atomic_v1',identity);
+  const saved={schema:1,identity,revision:4,state:initial,outbox:[],cursor:2,applied:{a:true,b:true}};
+  const cache={...saved,revision:5,cursor:1,applied:{a:true}};
+  const raw=JSON.stringify(cache);backend.setItem(key,raw);
+  const store=new AtomicStore(identity,initial,backend,{durableFirst:true});
+  await assert.rejects(store.archiveConflictingCache({read:async()=>saved,
+    archiveCache:async()=>{throw Error('disk full');}}),/disk full/);
+  assert.equal(backend.getItem(key),raw);
+  cache.outbox=[event(identity)];backend.setItem(key,JSON.stringify(cache));
+  await assert.rejects(store.archiveConflictingCache({read:async()=>saved,
+    archiveCache:async()=>assert.fail('must not archive')}),/معلقة/);
+  assert.equal(backend.getItem(key),JSON.stringify(cache));
+  cache.outbox=[];
+  cache.state={...initial,khodar_pos_invoices_v3:[{id:'local-only-invoice'}]};
+  backend.setItem(key,JSON.stringify(cache));
+  await assert.rejects(store.archiveConflictingCache({read:async()=>saved,
+    archiveCache:async()=>assert.fail('must not archive')}),/سجلات مالية/);
+  assert.equal(backend.getItem(key),JSON.stringify(cache));
+});
 test('explicit scoped aggregate adoption preserves revision, business state and pending outbox',async()=>{
   const backend=storage(),identity=user(),rows=new Map(),store=new AtomicStore(identity,initial,backend);
   await store.acquire();post(store);

@@ -124,30 +124,30 @@ try {
   assert.equal(retried.position.bankBalance, -8);
   const inbound = await reopened.evaluate(async () => {
     const originalFetch = window.fetch.bind(window);
-    const remoteExpense = { id: 'remote-expense-after-retry', tenantId: 'browser-hook-tenant',
+    const remoteExpense = { id: 'remote-expense-after-retry', tenantId: 'browser-hook-tenant', branchId: 'browser-hook-main',
       title: 'Remote rent', amount: 9, paymentMethod: 'cash' };
-    const remoteSupplier = { id: 'remote-supplier-after-retry', tenantId: 'browser-hook-tenant',
+    const remoteSupplier = { id: 'remote-supplier-after-retry', tenantId: 'browser-hook-tenant', branchId: 'browser-hook-main',
       name: 'Remote supplier', balance: 0 };
-    const remoteProduct = { id: 'remote-product-after-retry', name: 'Remote cucumber',
+    const remoteProduct = { id: 'remote-product-after-retry', name: 'Remote cucumber', branchId: 'browser-hook-main',
       currentStockKg: 0, costPerKg: 0, branchStock: { 'browser-hook-main': 0 } };
     const remotePurchase = { id: 'remote-purchase-after-retry', tenantId: 'browser-hook-tenant',
       productId: remoteProduct.id, productName: remoteProduct.name, supplierId: remoteSupplier.id,
       supplierName: remoteSupplier.name, quantityKg: 4, costPerKg: 3, totalCost: 12,
       paymentMethod: 'credit', creditAmount: 12, branchId: 'browser-hook-main' };
-    const remotePurchaseReturn = { id: 'remote-purchase-return-after-retry', tenantId: 'browser-hook-tenant',
+    const remotePurchaseReturn = { id: 'remote-purchase-return-after-retry', tenantId: 'browser-hook-tenant', branchId: 'browser-hook-main',
       purchaseId: remotePurchase.id, productId: remoteProduct.id, productName: remoteProduct.name,
       supplierId: remoteSupplier.id, returnedKg: 1, refundMethod: 'supplier_debt_deduction',
       totalRefundAmount: 3 };
-    const remoteCustomer = { id: 'remote-customer-after-retry', tenantId: 'browser-hook-tenant',
+    const remoteCustomer = { id: 'remote-customer-after-retry', tenantId: 'browser-hook-tenant', branchId: 'browser-hook-main',
       name: 'Remote customer', balance: 0 };
-    const remoteSaleProduct = { id: 'remote-sale-product-after-retry', name: 'Remote pepper',
+    const remoteSaleProduct = { id: 'remote-sale-product-after-retry', name: 'Remote pepper', branchId: 'browser-hook-main',
       currentStockKg: 5, costPerKg: 2, branchStock: { 'browser-hook-main': 5 } };
     const remoteInvoice = { id: 'remote-invoice-after-retry', tenantId: 'browser-hook-tenant',
       customerId: remoteCustomer.id, customerName: remoteCustomer.name, saleType: 'credit',
       paidAmount: 0, remainingDebt: 15, status: 'active', branchId: 'browser-hook-main',
       items: [{ productId: remoteSaleProduct.id, name: remoteSaleProduct.name, netWeight: 3,
         pricePerKg: 5, total: 15 }] };
-    const remoteSalesReturn = { id: 'remote-sales-return-after-retry', tenantId: 'browser-hook-tenant',
+    const remoteSalesReturn = { id: 'remote-sales-return-after-retry', tenantId: 'browser-hook-tenant', branchId: 'browser-hook-main',
       invoiceId: remoteInvoice.id, customerId: remoteCustomer.id, refundMethod: 'credit_deduction',
       inventoryAction: 'restock', totalRefundAmount: 5,
       items: [{ productId: remoteSaleProduct.id, name: remoteSaleProduct.name,
@@ -175,7 +175,8 @@ try {
     const heads = { ...(window.app.syncService.repository.value.state.khodar_pos_sync_heads_v1 || {}) };
     const remoteEvents = [remoteEvent, remoteSupplierEvent, remoteProductEvent, remotePurchaseEvent,
       remotePurchaseReturnEvent, remoteCustomerEvent, remoteSaleProductEvent, remoteInvoiceEvent,
-      remoteSalesReturnEvent].map(event => window.attachConflictPreconditions(event, heads));
+      remoteSalesReturnEvent].map(event => window.attachConflictPreconditions({
+      ...event, branchId: 'browser-hook-main' }, heads));
     window.fetch = async (input, init = {}) => {
       const requestUrl = String(input);
       if (requestUrl.includes('/api/sync/push')) {

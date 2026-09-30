@@ -12,7 +12,7 @@ export default function DesktopUpdateModal({
   releaseInfo,
   cartItemsCount = 0
 }) {
-  const [status, setStatus] = useState('idle'); // 'idle' | 'downloading' | 'ready' | 'error'
+  const [status, setStatus] = useState('idle'); // 'idle' | 'downloading' | 'ready' | 'installer-opened' | 'error'
   const [progress, setProgress] = useState({
     percent: 0,
     receivedBytes: 0,
@@ -88,6 +88,7 @@ export default function DesktopUpdateModal({
       if (window.electronAPI?.installUpdate) {
         const result = await window.electronAPI.installUpdate();
         if (!result.success) throw new Error(result.error || 'تعذر تشغيل مثبت التحديث');
+        setStatus('installer-opened');
       }
     } catch (err) {
       setErrorMessage(err.message || 'تعذر تشغيل مثبت التحديث');
@@ -283,7 +284,7 @@ export default function DesktopUpdateModal({
                   <span>اكتمل تنزيل التحديث والتحقق من سلامته</span>
                 </div>
                 <p className="text-xs text-emerald-700 leading-relaxed">
-                  الملف جاهز للتطبيق. عند الضغط أدناه سيتم إغلاق التطبيق لمدة 3 ثوانٍ لتطبيق التحديث ثم إعادة فتحه تلقائياً.
+                  عند الضغط أدناه ستُفتح نافذة المثبّت. تأكد من ظهورها، ثم أغلق براكه واتبع خطوات التثبيت. لن تُحذف بياناتك المحلية.
                 </p>
               </div>
 
@@ -293,7 +294,7 @@ export default function DesktopUpdateModal({
                   onClick={onClose}
                   className="py-2.5 px-4 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
                 >
-                  تأجيل الإغلاق
+                  تثبيت لاحقًا
                 </button>
                 <button
                   type="button"
@@ -301,8 +302,22 @@ export default function DesktopUpdateModal({
                   className="py-2.5 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer"
                 >
                   <FileCheck size={16} />
-                  <span>تثبيت وإعادة التشغيل الفوري</span>
+                  <span>فتح مُثبّت التحديث</span>
                 </button>
+              </div>
+            </div>
+          )}
+
+          {status === 'installer-opened' && (
+            <div className="space-y-4 pt-1">
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-2">
+                <strong className="block">تم تشغيل مُثبّت التحديث</strong>
+                <p>تأكد من ظهور نافذة التثبيت على سطح المكتب. بعد ظهورها، أغلق براكه واستكمل خطوات المثبّت. قد يطلب Windows موافقتك على تشغيل ملف من ناشر غير معروف.</p>
+                <p>إذا لم تظهر النافذة، لا تُغلق براكه. ملف التحديث المحقَّق منه محفوظ في: <span className="break-all select-text">{downloadedFilePath}</span></p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={onClose} className="py-2.5 px-4 rounded-xl border border-slate-300 text-xs font-semibold">البقاء في براكه</button>
+                <button type="button" onClick={() => window.electronAPI?.close()} className="py-2.5 px-5 rounded-xl bg-emerald-600 text-white text-xs font-bold">إغلاق براكه ومتابعة التثبيت</button>
               </div>
             </div>
           )}

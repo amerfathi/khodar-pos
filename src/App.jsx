@@ -182,6 +182,15 @@ export default function App() {
 
   // 5-Second Brand Splash Screen on App Launch
   const [showSplash, setShowSplash] = useState(true);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState(null);
+  const handleArchiveConflictingCache = async () => {
+    if (!window.confirm('سيحفظ براكه النسخة المحلية المختلفة كاملة في أرشيف استرداد داخل هذا الجهاز، ثم يفتح السجل الدائم. إذا كانت بها حركات لم تصل إلى الخادم فستحتاج إلى مراجعة الأرشيف لاحقًا. هل تريد المتابعة؟')) return;
+    setRecoveryBusy(true);
+    setRecoveryError(null);
+    try { await store.archiveConflictingCache(); }
+    catch (error) { setRecoveryError(error.message); setRecoveryBusy(false); }
+  };
 
   // Navigation history stack for mobile back button + direction tracking
   const [navHistory, setNavHistory] = useState(['home']);
@@ -459,6 +468,13 @@ export default function App() {
       <h1 className="text-xl font-bold">حماية بيانات براكه</h1>
       <p role="alert">{store.persistence.error || 'جارٍ فتح التخزين الآمن…'}</p>
       <p>لا تحذف بيانات المتصفح. عند فشل الحفظ لم تُعتمد تغييرات جزئية للحركة.</p>
+      {store.persistence.error?.includes('نسخة محلية أحدث أو مختلفة') &&
+        ['company_owner', 'admin', 'super_admin'].includes(currentUser.role) &&
+        <button disabled={recoveryBusy} className="px-4 py-2 bg-blue-700 text-white rounded disabled:opacity-50"
+          onClick={handleArchiveConflictingCache}>
+          {recoveryBusy ? 'جارٍ حفظ نسخة الاسترداد…' : 'حفظ النسخة المحلية المختلفة والمتابعة بالسجل الدائم'}
+        </button>}
+      {recoveryError && <p role="alert">{recoveryError}</p>}
       <button className="px-4 py-2 bg-emerald-700 text-white rounded" onClick={() => window.location.reload()}>إعادة الفتح والمحاولة</button>
       <button onClick={store.logout}>تسجيل الخروج</button>
     </main>;
