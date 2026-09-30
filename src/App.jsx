@@ -220,7 +220,7 @@ export default function App() {
   const [isDesktopDownloadModalOpen, setIsDesktopDownloadModalOpen] = useState(false);
 
   // Cloudflare sync status; an online device may still have a stale inbound view.
-  const [syncStatus, setSyncStatus] = useState({ status: 'idle', error: '', isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true, queueLength: 0 });
+  const [syncStatus, setSyncStatus] = useState({ status: 'idle', error: '', isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true, queueLength: 0, lastSyncTime: 0 });
   useEffect(() => {
     if (store.syncService?.subscribe) {
       const unsub = store.syncService.subscribe(update => setSyncStatus(previous => ({ ...previous, ...update })));

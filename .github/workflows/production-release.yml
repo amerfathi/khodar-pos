@@ -40,7 +40,7 @@ jobs:
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run lint
-      - run: npm run typecheck:core
+      - run: npm run typecheck
       - run: npm test
 
   android:

@@ -171,7 +171,9 @@ test('fallback is no faster than one hour and stops without another request', as
   const service = new CloudflareSyncService(); service.isOnline = true;
   const timers = new Map(); let nextId = 1, refreshes = 0;
   service.refreshForActivity = async () => { refreshes++; return true; };
-  globalThis.setTimeout = (callback, delay) => { const id = nextId++; timers.set(id, { callback, delay }); return id; };
+  // This test timer has numeric handles; the production Node timer has Timeout handles.
+  globalThis.setTimeout = /** @type {typeof globalThis.setTimeout} */ (/** @type {unknown} */ (
+    (callback, delay) => { const id = nextId++; timers.set(id, { callback, delay }); return id; }));
   globalThis.clearTimeout = id => { timers.delete(id); };
   try {
     service.startAutoSync('test-tenant');
