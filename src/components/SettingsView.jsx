@@ -1420,7 +1420,7 @@ export default function SettingsView({
                       {syncStatus.isOnline ? (
                         <>
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                          <span className="font-bold text-emerald-400">متصل سحابياً</span>
+                          <span className="font-bold text-emerald-400">الاتصال متاح</span>
                         </>
                       ) : (
                         <>

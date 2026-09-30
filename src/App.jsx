@@ -219,7 +219,7 @@ export default function App() {
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [isDesktopDownloadModalOpen, setIsDesktopDownloadModalOpen] = useState(false);
 
-  // Cloudflare D1 real-time sync status subscription
+  // Cloudflare sync status; an online device may still have a stale inbound view.
   const [syncStatus, setSyncStatus] = useState({ status: 'idle', error: '', isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true, queueLength: 0 });
   useEffect(() => {
     if (store.syncService?.subscribe) {
@@ -342,6 +342,13 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
+
+  // Refresh the tenant cursor when a financial surface or branch becomes active.
+  // The service coalesces rapid navigation and never throttles outbound events.
+  useEffect(() => {
+    if (!currentUser || !store?.syncService || currentTab === 'home' || currentTab === 'settings') return;
+    void store.syncService.refreshForActivity();
+  }, [currentUser?.tenantId, currentTab, store.activeBranchId]);
 
   // Guard active tab against unauthorized roles
   useEffect(() => {
@@ -638,11 +645,11 @@ export default function App() {
                 borderColor: !syncStatus.isOnline || syncStatus.status === 'error' ? '#fecaca' : (syncStatus.queueLength > 0 ? '#fef08a' : '#bbf7d0'),
                 color: !syncStatus.isOnline || syncStatus.status === 'error' ? '#991b1b' : (syncStatus.queueLength > 0 ? '#854d0e' : '#166534')
               }}
-              title={syncStatus.status === 'error' ? syncStatus.error : !syncStatus.isOnline ? 'وضع عدم الاتصال (أوفلاين)' : (syncStatus.queueLength > 0 ? `توجد ${syncStatus.queueLength} حركة محلية لم تُرفع؛ راجع حالة المزامنة` : 'متصل ومزامن سحابياً')}
+              title={syncStatus.status === 'error' ? syncStatus.error : !syncStatus.isOnline ? 'وضع عدم الاتصال (أوفلاين)' : (syncStatus.queueLength > 0 ? `توجد ${syncStatus.queueLength} حركة محلية لم تُرفع؛ راجع حالة المزامنة` : syncStatus.lastSyncTime ? `لا توجد عمليات معلقة. آخر تحقق من السحابة: ${new Date(syncStatus.lastSyncTime).toLocaleString('ar-SA')}` : 'الاتصال متاح؛ لم يكتمل التحقق من أحدث البيانات بعد')}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${!syncStatus.isOnline || syncStatus.status === 'error' ? 'bg-rose-500' : (syncStatus.queueLength > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500')}`} />
               <span className="hidden sm:inline">
-                {syncStatus.status === 'error' ? (syncStatus.error?.includes('تعارض') ? 'تعارض مزامنة' : 'خطأ مزامنة') : !syncStatus.isOnline ? 'أوفلاين' : (syncStatus.queueLength > 0 ? `${syncStatus.queueLength} معلق` : 'سحابي')}
+                {syncStatus.status === 'error' ? (syncStatus.error?.includes('تعارض') ? 'تعارض مزامنة' : 'خطأ مزامنة') : !syncStatus.isOnline ? 'أوفلاين' : (syncStatus.queueLength > 0 ? `${syncStatus.queueLength} معلق` : 'متصل')}
               </span>
             </div>
 

@@ -179,6 +179,65 @@ test('actual app hook with opt-in durable repository waits before publishing an 
   }
 });
 
+test('online financial action waits for fresh server state and preserves inputs on preflight failure', async () => {
+  installBrowserDoubles();
+  const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: {'import.meta.env':'{}'}, format:'cjs', platform:'node', packages:'external' });
+  const loaded = { exports: {} };
+  new Function('require','module','exports',bundle.outputFiles[0].text)(createRequire(import.meta.url),loaded,loaded.exports);
+  const { useAppStore, cloudflareSync, setSessionToken, setSessionUser } = loaded.exports;
+  let app, root, releasePreflight, calls = 0;
+  function Harness() { app = useAppStore(); return null; }
+  try {
+    setSessionToken('test-session');
+    setSessionUser({ id:'u', tenantId:'A', role:'cashier', branchId:'branch-main', branchIds:['branch-main'], isStaff:true,
+      sessionExpiresAt:new Date(Date.now()+60_000).toISOString() });
+    seedBranchContext(localStorage,'u');
+    await act(async () => { root = TestRenderer.create(React.createElement(Harness)); });
+    assert.equal(app.persistence.ready, true);
+    const before = JSON.stringify(cloudflareSync.repository.value);
+    cloudflareSync.isOnline = true;
+    cloudflareSync.prepareFinancialMutation = async () => { calls++; return new Promise(resolve => { releasePreflight = resolve; }); };
+    const pending = app.addExpense({ id:'online-preflight-expense', amount:10, paymentMethod:'cash' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 1);
+    assert.equal(JSON.stringify(cloudflareSync.repository.value), before);
+    releasePreflight({ success:false, error:'server unavailable' });
+    await assert.rejects(pending, /server unavailable/);
+    assert.equal(JSON.stringify(cloudflareSync.repository.value), before);
+  } finally {
+    await act(async () => { root?.unmount(); }); cloudflareSync.stopAutoSync();
+    delete globalThis.window; delete globalThis.document;
+  }
+});
+
+test('a durable financial commit triggers outbound delivery without waiting for the fallback timer', async () => {
+  installBrowserDoubles();
+  const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: {'import.meta.env':'{}'}, format:'cjs', platform:'node', packages:'external' });
+  const loaded = { exports:{} };
+  new Function('require','module','exports',bundle.outputFiles[0].text)(createRequire(import.meta.url),loaded,loaded.exports);
+  const { useAppStore, cloudflareSync, setSessionToken, setSessionUser } = loaded.exports;
+  let app, root, deliver = 0;
+  function Harness() { app = useAppStore(); return null; }
+  try {
+    setSessionToken('test-session');
+    setSessionUser({ id:'u', tenantId:'A', role:'cashier', branchId:'branch-main', branchIds:['branch-main'], isStaff:true,
+      sessionExpiresAt:new Date(Date.now()+60_000).toISOString() });
+    seedBranchContext(localStorage,'u');
+    await act(async () => { root = TestRenderer.create(React.createElement(Harness)); });
+    assert.equal(app.persistence.ready, true);
+    cloudflareSync.isOnline = true;
+    cloudflareSync.prepareFinancialMutation = async () => ({success:true});
+    cloudflareSync.flushQueue = async () => { deliver++; return false; };
+    await act(async () => { await app.addExpense({id:'deliver-after-commit', amount:10, paymentMethod:'cash'}); });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(deliver >= 1, 'the durable commit must wake the outbound queue');
+    assert.equal(cloudflareSync.repository.current.outbox.some(event => event.entityId === 'deliver-after-commit'), true);
+  } finally {
+    await act(async () => { root?.unmount(); }); cloudflareSync.stopAutoSync();
+    delete globalThis.window; delete globalThis.document;
+  }
+});
+
 test('server-created user stays a success when its local cache commit fails', async () => {
   installBrowserDoubles();
   const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: { 'import.meta.env': '{}' }, format: 'cjs', platform: 'node', packages: 'external' });

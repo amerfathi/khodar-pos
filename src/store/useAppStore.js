@@ -219,6 +219,13 @@ export function useAppStore(options = {}) {
       if (!disposed) {
         redraw(value => value + 1);
         if (local.failure) setPersistence(previous => ({ ...previous, error: local.failure }));
+        // The repository notifies only after its transaction completes. Send
+        // newly committed outbox entries immediately, never an uncommitted draft.
+        if (cloudflareSync.repository === local && cloudflareSync.currentTenantId === currentUser?.tenantId &&
+            local.current.outbox.some(event => event.tenantId === currentUser.tenantId)) {
+          cloudflareSync.notifyListeners('queued');
+          queueMicrotask(() => { if (!disposed) void cloudflareSync.flushQueue(); });
+        }
       }
     });
     if (currentUser) {
@@ -316,6 +323,15 @@ export function useAppStore(options = {}) {
       setPersistence(previous => ({ ...previous, error: error.message }));
       throw error;
     } finally { refreshBindings(); }
+  };
+  const financialAction = action => (...args) => {
+    const commit = () => atomicAction(action)(...args);
+    if (!currentUser || !getSessionToken() || !cloudflareSync.isOnline || !persistence.ready) return commit();
+    return cloudflareSync.prepareFinancialMutation(currentUser.tenantId, handleInboundSyncEvents)
+      .then(result => {
+        if (!result.success) throw new Error(('error' in result && result.error) || 'تعذر تحديث البيانات المالية قبل العملية');
+        return commit();
+      });
   };
 
   // Server account changes are authoritative. A failed local cache commit must
@@ -727,13 +743,13 @@ export function useAppStore(options = {}) {
   };
   const handleInboundSyncEvents = useCallback((...args) => inboundRef.current(...args), []);
 
-  // Background Auto-sync to Cloudflare Edge (Near Real-Time: 4-second polling + on-focus immediate sync)
+  // Immediate outbound sync, activity-driven inbound refresh, rare recovery fallback.
   useEffect(() => {
     if (!currentUser || !getSessionToken() || !persistence.ready) return;
     cloudflareSync.repository = local;
     const tenantId = currentUser.tenantId;
     
-    cloudflareSync.startAutoSync(tenantId, handleInboundSyncEvents, 4000);
+    cloudflareSync.startAutoSync(tenantId, handleInboundSyncEvents);
     return () => { cloudflareSync.stopAutoSync(); if (cloudflareSync.repository === local) cloudflareSync.repository = null; };
   }, [currentUser?.tenantId, handleInboundSyncEvents, persistence.ready, local]);
 
@@ -2667,7 +2683,7 @@ export function useAppStore(options = {}) {
     updateBranch: atomicAction(updateBranch),
     deleteBranch: atomicAction(deleteBranch),
     setMainBranch: atomicAction(setMainBranch),
-    transferStockBetweenBranches: atomicAction(transferStockBetweenBranches),
+    transferStockBetweenBranches: financialAction(transferStockBetweenBranches),
     login,
     logout,
     changePassword,
@@ -2699,49 +2715,49 @@ export function useAppStore(options = {}) {
     partners: visibleBranchRecords(currentUser, activeBranchId, partners),
     partnerDrawings: visibleBranchRecords(currentUser, activeBranchId, partnerDrawings),
     profitDistributions: visibleBranchRecords(currentUser, activeBranchId, profitDistributions),
-    addProduct: atomicAction(addProduct),
-    updateProduct: atomicAction(updateProduct),
-    updateProductPrice: atomicAction(updateProductPrice),
-    deleteProduct: atomicAction(deleteProduct),
-    addCustomer: atomicAction(addCustomer),
-    updateCustomer: atomicAction(updateCustomer),
-    deleteCustomer: atomicAction(deleteCustomer),
-    recordCustomerPayment: atomicAction(recordCustomerPayment),
-    deleteCustomerPayment: atomicAction(deleteCustomerPayment),
-    saveInvoice: atomicAction(saveInvoice),
-    updateInvoiceNotes: atomicAction(updateInvoiceNotes),
-    voidInvoice: atomicAction(voidInvoice),
-    deleteInvoice: atomicAction(deleteInvoice),
-    recordSalesReturn: atomicAction(recordSalesReturn),
-    deleteSalesReturn: atomicAction(deleteSalesReturn),
-    addExpense: atomicAction(addExpense),
-    deleteExpense: atomicAction(deleteExpense),
+    addProduct: financialAction(addProduct),
+    updateProduct: financialAction(updateProduct),
+    updateProductPrice: financialAction(updateProductPrice),
+    deleteProduct: financialAction(deleteProduct),
+    addCustomer: financialAction(addCustomer),
+    updateCustomer: financialAction(updateCustomer),
+    deleteCustomer: financialAction(deleteCustomer),
+    recordCustomerPayment: financialAction(recordCustomerPayment),
+    deleteCustomerPayment: financialAction(deleteCustomerPayment),
+    saveInvoice: financialAction(saveInvoice),
+    updateInvoiceNotes: financialAction(updateInvoiceNotes),
+    voidInvoice: financialAction(voidInvoice),
+    deleteInvoice: financialAction(deleteInvoice),
+    recordSalesReturn: financialAction(recordSalesReturn),
+    deleteSalesReturn: financialAction(deleteSalesReturn),
+    addExpense: financialAction(addExpense),
+    deleteExpense: financialAction(deleteExpense),
     addExpenseCategory: atomicAction(addExpenseCategory),
     deleteExpenseCategory: atomicAction(deleteExpenseCategory),
-    addDamagedItem: atomicAction(addDamagedItem),
-    deleteDamagedItem: atomicAction(deleteDamagedItem),
-    addWorker: atomicAction(addWorker),
-    updateWorker: atomicAction(updateWorker),
-    deleteWorker: atomicAction(deleteWorker),
-    addWorkerTransaction: atomicAction(addWorkerTransaction),
-    recordWorkerTransactionWithUpdate: atomicAction(recordWorkerTransactionWithUpdate),
-    deleteWorkerTransaction: atomicAction(deleteWorkerTransaction),
-    addPurchase: atomicAction(addPurchase),
-    deletePurchase: atomicAction(deletePurchase),
-    recordPurchaseReturn: atomicAction(recordPurchaseReturn),
-    deletePurchaseReturn: atomicAction(deletePurchaseReturn),
-    addSupplier: atomicAction(addSupplier),
-    updateSupplier: atomicAction(updateSupplier),
-    deleteSupplier: atomicAction(deleteSupplier),
-    recordSupplierPayment: atomicAction(recordSupplierPayment),
-    deleteSupplierPayment: atomicAction(deleteSupplierPayment),
-    addPartner: atomicAction(addPartner),
-    updatePartner: atomicAction(updatePartner),
-    deletePartner: atomicAction(deletePartner),
-    recordPartnerDrawing: atomicAction(recordPartnerDrawing),
-    deletePartnerDrawing: atomicAction(deletePartnerDrawing),
-    recordProfitDistribution: atomicAction(recordProfitDistribution),
-    deleteProfitDistribution: atomicAction(deleteProfitDistribution),
+    addDamagedItem: financialAction(addDamagedItem),
+    deleteDamagedItem: financialAction(deleteDamagedItem),
+    addWorker: financialAction(addWorker),
+    updateWorker: financialAction(updateWorker),
+    deleteWorker: financialAction(deleteWorker),
+    addWorkerTransaction: financialAction(addWorkerTransaction),
+    recordWorkerTransactionWithUpdate: financialAction(recordWorkerTransactionWithUpdate),
+    deleteWorkerTransaction: financialAction(deleteWorkerTransaction),
+    addPurchase: financialAction(addPurchase),
+    deletePurchase: financialAction(deletePurchase),
+    recordPurchaseReturn: financialAction(recordPurchaseReturn),
+    deletePurchaseReturn: financialAction(deletePurchaseReturn),
+    addSupplier: financialAction(addSupplier),
+    updateSupplier: financialAction(updateSupplier),
+    deleteSupplier: financialAction(deleteSupplier),
+    recordSupplierPayment: financialAction(recordSupplierPayment),
+    deleteSupplierPayment: financialAction(deleteSupplierPayment),
+    addPartner: financialAction(addPartner),
+    updatePartner: financialAction(updatePartner),
+    deletePartner: financialAction(deletePartner),
+    recordPartnerDrawing: financialAction(recordPartnerDrawing),
+    deletePartnerDrawing: financialAction(deletePartnerDrawing),
+    recordProfitDistribution: financialAction(recordProfitDistribution),
+    deleteProfitDistribution: financialAction(deleteProfitDistribution),
     getFinancialPosition, getAccountingSnapshot,
     updateSettings: atomicAction(updateSettings),
     resetToSampleData: atomicAction(resetToSampleData),

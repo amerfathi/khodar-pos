@@ -6,7 +6,7 @@
  * 
  * Key Principles:
  * 1. A server push is acknowledged locally only after the aggregate queue commit.
- * 2. Rapid delta polling (4s) + instant on-focus triggers.
+ * 2. Immediate outbound delivery; activity-triggered inbound refresh with a rare fallback.
  * 3. Pending mutations remain in the aggregate across retryable network failures.
  * 4. Flush and pull resume once connectivity returns.
  * 5. Multi-Tenant isolation: Per-tenant sync cursor and state partitioning.
@@ -15,6 +15,9 @@
 import { getApiBaseUrl } from '../config/appVersion.js';
 
 const QUEUE_STORAGE_KEY = 'khodar_offline_sync_queue';
+const ACTIVITY_REFRESH_MIN_MS = 5 * 60_000;
+const FALLBACK_SYNC_MIN_MS = 60 * 60_000;
+const FALLBACK_SYNC_JITTER_MS = 60 * 60_000;
 const getTenantSyncKey = (tenantId) => `braka_sync_cursor_v2_${tenantId}_${getSessionUser()?.id || 'none'}`;
 import { getSessionToken, getSessionUser } from './authSession.js';
 const authHeaders = () => {
@@ -45,12 +48,17 @@ export class CloudflareSyncService {
     this.updateHandler = null;
     this.currentTenantId = null;
     this.focusListenerAttached = false;
+    this.lastPullAt = 0;
+    this.activitySyncPromise = null;
+    this.retryTimerId = null;
+    this.retryDelayMs = 5_000;
+    this.batchTimerId = null;
 
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
         this.isOnline = true;
         this.notifyListeners('online');
-        this.flushQueue().then(clear=>{ if (clear && this.currentTenantId) this.pullUpdates(this.currentTenantId, this.updateHandler); });
+        void this.refreshForActivity({ force: true });
       });
 
       window.addEventListener('offline', () => {
@@ -62,13 +70,22 @@ export class CloudflareSyncService {
     }
   }
 
+  schedulePendingRetry() {
+    if (this.retryTimerId || !this.isOnline || !this.currentTenantId || !getSessionToken()) return;
+    if (!this.getQueue().some(event => event.tenantId === this.currentTenantId)) return;
+    const delay = this.retryDelayMs;
+    this.retryDelayMs = Math.min(this.retryDelayMs * 2, 5 * 60_000);
+    this.retryTimerId = setTimeout(() => {
+      this.retryTimerId = null;
+      void this.flushQueue();
+    }, delay + Math.floor(Math.random() * Math.min(delay, 5_000)));
+  }
+
   setupFocusListeners() {
     if (this.focusListenerAttached || typeof window === 'undefined') return;
 
     const onWindowActive = () => {
-      if (this.isOnline && this.currentTenantId && !this.isSyncing) {
-        this.flushQueue().then(clear=>{ if(clear) this.pullUpdates(this.currentTenantId, this.updateHandler); });
-      }
+      void this.refreshForActivity();
     };
 
     window.addEventListener('focus', onWindowActive);
@@ -81,6 +98,35 @@ export class CloudflareSyncService {
     this.focusListenerAttached = true;
   }
 
+  // Activity refreshes are coalesced and throttled; queued writes are never throttled.
+  refreshForActivity({ force = false } = {}) {
+    if (!this.isOnline || !this.currentTenantId || !getSessionToken()) return Promise.resolve(false);
+    if (this.activitySyncPromise) return this.activitySyncPromise;
+    try {
+      if (!force && this.getQueueLength() === 0 && Date.now() - this.lastPullAt < ACTIVITY_REFRESH_MIN_MS)
+        return Promise.resolve(true);
+    } catch (error) {
+      this.lastError = error.message;
+      this.notifyListeners('error', { error: error.message });
+      return Promise.resolve(false);
+    }
+    const tenantId = this.currentTenantId;
+    const task = (async () => {
+      const clear = await this.flushQueue({ pullAfterFlush: false });
+      if (!clear || tenantId !== this.currentTenantId) return false;
+      await this.pullUpdates(tenantId, this.updateHandler);
+      return !this.lastError;
+    })().catch(error => {
+      this.lastError = error.message;
+      this.notifyListeners('error', { error: error.message });
+      return false;
+    });
+    this.activitySyncPromise = task;
+    const clearTask = () => { if (this.activitySyncPromise === task) this.activitySyncPromise = null; };
+    void task.then(clearTask, clearTask);
+    return task;
+  }
+
   // Subscribe to sync status changes (for UI indicators)
   subscribe(callback) {
     this.listeners.add(callback);
@@ -88,13 +134,19 @@ export class CloudflareSyncService {
   }
 
   notifyListeners(status, details = {}) {
+    let queueLength = null;
+    try { queueLength = this.getQueueLength(); }
+    catch (error) {
+      status = 'error';
+      details = { ...details, error: error.message };
+    }
     for (const cb of this.listeners) {
       try {
         cb({ 
           status, 
           isOnline: this.isOnline, 
-          queueLength: this.getQueueLength(), 
-          lastSyncTime: Date.now(),
+          queueLength,
+          lastSyncTime: this.lastPullAt || null,
           ...details 
         });
       } catch (err) {
@@ -202,28 +254,39 @@ export class CloudflareSyncService {
         else if (this.repository) this.repository.acknowledge(accepted);
         else this.saveQueue(remainingQueue);
         this.lastError = null;
+        this.retryDelayMs = 5_000;
+        if (this.retryTimerId) { clearTimeout(this.retryTimerId); this.retryTimerId = null; }
         this.notifyListeners('synced_batch', { count: batch.length });
 
-        // If more items remain, flush next batch
-        if (remainingQueue.length > 0) {
-          setTimeout(() => this.flushQueue(), 100);
+        // Re-read after the durable acknowledgement: another local commit may
+        // have arrived while this request was in flight.
+        const pendingForTenant = this.getQueue().some(event => event.tenantId === tenantId);
+        if (pendingForTenant) {
+          if (!this.batchTimerId) this.batchTimerId = setTimeout(() => {
+            this.batchTimerId = null;
+            void this.flushQueue();
+          }, 100);
         } else {
-          // Immediately pull to stay completely in lockstep with cloud
-          if (tenantId && pullAfterFlush) {
+          // A financial preflight just pulled the latest cursor. Avoid a second
+          // empty D1 read after its push; server conflict heads still guard races.
+          if (tenantId && pullAfterFlush && Date.now() - this.lastPullAt >= ACTIVITY_REFRESH_MIN_MS) {
             this.pullUpdates(tenantId, this.updateHandler);
           }
         }
-        return remainingQueue.length === 0;
+        return !pendingForTenant;
       } else {
         const details=await response.json().catch(()=>null);
-        throw new Error(response.status===409
+        const failure = Object.assign(new Error(response.status===409
           ? 'تعارض بين جهازين: لم تُرفع الحركة المحلية. زامن وراجع الحركة قبل إعادة المحاولة'
-          : details?.error || `Sync push failed: HTTP ${response.status}`);
+          : details?.error || `Sync push failed: HTTP ${response.status}`),
+          { nonRetryable: [400, 401, 403, 409].includes(response.status) });
+        throw failure;
       }
     } catch (err) {
       this.lastError = err.message;
       this.notifyListeners('error', { error: err.message });
       console.warn('Cloudflare sync failed (will retry automatically):', err.message);
+      if (!err.nonRetryable) this.schedulePendingRetry();
       return false;
     } finally {
       this.isSyncing = false;
@@ -240,30 +303,35 @@ export class CloudflareSyncService {
     this.isPulling = true;
 
     const syncKey = getTenantSyncKey(tenantId);
-    const lastSync = forceSince !== null ? forceSince : this.repository ? this.repository.current.cursor : parseInt(localStorage.getItem(syncKey) || '0', 10);
+    let cursor = forceSince !== null ? forceSince : this.repository ? this.repository.current.cursor : parseInt(localStorage.getItem(syncKey) || '0', 10);
     const callback = onUpdatesReceived || this.updateHandler;
 
     try {
       const baseUrl = getApiBaseUrl();
-      const res = await fetch(`${baseUrl}/api/sync/pull?tenantId=${encodeURIComponent(tenantId)}&cursor=${lastSync}`, { headers: authHeaders() });
-      if (!res.ok) throw new Error(`Sync pull failed: HTTP ${res.status}`);
-      if (token !== getSessionToken() || generation !== this.generation) return 0;
-
-      const data = await res.json();
-      if (token !== getSessionToken() || generation !== this.generation) return 0;
-      if (data.success && Array.isArray(data.events)) {
-        // CRITICAL FIX: only advance cursor using the real server_timestamp from D1.
-        // NEVER use Date.now() fallback — it jumps the cursor into the future and
-        // causes any events pushed from Desktop/Mobile to be permanently skipped.
+      let received = 0;
+      for (let page = 0; page < 100; page++) {
+        const res = await fetch(`${baseUrl}/api/sync/pull?tenantId=${encodeURIComponent(tenantId)}&cursor=${cursor}`, { headers: authHeaders() });
+        if (!res.ok) throw new Error(`Sync pull failed: HTTP ${res.status}`);
+        if (token !== getSessionToken() || generation !== this.generation) return 0;
+        const data = await res.json();
+        if (token !== getSessionToken() || generation !== this.generation) return 0;
+        if (!data.success || !Array.isArray(data.events) || !Number.isSafeInteger(data.nextCursor) || data.nextCursor < cursor)
+          throw new Error('Invalid sync response');
+        if (data.hasMore && data.nextCursor === cursor) throw new Error('Sync cursor did not advance');
         if (typeof callback !== 'function') throw new Error('No durable sync receiver');
         await callback(data.events, data.nextCursor, data.conflictHeads, data.fullTenantVisibility === false);
         if (token !== getSessionToken() || generation !== this.generation) return 0;
-        if (!this.repository && Number.isSafeInteger(data.nextCursor)) localStorage.setItem(syncKey, String(data.nextCursor));
-        this.notifyListeners('synced_inbound', { count: data.events.length });
-        return data.events.length;
+        if (!this.repository) localStorage.setItem(syncKey, String(data.nextCursor));
+        cursor = data.nextCursor;
+        received += data.events.length;
+        if (!data.hasMore) {
+          this.lastPullAt = Date.now();
+          this.lastError = null;
+          this.notifyListeners('synced_inbound', { count: received });
+          return received;
+        }
       }
-
-      throw new Error('Invalid sync response');
+      throw new Error('Sync backlog exceeds 100 pages; retry to continue');
     } catch (err) {
       this.lastError = err.message;
       this.notifyListeners('error', { error: err.message });
@@ -340,36 +408,59 @@ export class CloudflareSyncService {
     return { success: clear && !this.lastError, pulledCount: pulled, ...(this.lastError ? { error: this.lastError } : {}) };
   }
 
+  // Online financial commits must read the latest available server cursor first.
+  // Offline commits remain local and pending; server causal checks still decide
+  // whether a concurrently-created mutation is acceptable when it is pushed.
+  async prepareFinancialMutation(tenantId, onUpdatesReceived = null) {
+    if (!this.isOnline) return { success: true, offline: true };
+    const deadline = Date.now() + 15_000;
+    while (this.isSyncing || this.isPulling || this.activitySyncPromise) {
+      if (Date.now() >= deadline) return { success: false, error: 'المزامنة مشغولة؛ أعد المحاولة بعد قليل' };
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    return this.syncNow(tenantId, onUpdatesReceived);
+  }
+
   // Set handler for applying inbound synced events to local store
   setUpdateHandler(handler) {
     this.updateHandler = handler;
   }
 
-  // Start periodic sync daemon (default: rapid 4-second polling for real-time experience)
-  startAutoSync(tenantId, onUpdatesReceived = null, intervalMs = 4000) {
+  // Rare recovery fallback. Normal inbound refresh is triggered by user activity.
+  startAutoSync(tenantId, onUpdatesReceived = null, intervalMs = FALLBACK_SYNC_MIN_MS) {
+    this.stopAutoSync();
     this.currentTenantId = tenantId;
     if (onUpdatesReceived) {
       this.updateHandler = onUpdatesReceived;
     }
-    this.stopAutoSync();
 
-    // Immediate initial sync (do not wait for first timer tick!)
+    // Immediate initial sync (do not wait for the fallback timer).
     if (tenantId && this.isOnline) {
-      this.flushQueue().then(clear=>{ if(clear) this.pullUpdates(tenantId, this.updateHandler); });
+      void this.refreshForActivity({ force: true });
     }
-
-    this.syncIntervalId = setInterval(() => {
-      if (this.isOnline && this.currentTenantId) {
-        this.flushQueue().then(clear=>{ if(clear) this.pullUpdates(this.currentTenantId, this.updateHandler); });
-      }
-    }, intervalMs);
+    const scheduleFallback = () => {
+      this.syncIntervalId = setTimeout(() => {
+        if (this.currentTenantId === tenantId && this.isOnline) void this.refreshForActivity({ force: true });
+        if (this.currentTenantId === tenantId) scheduleFallback();
+      }, intervalMs + Math.floor(Math.random() * FALLBACK_SYNC_JITTER_MS));
+    };
+    scheduleFallback();
   }
 
   stopAutoSync() {
     this.generation++;
+    this.currentTenantId = null;
     if (this.syncIntervalId) {
-      clearInterval(this.syncIntervalId);
+      clearTimeout(this.syncIntervalId);
       this.syncIntervalId = null;
+    }
+    if (this.retryTimerId) {
+      clearTimeout(this.retryTimerId);
+      this.retryTimerId = null;
+    }
+    if (this.batchTimerId) {
+      clearTimeout(this.batchTimerId);
+      this.batchTimerId = null;
     }
   }
 }

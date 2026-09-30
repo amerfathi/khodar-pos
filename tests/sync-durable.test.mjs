@@ -87,6 +87,7 @@ test('incomplete or unrelated server acknowledgement never clears an aggregate e
     }
     assert.equal(statuses.includes('synced_batch'), false);
   } finally {
+    service.stopAutoSync();
     globalThis.fetch = oldFetch;
     globalThis.sessionStorage = oldSession;
   }
@@ -141,4 +142,93 @@ test('manual sync waits for inbound application after a complete outbound flush'
     finishPull(2);
     assert.deepEqual(await pending,{success:true,pulledCount:2});
   } finally {globalThis.sessionStorage=oldSession;}
+});
+
+test('activity refresh coalesces navigation and throttles only empty inbound checks', async () => {
+  const oldSession = globalThis.sessionStorage;
+  globalThis.sessionStorage = memoryStorage(); setSessionToken('fixture-token');
+  setSessionUser({ id: 'owner', tenantId: 'test-tenant', sessionExpiresAt: new Date(Date.now() + 60_000).toISOString() });
+  const service = new CloudflareSyncService(); service.isOnline = true; service.currentTenantId = 'test-tenant';
+  service.repository = { current: { outbox: [] } };
+  let flushes = 0, pulls = 0;
+  service.flushQueue = async () => { flushes++; return true; };
+  service.pullUpdates = async () => { pulls++; service.lastPullAt = Date.now(); return 0; };
+  try {
+    await Promise.all([service.refreshForActivity(), service.refreshForActivity()]);
+    assert.equal(flushes, 1); assert.equal(pulls, 1);
+    await service.refreshForActivity();
+    assert.equal(pulls, 1);
+    service.repository.current.outbox.push({ id: 'queued', tenantId: 'test-tenant' });
+    await service.refreshForActivity();
+    assert.equal(flushes, 2, 'pending writes must bypass inbound throttling');
+    await service.refreshForActivity({ force: true });
+    assert.equal(pulls, 3);
+  } finally { globalThis.sessionStorage = oldSession; }
+});
+
+test('fallback is no faster than one hour and stops without another request', async () => {
+  const oldTimeout = globalThis.setTimeout, oldClear = globalThis.clearTimeout;
+  const service = new CloudflareSyncService(); service.isOnline = true;
+  const timers = new Map(); let nextId = 1, refreshes = 0;
+  service.refreshForActivity = async () => { refreshes++; return true; };
+  globalThis.setTimeout = (callback, delay) => { const id = nextId++; timers.set(id, { callback, delay }); return id; };
+  globalThis.clearTimeout = id => { timers.delete(id); };
+  try {
+    service.startAutoSync('test-tenant');
+    assert.equal(refreshes, 1);
+    assert.equal(timers.size, 1);
+    assert.ok([...timers.values()][0].delay >= 60 * 60_000);
+    service.stopAutoSync();
+    assert.equal(timers.size, 0);
+  } finally { globalThis.setTimeout = oldTimeout; globalThis.clearTimeout = oldClear; }
+});
+
+test('inbound refresh drains all pages and advances cursor only after each applied page', async () => {
+  const oldSession = globalThis.sessionStorage, oldLocal = globalThis.localStorage, oldFetch = globalThis.fetch;
+  globalThis.sessionStorage = memoryStorage(); globalThis.localStorage = memoryStorage();
+  setSessionToken('fixture-token');
+  setSessionUser({ id: 'owner', tenantId: 'test-tenant', sessionExpiresAt: new Date(Date.now() + 60_000).toISOString() });
+  const service = new CloudflareSyncService(); service.isOnline = true; service.currentTenantId = 'test-tenant';
+  const urls = [], applied = [];
+  globalThis.fetch = async url => {
+    urls.push(String(url));
+    const first = urls.length === 1;
+    return Response.json({ success: true, events: [{ id: first ? 'a' : 'b' }], nextCursor: first ? 10 : 11, hasMore: first });
+  };
+  try {
+    const count = await service.pullUpdates('test-tenant', async events => { applied.push(events[0].id); });
+    assert.equal(count, 2);
+    assert.deepEqual(applied, ['a', 'b']);
+    assert.match(urls[1], /cursor=10/);
+    assert.equal(globalThis.localStorage.getItem('braka_sync_cursor_v2_test-tenant_owner'), '11');
+  } finally { globalThis.sessionStorage = oldSession; globalThis.localStorage = oldLocal; globalThis.fetch = oldFetch; }
+});
+
+test('an event committed during an in-flight push is sent without waiting an hour', async () => {
+  const oldSession = globalThis.sessionStorage, oldFetch = globalThis.fetch;
+  globalThis.sessionStorage = memoryStorage(); setSessionToken('fixture-token');
+  setSessionUser({id:'owner', tenantId:'test-tenant', sessionExpiresAt:new Date(Date.now()+60_000).toISOString()});
+  const events = [{id:'first', tenantId:'test-tenant', entityType:'invoice', entityId:'one', action:'create', payload:{id:'one'}}];
+  const service = new CloudflareSyncService(); service.isOnline = true; service.currentTenantId = 'test-tenant';
+  service.repository = {current:{outbox:events}, acknowledge: accepted => {
+    for (let i=events.length-1;i>=0;i--) if (accepted.has(events[i].id)) events.splice(i,1);
+  }};
+  service.lastPullAt = Date.now();
+  let releaseFirst, requests = 0;
+  globalThis.fetch = async (_url, init) => {
+    requests++;
+    const ids = JSON.parse(init.body).events.map(event => event.id);
+    if (requests === 1) await new Promise(resolve => { releaseFirst = resolve; });
+    return Response.json({success:true, acceptedIds:ids});
+  };
+  try {
+    const first = service.flushQueue();
+    for (let i=0;i<20 && !releaseFirst;i++) await new Promise(resolve => setTimeout(resolve,0));
+    assert.ok(releaseFirst);
+    events.push({id:'second', tenantId:'test-tenant', entityType:'invoice', entityId:'two', action:'create', payload:{id:'two'}});
+    releaseFirst(); await first;
+    for (let i=0;i<30 && events.length;i++) await new Promise(resolve => setTimeout(resolve,10));
+    assert.equal(requests,2);
+    assert.deepEqual(events,[]);
+  } finally { service.stopAutoSync(); globalThis.sessionStorage=oldSession; globalThis.fetch=oldFetch; }
 });
