@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Building2, Receipt, Scale, PackageCheck, Cloud, ShieldCheck, 
   Save, Check, Download, Upload, RefreshCw, AlertCircle, Store, 
@@ -40,7 +40,9 @@ export default function SettingsView({
   } = store;
 
   const [activeSubTab, setActiveSubTab] = useState('profile');
-  const [form, setForm] = useState({ ...settings, address: getStoreDisplayAddress(settings.address) });
+  const initialSettings = () => ({ ...settings, address: getStoreDisplayAddress(settings.address) });
+  const [form, setForm] = useState(initialSettings);
+  const previousSettings = useRef(initialSettings());
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [cloudSyncMessage, setCloudSyncMessage] = useState(null);
@@ -101,9 +103,19 @@ export default function SettingsView({
     checkLatestRelease().then(setReleaseInfo).catch(() => {});
   }, []);
 
-  // Sync form when settings change
+  // Refresh untouched fields without discarding an in-progress edit when sync
+  // publishes a new settings object (or changes another field).
   useEffect(() => {
-    setForm({ ...settings, address: getStoreDisplayAddress(settings.address) });
+    const incoming = { ...settings, address: getStoreDisplayAddress(settings.address) };
+    const previous = previousSettings.current;
+    setForm(current => {
+      const merged = { ...incoming };
+      for (const [key, value] of Object.entries(current)) {
+        if (JSON.stringify(value) !== JSON.stringify(previous[key])) merged[key] = value;
+      }
+      return merged;
+    });
+    previousSettings.current = incoming;
   }, [settings]);
 
   // Subscribe to cloud sync service if available

@@ -31,3 +31,31 @@ test('cloud screen reads the real pending count when opened without a new sync e
     globalThis.fetch = priorFetch;
   }
 });
+
+test('settings draft survives an unrelated store refresh before Save', async () => {
+  const bundle = await build({ entryPoints: ['src/components/SettingsView.jsx'], bundle: true,
+    write: false, format: 'cjs', platform: 'node', define: { 'import.meta.env': '{}' },
+    loader: { '.png': 'dataurl' }, external: ['react', 'react-dom', 'react-test-renderer'] });
+  const loaded = { exports: {} };
+  new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), loaded, loaded.exports);
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 503 });
+  const syncService = { isOnline: true, getQueueLength: () => 0, subscribe: () => () => {} };
+  const base = { syncService, branches: [], users: [], currentUser: { id: 'owner', tenantId: 'A', role: 'company_owner', username: 'owner' }, updateSettings: async () => {} };
+  let root;
+  const shopInput = () => root.root.findAllByType('input').find(node => node.props.placeholder === 'مثال: سوق ومحل الخضار والفواكه');
+  try {
+    await act(async () => { root = TestRenderer.create(React.createElement(loaded.exports.default, { store: { ...base, settings: { shopName: 'الأصل' } } })); });
+    await act(async () => { shopInput().props.onChange({ target: { value: 'الاسم الجديد' } }); });
+    assert.equal(shopInput().props.value, 'الاسم الجديد');
+    await act(async () => { root.update(React.createElement(loaded.exports.default, { store: { ...base, settings: { shopName: 'الأصل' } } })); });
+    assert.equal(shopInput().props.value, 'الاسم الجديد');
+    await act(async () => { root.update(React.createElement(loaded.exports.default, { store: { ...base, settings: { shopName: 'الأصل', subTitle: 'وصف محدث' } } })); });
+    assert.equal(shopInput().props.value, 'الاسم الجديد');
+    const subtitle = root.root.findAllByType('input').find(node => node.props.placeholder === 'مثال: مبيعات وتوريد بالجملة والتجزئة');
+    assert.equal(subtitle.props.value, 'وصف محدث');
+  } finally {
+    await act(async () => { root?.unmount(); });
+    globalThis.fetch = priorFetch;
+  }
+});
