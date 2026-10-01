@@ -89,6 +89,7 @@ export default function DesktopUpdateModal({
         const result = await window.electronAPI.installUpdate();
         if (!result.success) throw new Error(result.error || 'تعذر تشغيل مثبت التحديث');
         setStatus('installer-opened');
+        window.electronAPI.close();
       }
     } catch (err) {
       setErrorMessage(err.message || 'تعذر تشغيل مثبت التحديث');
@@ -284,7 +285,7 @@ export default function DesktopUpdateModal({
                   <span>اكتمل تنزيل التحديث والتحقق من سلامته</span>
                 </div>
                 <p className="text-xs text-emerald-700 leading-relaxed">
-                  عند الضغط أدناه ستُفتح نافذة المثبّت. تأكد من ظهورها، ثم أغلق براكه واتبع خطوات التثبيت. لن تُحذف بياناتك المحلية.
+                  سيُغلق براكه إغلاقًا طبيعيًا بعد الضغط، ثم يفتح المثبّت تلقائيًا. لن تُحذف بياناتك المحلية.
                 </p>
               </div>
 
@@ -302,7 +303,7 @@ export default function DesktopUpdateModal({
                   className="py-2.5 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer"
                 >
                   <FileCheck size={16} />
-                  <span>فتح مُثبّت التحديث</span>
+                  <span>تثبيت التحديث وإغلاق براكه</span>
                 </button>
               </div>
             </div>

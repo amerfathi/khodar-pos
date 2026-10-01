@@ -24,8 +24,8 @@ test('Windows update UI displays failed installer acknowledgement', async () => 
       isOpen: true, onClose() {}, releaseInfo: { isUpdateAvailable: true, latestVersion: '2.6.5' }
     })); });
     await act(async () => { await click('تحميل التحديث وتثبيته الآن'); });
-    assert.match(text(root.toJSON()), /فتح مُثبّت التحديث/);
-    await act(async () => { await click('فتح مُثبّت التحديث'); });
+    assert.match(text(root.toJSON()), /تثبيت التحديث وإغلاق براكه/);
+    await act(async () => { await click('تثبيت التحديث وإغلاق براكه'); });
     assert.match(text(root.toJSON()), /Injected installer failure/);
   } finally {
     await act(async () => { root?.unmount(); });
@@ -33,7 +33,7 @@ test('Windows update UI displays failed installer acknowledgement', async () => 
   }
 });
 
-test('Windows update keeps the app open until the user sees the installer', async () => {
+test('Windows update closes the app after scheduling the installer handoff', async () => {
   const bundle = await build({ entryPoints: ['src/components/DesktopUpdateModal.jsx'], bundle: true,
     write: false, format: 'cjs', platform: 'node', define: { 'import.meta.env': '{}' },
     external: ['react', 'react-dom', 'react-test-renderer'] });
@@ -54,10 +54,7 @@ test('Windows update keeps the app open until the user sees the installer', asyn
       isOpen: true, onClose() {}, releaseInfo: { isUpdateAvailable: true, latestVersion: '2.6.7' }
     })); });
     await act(async () => { await click('تحميل التحديث وتثبيته الآن'); });
-    await act(async () => { await click('فتح مُثبّت التحديث'); });
-    assert.equal(closeCount, 0);
-    assert.match(text(root.toJSON()), /تأكد من ظهور نافذة التثبيت/);
-    await act(async () => { click('إغلاق براكه ومتابعة التثبيت'); });
+    await act(async () => { await click('تثبيت التحديث وإغلاق براكه'); });
     assert.equal(closeCount, 1);
   } finally {
     await act(async () => { root?.unmount(); });

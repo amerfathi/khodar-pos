@@ -97,7 +97,7 @@ const https = require('node:https');
 const { pipeline } = require('node:stream/promises');
 const { Transform } = require('node:stream');
 const { validateDownloadUrl, verifyManifest, verifyFile } = require('./update-security.cjs');
-const { launchVisibleInstaller } = require('./update-installer.cjs');
+const { launchInstallerAfterAppExit } = require('./update-installer.cjs');
 let activeAbort = null;
 let verifiedUpdate = null;
 function trustedSender(event) {
@@ -159,8 +159,8 @@ ipcMain.handle('install-update', async event=>{
   if(!trustedSender(event) || !verifiedUpdate) return {success:false,error:'No verified update'};
   try {
     await verifyFile(verifiedUpdate.installer,verifiedUpdate.manifest);
-    // No renderer-controlled path, shell, batch file, or process-name termination.
-    await launchVisibleInstaller(verifiedUpdate.installer);
+    // Wait outside this process so NSIS cannot race our graceful Electron shutdown.
+    await launchInstallerAfterAppExit(verifiedUpdate.installer, process.pid);
     return {success:true};
   } catch(error) {return {success:false,error:error.message};}
 });
