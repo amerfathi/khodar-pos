@@ -244,20 +244,32 @@ export function useAppStore(options = {}) {
       }).then(async ready => {
         if (disposed) return;
         if (ready) {
-          const ownedBranches = local.read(STORAGE_KEYS.BRANCHES);
-          const selected = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
-          if (!Array.isArray(ownedBranches) || !ownedBranches.length ||
-              ownedBranches.some(branch => branch?.tenantId !== currentUser.tenantId) ||
-              (!ownedBranches.some(branch => branch.id === selected) &&
-                !(selected === 'all' && canAccessBranch(currentUser, 'all')))) {
+          const hasValidBranchContext = () => {
+            const ownedBranches = local.read(STORAGE_KEYS.BRANCHES);
+            const selected = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
+            return Array.isArray(ownedBranches) && ownedBranches.length > 0 &&
+              ownedBranches.every(branch => branch?.tenantId === currentUser.tenantId) &&
+              (ownedBranches.some(branch => branch.id === selected) ||
+                (selected === 'all' && canAccessBranch(currentUser, 'all')));
+          };
+          const canReadCompleteManifest = ['company_owner','admin','super_admin'].includes(currentUser.role) &&
+            (!currentUser.branchId || currentUser.branchId === 'all');
+          let manifest = null;
+          let branchError = null;
+          if (!hasValidBranchContext() && canReadCompleteManifest) {
+            try {
+              manifest = await fetchServerBranchManifest({tenantId:currentUser.tenantId});
+              if (disposed) return;
+              await local.repairBranchContextFromManifest(STORAGE_KEYS.BRANCHES, STORAGE_KEYS.ACTIVE_BRANCH_ID, manifest);
+            } catch (error) { branchError = error; }
+          }
+          if (!hasValidBranchContext()) {
             await local.close();
-            if (!disposed) setPersistence({ ready: false, error: 'تعذر التحقق من فروع الشركة أو الفرع النشط؛ لم تُفتح العمليات المالية. يلزم مراجعة بيانات الفروع.' });
+            if (!disposed) setPersistence({ ready: false, error: `تعذر التحقق من فروع الشركة أو الفرع النشط؛ لم تُفتح العمليات المالية. ${branchError?.message || 'يلزم مراجعة بيانات الفروع.'}` });
             return;
           }
-          let manifest = null;
-          if (['company_owner','admin','super_admin'].includes(currentUser.role) &&
-              (!currentUser.branchId || currentUser.branchId === 'all')) {
-            manifest=await fetchServerBranchManifest({tenantId:currentUser.tenantId});
+          if (canReadCompleteManifest) {
+            manifest ||= await fetchServerBranchManifest({tenantId:currentUser.tenantId});
             if (!manifest?.fullTenantVisibility) throw new Error('تعذر تهيئة سياسة تعارض الأجهزة دون رؤية كاملة للشركة');
             if (!Object.hasOwn(local.value.state,SYNC_HEADS_STATE_KEY))
               await local.initializeConflictPolicy(manifest.conflictHeads,manifest.latestSequence);

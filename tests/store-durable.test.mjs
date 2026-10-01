@@ -68,6 +68,8 @@ test('actual app hook cloud-checks and adopts an existing legacy aggregate befor
 
 test('actual app hook blocks finance when authenticated branch provenance is missing', async () => {
   installBrowserDoubles();
+  const previousFetch=globalThis.fetch;
+  globalThis.fetch=async()=>Response.json({success:true,tenantId:'A',fullTenantVisibility:true,latestSequence:0,conflictHeads:{},branches:[]});
   const bundle=await build({stdin:{contents:"export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';",resolveDir:process.cwd()},bundle:true,write:false,define:{'import.meta.env':'{}'},format:'cjs',platform:'node',packages:'external'});
   const loaded={exports:{}};new Function('require','module','exports',bundle.outputFiles[0].text)(createRequire(import.meta.url),loaded,loaded.exports);
   const {useAppStore,cloudflareSync,setSessionToken,setSessionUser}=loaded.exports;
@@ -75,13 +77,62 @@ test('actual app hook blocks finance when authenticated branch provenance is mis
   try {
     setSessionToken('test-session');
     setSessionUser({id:'u',tenantId:'A',role:'company_owner',branchId:'all',sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
-    await act(async()=>{root=TestRenderer.create(React.createElement(Harness));await new Promise(resolve=>setTimeout(resolve,0));});
+    await act(async()=>{root=TestRenderer.create(React.createElement(Harness));await new Promise(resolve=>setTimeout(resolve,100));});
     assert.equal(app.persistence.ready,false);
     assert.match(app.persistence.error,/فروع الشركة/);
     assert.ok(!cloudflareSync.repository);
     assert.throws(()=>app.addExpense({id:'blocked-expense',amount:10}),/الحفظ غير متاح/);
     assert.equal(app.expenses.some(item=>item.id==='blocked-expense'),false);
-  } finally {await act(async()=>{root?.unmount();});cloudflareSync.stopAutoSync();delete globalThis.window;delete globalThis.document;}
+  } finally {globalThis.fetch=previousFetch;await act(async()=>{root?.unmount();});cloudflareSync.stopAutoSync();delete globalThis.window;delete globalThis.document;}
+});
+
+test('owner startup repairs missing branch context from the authenticated manifest without changing saved finance', async () => {
+  installBrowserDoubles();
+  const bundle=await build({stdin:{contents:"export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';",resolveDir:process.cwd()},bundle:true,write:false,define:{'import.meta.env':'{}'},format:'cjs',platform:'node',packages:'external'});
+  const loaded={exports:{}};new Function('require','module','exports',bundle.outputFiles[0].text)(createRequire(import.meta.url),loaded,loaded.exports);
+  const {useAppStore,cloudflareSync,setSessionToken,setSessionUser}=loaded.exports;
+  const identity={id:'repair-owner',tenantId:'A',role:'company_owner',branchId:'all',sessionExpiresAt:new Date(Date.now()+60000).toISOString()};
+  const branch={id:'branch-main',tenantId:'A',name:'Main',isMain:true,status:'active'};
+  const invoice={id:'saved-invoice',tenantId:'A',branchId:branch.id,total:27};
+  const saved=seedAggregate(localStorage,identity,{branches_v1:[],active_branch_id_v1:null,invoices_v3:[invoice]});
+  const rows=new Map([['braka:A:repair-owner:atomic_v1',structuredClone(saved)]]);
+  const durableRepository={async read(key){return structuredClone(rows.get(key)??null);},async commit(key,value){rows.set(key,structuredClone(value));return structuredClone(value);}};
+  const previousFetch=globalThis.fetch;let app,root;
+  function Harness(){app=useAppStore({durableRepository});return null;}
+  try {
+    setSessionToken('test-session');setSessionUser(identity);
+    globalThis.fetch=async url=>String(url).includes('/api/branches')
+      ? Response.json({success:true,tenantId:'A',fullTenantVisibility:true,latestSequence:0,conflictHeads:{'record:branch:branch-main':'server-branch-event'},branches:[branch]})
+      : Response.json({success:true,events:[],nextCursor:0,hasMore:false,conflictHeads:{}});
+    await act(async()=>{root=TestRenderer.create(React.createElement(Harness));await new Promise(resolve=>setTimeout(resolve,100));});
+    assert.equal(app.persistence.ready,true,app.persistence.error);
+    assert.deepEqual(app.invoices,[invoice]);
+    assert.deepEqual(app.branches,[branch]);
+    assert.equal(app.activeBranchId,branch.id);
+    assert.deepEqual(rows.get('braka:A:repair-owner:atomic_v1').outbox,[]);
+  } finally {globalThis.fetch=previousFetch;await act(async()=>{root?.unmount();});cloudflareSync.stopAutoSync();delete globalThis.window;delete globalThis.document;}
+});
+
+test('owner startup keeps protection when saved finance belongs to an unrecognized branch', async () => {
+  installBrowserDoubles();
+  const bundle=await build({stdin:{contents:"export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';",resolveDir:process.cwd()},bundle:true,write:false,define:{'import.meta.env':'{}'},format:'cjs',platform:'node',packages:'external'});
+  const loaded={exports:{}};new Function('require','module','exports',bundle.outputFiles[0].text)(createRequire(import.meta.url),loaded,loaded.exports);
+  const {useAppStore,cloudflareSync,setSessionToken,setSessionUser}=loaded.exports;
+  const identity={id:'unsafe-owner',tenantId:'A',role:'company_owner',branchId:'all',sessionExpiresAt:new Date(Date.now()+60000).toISOString()};
+  const saved=seedAggregate(localStorage,identity,{branches_v1:[],active_branch_id_v1:null,invoices_v3:[{id:'invoice-other',tenantId:'A',branchId:'unknown-branch',total:27}]});
+  const rows=new Map([['braka:A:unsafe-owner:atomic_v1',structuredClone(saved)]]);
+  const durableRepository={async read(key){return structuredClone(rows.get(key)??null);},async commit(){throw Error('Unsafe aggregate must not be committed');}};
+  const previousFetch=globalThis.fetch;let app,root;
+  function Harness(){app=useAppStore({durableRepository});return null;}
+  try {
+    setSessionToken('test-session');setSessionUser(identity);
+    globalThis.fetch=async()=>Response.json({success:true,tenantId:'A',fullTenantVisibility:true,latestSequence:0,conflictHeads:{},branches:[{id:'branch-main',tenantId:'A',name:'Main',isMain:true,status:'active'}]});
+    await act(async()=>{root=TestRenderer.create(React.createElement(Harness));await new Promise(resolve=>setTimeout(resolve,100));});
+    assert.equal(app.persistence.ready,false);
+    assert.match(app.persistence.error,/فرع غير معروف/);
+    assert.deepEqual(rows.get('braka:A:unsafe-owner:atomic_v1'),saved);
+    assert.equal(cloudflareSync.repository,null);
+  } finally {globalThis.fetch=previousFetch;await act(async()=>{root?.unmount();});cloudflareSync.stopAutoSync();delete globalThis.window;delete globalThis.document;}
 });
 
 test('actual app hook starts a newly authenticated tenant on its server-provisioned branch only', async () => {

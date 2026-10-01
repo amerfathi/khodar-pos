@@ -442,6 +442,7 @@ export class AtomicStore {
     }
     for (const [key, allowedTypes] of Object.entries(FINANCIAL_EVENT_TYPES_BY_KEY)) {
       if (JSON.stringify(before.state[key]) === JSON.stringify(after.state[key])) continue;
+      if (key === 'khodar_pos_branches_v1' && this.manifestBranchRepair === true) continue;
       if (!allowedTypes.some(type => this.txEventTypes?.has(type)))
         throw new Error(`تغير مالي بلا حدث مزامنة مرتبط (${key})؛ لم تُحفظ العملية`);
       const directType = DIRECT_RECORD_EVENT_BY_KEY[key];
@@ -743,6 +744,43 @@ export class AtomicStore {
       const previous = this.draft.state[key];
       this.draft.state[key] = typeof update === 'function' ? update(previous) : update;
     });
+  }
+  repairBranchContextFromManifest(branchesKey, selectedKey, manifest) {
+    const existing = this.read(branchesKey);
+    const incoming = manifest?.branches;
+    if (!manifest?.fullTenantVisibility || manifest.tenantId !== this.user.tenantId ||
+        !Number.isSafeInteger(manifest.latestSequence) || manifest.latestSequence < this.value.cursor ||
+        !Array.isArray(incoming) || !incoming.length || !Array.isArray(existing) ||
+        this.value.outbox.length || incoming.some(branch => !branch || typeof branch.id !== 'string' ||
+          !branch.id || branch.tenantId !== this.user.tenantId) ||
+        new Set(incoming.map(branch => branch.id)).size !== incoming.length ||
+        existing.some(branch => !branch || branch.tenantId !== this.user.tenantId))
+      throw new Error('تعذر التحقق من فروع الشركة؛ احتُفظ بالسجل المحلي دون تغيير');
+    const known = new Set(incoming.map(branch => branch.id));
+    if (existing.some(branch => !known.has(branch.id)))
+      throw new Error('يوجد فرع محلي غير مسجل في الخادم؛ احتُفظ بالسجل المحلي دون تغيير');
+    for (const value of Object.values(this.value.state)) {
+      if (!Array.isArray(value)) continue;
+      for (const row of value) {
+        if (!row || typeof row !== 'object') continue;
+        for (const key of ['branchId', 'fromBranchId', 'toBranchId', 'sourceBranchId', 'destinationBranchId']) {
+          if (row[key] != null && row[key] !== 'all' && !known.has(row[key]))
+            throw new Error('توجد بيانات مرتبطة بفرع غير معروف؛ احتُفظ بالسجل المحلي دون تغيير');
+        }
+      }
+    }
+    const selected = this.read(selectedKey);
+    const replacement = known.has(selected) ? selected :
+      (incoming.find(branch => branch.isMain && branch.status === 'active') ||
+        incoming.find(branch => branch.status === 'active'))?.id;
+    if (!replacement) throw new Error('لا يوجد فرع نشط موثوق؛ احتُفظ بالسجل المحلي دون تغيير');
+    const action = () => {
+      this.draft.state[branchesKey] = clone(incoming);
+      this.draft.state[selectedKey] = replacement;
+    };
+    this.manifestBranchRepair = true;
+    try { return this.durable ? this.transactDurable(action) : this.transact(action); }
+    finally { this.manifestBranchRepair = false; }
   }
   initializeConflictPolicy(conflictHeads, latestSequence) {
     const action=()=>{
