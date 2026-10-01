@@ -3,6 +3,8 @@ import { Printer, MessageCircle, X, Check, FileText, ArrowRight, ShieldCheck, Ed
 import { formatCurrency, formatWeight } from '../utils/formatters';
 import { openWhatsAppInvoice } from '../utils/whatsapp';
 import { displayInvoiceNumber } from '../services/invoiceIdentity';
+import { BRRAKA_LOGO } from '../assets/branding';
+import { getStoreDisplayAddress } from '../utils/storeDisplay';
 
 export default function A4InvoiceModal({ 
   isOpen, 
@@ -144,14 +146,14 @@ export default function A4InvoiceModal({
               {/* Store Details */}
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-2xl">🥬</span>
+                  <img src={BRRAKA_LOGO} alt="شعار براكه" className="w-9 h-9 object-contain shrink-0" />
                   <h1 className="text-xl font-black text-slate-900 tracking-tight">
                     {settings.shopName || 'براكه'}
                   </h1>
                 </div>
                 <p className="text-xs text-slate-600 font-semibold">{settings.subTitle}</p>
-                <p className="text-[11px] text-slate-500">📍 {settings.address}</p>
-                <p className="text-[11px] font-mono text-slate-700">📞 {settings.phone} {settings.secondaryPhone ? `• ${settings.secondaryPhone}` : ''}</p>
+                {getStoreDisplayAddress(settings.address) && <p className="text-[11px] text-slate-500">📍 {getStoreDisplayAddress(settings.address)}</p>}
+                {(settings.phone || settings.secondaryPhone) && <p className="text-[11px] font-mono text-slate-700">📞 {settings.phone} {settings.secondaryPhone ? `• ${settings.secondaryPhone}` : ''}</p>}
               </div>
 
               {/* Invoice Title & Number */}
@@ -287,9 +289,6 @@ export default function A4InvoiceModal({
                 <p className="text-[11px] text-slate-700 leading-relaxed font-medium bg-white p-2.5 rounded-lg border border-slate-200/70 min-h-[48px]">
                   {notes || invoice.notes || settings.invoiceNote || 'البضاعة المباعة تخضع للفحص والوزن بالمحل، شكراً لتعاملكم معنا.'}
                 </p>
-                <div className="pt-2 border-t border-slate-200 text-[10px] text-slate-500">
-                  * تم تدقيق الأوزان والخصم الصافي بموجب معايير أسواق الخضار المركزية.
-                </div>
               </div>
 
               {/* Totals Breakdown Box */}

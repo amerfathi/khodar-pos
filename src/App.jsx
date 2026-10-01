@@ -31,7 +31,7 @@ import { getClientPlatform } from './config/appVersion';
 import DesktopSidebar, { TAB_PERMISSION_MAP } from './components/DesktopSidebar';
 import SettingsView from './components/SettingsView';
 import ErrorBoundary from './components/ErrorBoundary';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { 
   Settings, ShieldCheck, Smartphone, Printer, FileText, 
   ShoppingCart, Truck, Users, Package, AlertOctagon, UserCheck, PieChart,
@@ -85,7 +85,7 @@ const NAV_GROUPS = [
     tabs: [
       { id: 'audit', label: 'الجرد والسيولة ومطابقة الدرج', shortLabel: 'الجرد والسيولة', icon: Scale },
       { id: 'partners', label: 'الشركاء والمسحوبات والأرباح', shortLabel: 'الشركاء والأرباح', icon: Coins },
-      { id: 'reports', label: 'مركز تقارير A4 الرسمية', shortLabel: 'تقارير A4 الرسمية', icon: PieChart },
+      { id: 'reports', label: 'التقارير', shortLabel: 'التقارير', icon: PieChart },
     ]
   },
   {
@@ -121,7 +121,7 @@ const TAB_TITLES = {
   workers: 'الموظفون والرواتب',
   damaged: 'التوالف والهالك',
   products: 'الأصناف والأسعار',
-  reports: 'تقارير A4 الرسمية',
+  reports: 'التقارير',
   settings: 'إعدادات وضبط النظام الشاملة',
 };
 
@@ -138,7 +138,7 @@ const pageVariants = {
     x: 0,
     scale: 1,
     transition: {
-      duration: 0.28,
+      duration: 0.18,
       ease: [0.25, 1, 0.5, 1]
     }
   },
@@ -147,13 +147,14 @@ const pageVariants = {
     x: direction > 0 ? -30 : 30,
     scale: 0.99,
     transition: {
-      duration: 0.2,
+      duration: 0.1,
       ease: [0.25, 1, 0.5, 1]
     }
   })
 };
 
 export default function App() {
+  const prefersReducedMotion = useReducedMotion();
   const store = useAppStore();
   const { 
     settings, 
@@ -234,6 +235,8 @@ export default function App() {
     const bindAndroidBack = async () => {
       try {
         backListener = await CapApp.addListener('backButton', () => {
+          const overlayBack = new Event('braka:ui-back', { cancelable: true });
+          if (!window.dispatchEvent(overlayBack)) return;
           if (a4Invoice) { setA4Invoice(null); return; }
           if (receiptInvoice) { setReceiptInvoice(null); return; }
           if (isChangePasswordOpen) { setIsChangePasswordOpen(false); return; }
@@ -339,7 +342,7 @@ export default function App() {
       setDirection(1);
       setNavHistory(prev => [...prev, tabId]);
       setCurrentTab(tabId);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
   };
 
@@ -378,7 +381,7 @@ export default function App() {
       setCurrentTab('home');
       setNavHistory(['home']);
     }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'instant' });
   };
 
   const [isElectron, setIsElectron] = useState(false);
@@ -418,11 +421,11 @@ export default function App() {
     handleNavigate('reports');
   };
 
-  // 1. Initial 5-Second Branded Fullscreen Splash Screen on App Launch
+  // Brief visual transition while the application mounts.
   if (showSplash) {
     return (
       <AnimatePresence>
-        <SplashScreen onFinish={() => setShowSplash(false)} duration={5000} />
+        <SplashScreen onFinish={() => setShowSplash(false)} duration={1200} />
       </AnimatePresence>
     );
   }
@@ -490,7 +493,7 @@ export default function App() {
   const isSubPageOnMobile = currentTab !== 'home';
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-800 flex flex-row selection:bg-primary-500 selection:text-white relative overflow-x-hidden font-sans">
+    <div className="braka-workspace min-h-screen bg-[#f8fafc] text-slate-800 flex flex-row selection:bg-primary-500 selection:text-white relative overflow-x-hidden font-sans">
       
       {/* 1. Desktop Vertical Sidebar (RTL: right side) */}
       <DesktopSidebar 
@@ -784,7 +787,11 @@ export default function App() {
             <motion.div
               key={currentTab}
               custom={direction}
-              variants={pageVariants}
+              variants={prefersReducedMotion ? {
+                initial: { opacity: 1, x: 0, scale: 1 },
+                animate: { opacity: 1, x: 0, scale: 1, transition: { duration: 0 } },
+                exit: { opacity: 1, x: 0, scale: 1, transition: { duration: 0 } }
+              } : pageVariants}
               initial="initial"
               animate="animate"
               exit="exit"

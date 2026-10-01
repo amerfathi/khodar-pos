@@ -1,12 +1,14 @@
 import { formatCurrency, formatWeight } from './formatters';
 import { displayInvoiceNumber } from '../services/invoiceIdentity';
+import { getStoreDisplayAddress } from './storeDisplay';
 
 export const generateWhatsAppInvoiceMessage = (invoice, settings) => {
   const line = '━━━━━━━━━━━━━━━━━━━━━━';
   
-  let msg = `🥬 *${settings.shopName}*\n`;
-  msg += `📍 ${settings.address || 'تجارة الخضار والفواكه بالجملة'}\n`;
-  msg += `📞 هاتف: ${settings.phone}\n`;
+  let msg = `*${settings.shopName || 'براكه'}*\n`;
+  const address = getStoreDisplayAddress(settings.address);
+  if (address) msg += `📍 ${address}\n`;
+  if (settings.phone) msg += `📞 هاتف: ${settings.phone}\n`;
   msg += `${line}\n`;
   msg += `📄 *فاتورة مبيعات رقم:* #${displayInvoiceNumber(invoice)}\n`;
   msg += `📅 التاريخ: ${invoice.date} - ${invoice.time}\n`;

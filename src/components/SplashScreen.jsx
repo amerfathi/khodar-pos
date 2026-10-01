@@ -1,33 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { BRRAKA_LOGO } from '../assets/branding';
 import { APP_VERSION } from '../config/appVersion';
 import { Sparkles, ShieldCheck, ArrowLeft } from 'lucide-react';
 
-export default function SplashScreen({ onFinish, duration = 5000 }) {
-  const [timeLeft, setTimeLeft] = useState(Math.ceil(duration / 1000));
+export default function SplashScreen({ onFinish, duration = 1200 }) {
   const finishRef = useRef(onFinish);
   finishRef.current = onFinish;
 
   useEffect(() => {
-    // Countdown timer for user feedback
-    const interval = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    // Transition trigger after exactly duration ms (5 seconds)
+    // The visual transition does not delay access for five seconds.
     const timer = setTimeout(() => {
       finishRef.current?.();
     }, duration);
 
     return () => {
-      clearInterval(interval);
       clearTimeout(timer);
     };
   }, [duration]);
@@ -42,13 +29,13 @@ export default function SplashScreen({ onFinish, duration = 5000 }) {
       dir="rtl"
     >
       {/* Ambient background glow effects */}
-      <div className="absolute top-1/4 -left-20 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-1/4 -left-20 w-80 h-80 bg-primary-500/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-1/3 -right-20 w-80 h-80 bg-primary-500/15 rounded-full blur-3xl pointer-events-none" />
 
       {/* Top Bar: Skip button & Badge */}
       <div className="w-full max-w-md flex items-center justify-between z-10 pt-2">
         <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-[11px] font-medium text-slate-300 border border-white/10">
-          <Sparkles size={13} className="text-emerald-400" />
+          <Sparkles size={13} className="text-primary-400" />
           <span>سوق الخضار الذكي</span>
         </span>
 
@@ -72,7 +59,7 @@ export default function SplashScreen({ onFinish, duration = 5000 }) {
           transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
           className="relative mb-6"
         >
-          <div className="absolute -inset-4 bg-gradient-to-r from-emerald-500/25 to-teal-400/25 rounded-3xl blur-xl animate-pulse" />
+          <div className="absolute -inset-4 bg-primary-500/20 rounded-3xl blur-xl" />
           <div className="relative w-32 h-32 sm:w-40 sm:h-40 rounded-3xl bg-white/5 backdrop-blur-md border border-white/15 p-4 flex items-center justify-center shadow-2xl">
             <img 
               src={BRRAKA_LOGO} 
@@ -112,26 +99,23 @@ export default function SplashScreen({ onFinish, duration = 5000 }) {
         </motion.div>
       </div>
 
-      {/* Bottom: 5-Second Progress Bar & Status */}
+      {/* Brief progress cue */}
       <div className="w-full max-w-sm space-y-3 z-10 pb-4 text-center">
-        {/* Progress Bar (Fills in exactly 5 seconds) */}
+        {/* Progress bar follows the transition duration. */}
         <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden backdrop-blur-sm border border-white/5">
           <motion.div 
             initial={{ width: "0%" }}
             animate={{ width: "100%" }}
             transition={{ duration: duration / 1000, ease: "linear" }}
-            className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-300 rounded-full shadow-[0_0_12px_rgba(52,211,153,0.8)]"
+            className="h-full bg-primary-500 rounded-full"
           />
         </div>
 
-        {/* Countdown & Status */}
+        {/* Status */}
         <div className="flex items-center justify-between text-xs text-slate-400 font-mono px-1">
           <span className="flex items-center gap-1.5 font-sans text-[11px]">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+            <span className="w-2 h-2 rounded-full bg-primary-400 inline-block" />
             <span>جاري تهيئة المنظومة...</span>
-          </span>
-          <span className="text-[11px] text-slate-400">
-            {timeLeft} ثوانٍ
           </span>
         </div>
 

@@ -8,7 +8,7 @@ export const INITIAL_SETTINGS = {
   phone: '',
   secondaryPhone: '',
   currency: 'ريال',
-  address: 'السوق المركزي للخضار والفواكه',
+  address: '',
   taxNumber: '', // الرقم الضريبي للمنشأة (15 رقماً)
   commercialRegister: '', // رقم السجل التجاري
   enableTax: false, // تفعيل ضريبة القيمة المضافة

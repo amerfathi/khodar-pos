@@ -53,7 +53,7 @@ export const NAV_GROUPS = [
     tabs: [
       { id: 'audit', label: 'الجرد ومطابقة الدرج', icon: Scale },
       { id: 'partners', label: 'الشركاء والمسحوبات', icon: Coins },
-      { id: 'reports', label: 'مركز تقارير A4 الرسمية', icon: PieChart },
+      { id: 'reports', label: 'التقارير', icon: PieChart },
     ]
   },
   {

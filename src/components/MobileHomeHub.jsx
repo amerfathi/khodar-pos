@@ -132,7 +132,7 @@ export default function MobileHomeHub({
           desc: 'الخزنة ومطابقة الدرج',
           icon: Scale,
           color: 'bg-navy-850 text-white',
-          badge: 'أين الفلوس'
+          badge: null
         },
         {
           id: 'partners',
@@ -144,11 +144,11 @@ export default function MobileHomeHub({
         },
         {
           id: 'reports',
-          title: 'مركز تقارير A4',
+          title: 'التقارير',
           desc: 'الطباعة والكشوفات',
           icon: PieChart,
           color: 'bg-primary-600 text-white',
-          badge: 'A4 رسمي'
+          badge: null
         },
       ]
     },
@@ -165,7 +165,7 @@ export default function MobileHomeHub({
           desc: 'الضريبة، الطابعات، الميزان والسحابة',
           icon: Settings,
           color: 'bg-navy-850 text-white',
-          badge: 'Cloudflare D1'
+          badge: null
         }
       ]
     }
@@ -272,13 +272,13 @@ export default function MobileHomeHub({
             </div>
           </div>
 
-          <div className="bg-emerald-50/40 border border-emerald-200/60 rounded-xl p-2.5 space-y-1">
-            <span className="text-[10px] font-semibold text-emerald-800 block truncate">الخزينة (الدرج):</span>
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-2.5 space-y-1">
+            <span className="text-[10px] font-semibold text-slate-700 block truncate">الخزينة (الدرج):</span>
             <div className="flex items-baseline gap-1 overflow-hidden">
-              <span className="text-base font-bold font-mono tabular-nums text-emerald-800 truncate">
+              <span className="text-base font-bold font-mono tabular-nums text-navy-850 truncate">
                 {finPos ? (Number(finPos.cashBalance) || 0).toFixed(1) : '0'}
               </span>
-              <span className="text-[9px] text-emerald-600 font-medium shrink-0">{settings.currency}</span>
+              <span className="text-[9px] text-slate-600 font-medium shrink-0">{settings.currency}</span>
             </div>
           </div>
 
@@ -292,13 +292,13 @@ export default function MobileHomeHub({
             </div>
           </div>
 
-          <div className="bg-amber-50/40 border border-amber-200/60 rounded-xl p-2.5 space-y-1">
-            <span className="text-[10px] font-semibold text-amber-900 block truncate">ديون العملاء:</span>
+          <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-2.5 space-y-1">
+            <span className="text-[10px] font-semibold text-slate-700 block truncate">ديون العملاء:</span>
             <div className="flex items-baseline gap-1 overflow-hidden">
-              <span className="text-base font-bold font-mono tabular-nums text-amber-900 truncate">
+              <span className="text-base font-bold font-mono tabular-nums text-navy-850 truncate">
                 {totalDebts.toFixed(1)}
               </span>
-              <span className="text-[9px] text-amber-700 font-medium shrink-0">{settings.currency}</span>
+              <span className="text-[9px] text-slate-600 font-medium shrink-0">{settings.currency}</span>
             </div>
           </div>
         </div>

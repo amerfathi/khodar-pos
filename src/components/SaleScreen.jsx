@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Plus, Trash2, Edit3, Scale, User, UserPlus, 
   Receipt, Printer, Check, ShoppingBag, 
@@ -367,7 +368,7 @@ export default function SaleScreen({
   });
 
   return (
-    <div className="w-full pb-28 lg:pb-12 pt-3 px-3 sm:px-6 lg:px-8">
+    <div className="sale-screen w-full pb-48 lg:pb-12 pt-3 px-3 sm:px-6 lg:px-8">
       {/* 2-Column Responsive Layout */}
       <div className="flex flex-col lg:flex-row items-start gap-6 w-full">
         
@@ -1264,18 +1265,18 @@ export default function SaleScreen({
       )}
 
       {/* Mobile Sticky Quick-Checkout Floating Bar (Docked above BottomNav) */}
-      {cartItems.length > 0 && (
-        <div className="lg:hidden fixed bottom-16 inset-x-0 z-30 px-3 pb-safe pointer-events-none">
-          <div className="max-w-lg mx-auto bg-slate-900/95 text-white backdrop-blur-md rounded-2xl p-3 shadow-2xl border border-slate-700/80 pointer-events-auto flex items-center justify-between gap-3 animate-in slide-in-from-bottom duration-200">
+      {(globalThis.document?.body ? createPortal : (content) => content)(
+        <div className="lg:hidden fixed bottom-[calc(64px+env(safe-area-inset-bottom,0px))] inset-x-0 z-30 pointer-events-none">
+          <div className="max-w-lg mx-auto bg-white text-navy-850 p-3 shadow-soft border-t border-slate-200 pointer-events-auto flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-col min-w-0">
-              <span className="text-[10px] text-slate-300 font-medium truncate">
+              <span className="text-xs text-slate-600 font-medium truncate">
                 {cartItems.length} {cartItems.length === 1 ? 'صنف' : 'أصناف'} • {totalPackages} عبوة ({formatWeight(totalNetWeight)})
               </span>
               <div className="flex items-baseline gap-1">
-                <span className="text-emerald-400 font-black font-mono text-lg tracking-tight">
+                <span className="text-navy-850 font-bold font-mono text-2xl tracking-tight">
                   {finalTotal.toFixed(2)}
                 </span>
-                <span className="text-[11px] text-slate-400 font-medium">{settings.currency}</span>
+                <span className="text-xs text-slate-600 font-medium">{settings.currency}</span>
               </div>
             </div>
 
@@ -1286,7 +1287,7 @@ export default function SaleScreen({
                   const el = document.getElementById('payment-section');
                   if (el) el.scrollIntoView({ behavior: 'smooth' });
                 }}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1 border border-slate-700 transition-all cursor-pointer active:scale-95"
+                className="min-h-12 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl flex items-center gap-1 border border-slate-200 transition-colors cursor-pointer"
               >
                 <span>الدفع</span>
                 <ChevronDown size={14} />
@@ -1294,17 +1295,22 @@ export default function SaleScreen({
 
               <button
                 type="button"
-                disabled={isSubmitting}
+                disabled={isSubmitting || cartItems.length === 0}
                 onClick={() => handleSaveInvoice(true)}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                className="min-h-12 px-3.5 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Printer size={15} />
-                <span>حفظ وطباعة</span>
+                <span>{isSubmitting ? 'جاري الحفظ...' : 'حفظ وطباعة'}</span>
               </button>
             </div>
+            <button type="button" disabled={isSubmitting || cartItems.length === 0}
+              onClick={() => handleSaveInvoice(false)}
+              className="w-full min-h-11 text-sm font-semibold text-primary-700 bg-primary-50 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+              حفظ بدون طباعة
+            </button>
           </div>
         </div>
-      )}
+      , globalThis.document?.body)}
 
       {/* Scale Multi-Tally Modal */}
       <WeightTallyModal

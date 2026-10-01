@@ -67,7 +67,7 @@ export default function LoginView({ store, onClose = null }) {
     }
 
     if (!storeCode.trim()) {
-      setErrorMessage('يرجى إدخال كود المتجر (Store Code)');
+      setErrorMessage('يرجى إدخال رمز المتجر');
       return;
     }
 
@@ -101,7 +101,7 @@ export default function LoginView({ store, onClose = null }) {
   };
 
   return (
-    <div className={`${onClose ? 'fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/50 backdrop-blur-xs' : 'min-h-[100dvh] bg-white sm:bg-[#f8fafc] sm:py-8 sm:px-4 flex flex-col justify-start sm:justify-center items-center'} text-right font-sans pt-safe pb-safe`} dir="rtl">
+    <div className={`braka-login ${onClose ? 'fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-900/50 backdrop-blur-xs' : 'min-h-[100dvh] bg-white sm:bg-[#f8fafc] sm:py-8 sm:px-4 flex flex-col justify-start sm:justify-center items-center'} text-right font-sans pt-safe pb-safe`} dir="rtl">
       
       {/* Central Product Gateway Card (Responsive: Edge-to-Edge on Mobile, Elegant Card on Desktop) */}
       <div className="w-full sm:max-w-md bg-white sm:rounded-3xl sm:shadow-xl sm:border sm:border-slate-200/90 z-10 relative flex flex-col justify-between flex-1 sm:flex-initial">
@@ -132,7 +132,7 @@ export default function LoginView({ store, onClose = null }) {
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">براكه | Brraka</h1>
             <Badge variant="success" size="sm">v{APP_VERSION}</Badge>
           </div>
-          <p className="text-xs text-slate-500 mt-1 font-medium">منظومة كاشير ومحاسبة سحابية متكاملة</p>
+          <p className="text-xs text-slate-500 mt-1 font-medium">كاشير ومحاسبة للمتجر</p>
 
           {/* Navigation Pill Switcher (Web only - not shown on native Android app) */}
           {!isNativeMobile && (
@@ -223,7 +223,7 @@ export default function LoginView({ store, onClose = null }) {
                 <div className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-2xl animate-in fade-in">
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-xs font-bold text-emerald-950">
-                      كود المتجر السحابي (Store Code)
+                      رمز المتجر
                     </label>
                     {storeCode && (
                       <button

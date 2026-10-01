@@ -127,7 +127,7 @@ export default function BranchesManagementModal({ isOpen, onClose, store }) {
   };
 
   // WhatsApp Upgrade Link
-  const waPhone = '966500000000';
+  const waPhone = '966564982852';
   const waUpgradeText = encodeURIComponent(
     `السلام عليكم، أنا المشترك (${currentUser?.companyName || currentUser?.username})، أرغب في ترقية باقتي لإضافة فروع إضافية لنظام الخضار والفواكه.`
   );

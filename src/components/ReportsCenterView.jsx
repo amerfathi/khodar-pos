@@ -10,6 +10,9 @@ import {
 import { formatCurrency, formatWeight, getCurrentDateFormatted } from '../utils/formatters';
 import { buildReportSnapshot, buildReceivableAging } from '../services/reportRegistry';
 import { displayInvoiceNumber } from '../services/invoiceIdentity';
+import { APP_VERSION } from '../config/appVersion';
+import { BRRAKA_LOGO } from '../assets/branding';
+import { getStoreDisplayAddress } from '../utils/storeDisplay';
 
 export default function ReportsCenterView({ store, initialReportType = 'executive', initialPartnerId = '' }) {
   const { 
@@ -401,7 +404,7 @@ export default function ReportsCenterView({ store, initialReportType = 'executiv
 • صافي نقدية الصندوق (الدرج): ${expectedDrawerCash.toFixed(2)} ${settings.currency}
 • صافي الربح اليومي التقديري: ${netEstimatedProfit.toFixed(2)} ${settings.currency}
 
-_تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
+_تم الاستخراج آلياً من منظومة براكه v${APP_VERSION}_`;
 
     navigator.clipboard.writeText(text);
     setCopiedWhatsapp(true);
@@ -589,12 +592,12 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-sm sm:text-base font-bold text-slate-900">مركز التقارير وقوائم التدقيق المالي</h1>
+                <h1 className="text-sm sm:text-base font-bold text-slate-900">التقارير والتدقيق المالي</h1>
                 <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-bold border border-slate-200">
-                  v2.6.1
+                  v{APP_VERSION}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 font-normal">لوحة التقارير الاستراتيجية والرقابية المعتمدة للمالك والطباعة الرسمية A4</p>
+              <p className="text-xs text-slate-500 font-normal">المبيعات والمصروفات والمخزون والحسابات في مكان واحد</p>
             </div>
           </div>
 
@@ -800,13 +803,17 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b-2 border-slate-900">
             <div className="space-y-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-2xl">🥬</span>
+                <img src={BRRAKA_LOGO} alt="شعار براكه" className="w-9 h-9 object-contain shrink-0" />
                 <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight truncate">
                   {settings.shopName}
                 </h2>
               </div>
               <p className="text-xs text-slate-600 font-semibold truncate">{settings.subTitle}</p>
-              <p className="text-[11px] text-slate-500 truncate">📍 {settings.address} • 📞 {settings.phone}</p>
+              {(getStoreDisplayAddress(settings.address) || settings.phone) && <p className="text-[11px] text-slate-500 truncate">
+                {getStoreDisplayAddress(settings.address) && `📍 ${getStoreDisplayAddress(settings.address)}`}
+                {getStoreDisplayAddress(settings.address) && settings.phone && ' • '}
+                {settings.phone && `📞 ${settings.phone}`}
+              </p>}
             </div>
 
             <div className="text-right sm:text-left space-y-1 shrink-0">
@@ -2192,7 +2199,7 @@ _تم الاستخراج آلياً من منظومة براكه v2.6.1_`;
           </div>
 
           <div className="pt-8 text-center text-[10px] text-slate-400 border-t border-slate-100 mt-6">
-            مستند رسمي صادر عن منظومة براكه للمحاسبة والمبيعات (إصدار v2.6.1) • تم الاستخراج بتاريخ {todayStr}
+            تقرير صادر عن براكه (إصدار v{APP_VERSION}) • تم الاستخراج بتاريخ {todayStr}
           </div>
 
         </div>

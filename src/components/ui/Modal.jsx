@@ -84,7 +84,7 @@ export default function Modal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 flex items-center justify-center transition-colors cursor-pointer"
+                  className="w-11 h-11 rounded-lg text-slate-600 hover:text-slate-700 hover:bg-slate-200/60 flex items-center justify-center transition-colors cursor-pointer"
                   aria-label="إغلاق"
                 >
                   <X size={16} />

@@ -15,6 +15,7 @@ import { APP_VERSION, APP_RELEASE_DATE, getClientPlatform } from '../config/appV
 import { checkLatestRelease } from '../services/releaseService';
 import DesktopUpdateModal from './DesktopUpdateModal';
 import { resolveUserPermissions } from '../store/useAppStore';
+import { getStoreDisplayAddress } from '../utils/storeDisplay';
 
 export default function SettingsView({ 
   store, 
@@ -29,7 +30,6 @@ export default function SettingsView({
     activeBranchId, 
     exportBackupJSON, 
     importBackupJSON, 
-    resetToSampleData,
     syncService,
     backupStatus = { status: 'idle', error: null },
     users = [],
@@ -40,11 +40,11 @@ export default function SettingsView({
   } = store;
 
   const [activeSubTab, setActiveSubTab] = useState('profile');
-  const [form, setForm] = useState({ ...settings });
+  const [form, setForm] = useState({ ...settings, address: getStoreDisplayAddress(settings.address) });
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [cloudSyncMessage, setCloudSyncMessage] = useState(null);
-  const [syncStatus, setSyncStatus] = useState({ isOnline: true, queueLength: 0 });
+  const [syncStatus, setSyncStatus] = useState({ status: 'loading', isOnline: false, queueLength: null });
 
   // Users & Permissions Management State
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -103,18 +103,23 @@ export default function SettingsView({
 
   // Sync form when settings change
   useEffect(() => {
-    setForm({ ...settings });
+    setForm({ ...settings, address: getStoreDisplayAddress(settings.address) });
   }, [settings]);
 
   // Subscribe to cloud sync service if available
   useEffect(() => {
-    if (syncService && syncService.subscribe) {
-      const unsub = syncService.subscribe((status) => {
-        setSyncStatus(status);
-      });
-      return unsub;
+    if (!syncService?.subscribe || !syncService?.getQueueLength) {
+      setSyncStatus({ status: 'error', isOnline: false, queueLength: null });
+      return undefined;
     }
-  }, [syncService]);
+    const unsub = syncService.subscribe(status => setSyncStatus(status));
+    try {
+      setSyncStatus({ status: 'idle', isOnline: syncService.isOnline, queueLength: syncService.getQueueLength() });
+    } catch {
+      setSyncStatus({ status: 'error', isOnline: syncService.isOnline, queueLength: null });
+    }
+    return unsub;
+  }, [syncService, currentUser?.tenantId]);
 
   const handleSave = async (e) => {
     if (e) e.preventDefault();
@@ -131,9 +136,9 @@ export default function SettingsView({
     try {
       const result = await store.syncNow();
       if (!result.success) throw new Error(result.error || 'لم تكتمل المزامنة');
-      setCloudSyncMessage({ type: 'success', text: 'تمت المزامنة السحابية بنجاح مع Cloudflare D1!' });
+      setCloudSyncMessage({ type: 'success', text: 'اكتملت المزامنة السحابية بنجاح' });
     } catch (err) {
-      setCloudSyncMessage({ type: 'error', text: 'تعذرت المزامنة: ' + err.message });
+      setCloudSyncMessage({ type: 'error', text: 'تعذرت المزامنة. أعد المحاولة، وإذا استمرت المشكلة فتواصل مع الدعم.' });
     } finally {
       setIsCloudSyncing(false);
       setTimeout(() => setCloudSyncMessage(null), 4000);
@@ -148,13 +153,13 @@ export default function SettingsView({
         const fullBackup = store.getBackupSnapshot();
         const ok = await syncService.uploadBackupSnapshot(currentUser?.tenantId || 'tenant-demo', fullBackup);
         if (ok) {
-          setCloudSyncMessage({ type: 'success', text: 'تم حفظ نسخة احتياطية سحابية آمنة في Cloudflare!' });
+          setCloudSyncMessage({ type: 'success', text: 'تم حفظ النسخة الاحتياطية السحابية' });
         } else {
           setCloudSyncMessage({ type: 'error', text: 'فشل حفظ النسخة السحابية' });
         }
       }
     } catch (err) {
-      setCloudSyncMessage({ type: 'error', text: 'خطأ: ' + err.message });
+      setCloudSyncMessage({ type: 'error', text: 'تعذر حفظ النسخة الاحتياطية. أعد المحاولة لاحقًا.' });
     } finally {
       setIsCloudSyncing(false);
       setTimeout(() => setCloudSyncMessage(null), 4000);
@@ -301,7 +306,7 @@ export default function SettingsView({
     { id: 'scales', label: 'الميزان وسياسات البيع', icon: Scale, desc: 'الوزن الفارغ، دقة الجرام، خصومات الكاشير' },
     { id: 'inventory', label: 'المخزون والخزينة', icon: PackageCheck, desc: 'البيع على ذمة التوريد، عهدة الصندوق' },
     { id: 'users', label: 'المستخدمون والصلاحيات', icon: Users, desc: 'إدارة الكاشير، المحاسبين، وتعيين الصلاحيات' },
-    { id: 'cloud', label: 'السحابة والنسخ الاحتياطي', icon: Cloud, desc: 'Cloudflare D1، مزامنة وتصدير' },
+    { id: 'cloud', label: 'السحابة والنسخ الاحتياطي', icon: Cloud, desc: 'المزامنة والنسخ والاسترداد' },
     { id: 'security', label: 'الحساب والأمان', icon: ShieldCheck, desc: 'بيانات الاشتراك، كلمة المرور، الفروع' },
     { id: 'updates', label: 'التحديثات وإصدار النظام', icon: ArrowUpCircle, desc: 'إصدار v2.5.0، الفحص والتحديث الداخلي' },
   ];
@@ -494,26 +499,33 @@ export default function SettingsView({
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className="block text-xs font-bold text-slate-700 mb-1">العنوان أو مكان السوق المركزي</label>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">عنوان المتجر</label>
                       <input
                         type="text"
                         value={form.address || ''}
                         onChange={(e) => setForm(prev => ({ ...prev, address: e.target.value }))}
                         className="w-full px-3.5 py-2.5 bg-slate-50/70 border border-slate-200 rounded-xl text-slate-800 focus:bg-white focus:ring-2 focus:ring-primary-500 transition-all text-xs"
-                        placeholder="مثال: السوق المركزي للخضار والفواكه - جناح 4"
+                        placeholder="مثال: المدينة، الحي، الشارع"
                       />
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">العملة الافتراضية</label>
-                      <div className="flex gap-1.5">
+                      <div className="flex flex-wrap gap-1.5">
                         <input
                           type="text"
                           value={form.currency || 'ريال'}
                           onChange={(e) => setForm(prev => ({ ...prev, currency: e.target.value }))}
                           className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-center text-navy-850 text-xs focus:ring-2 focus:ring-primary-500"
                         />
-                        {['ريال', 'ر.س', 'د.إ', 'د.ك', 'ج.م', '$'].map(c => (
+                        {[
+                          'ريال سعودي', 'درهم إماراتي', 'دينار بحريني', 'دينار كويتي',
+                          'ريال عماني', 'ريال قطري', 'جنيه مصري', 'دينار ليبي',
+                          'دينار أردني', 'دينار عراقي', 'دينار تونسي', 'دينار جزائري',
+                          'درهم مغربي', 'جنيه سوداني', 'ليرة سورية', 'ليرة لبنانية',
+                          'ريال يمني', 'شلن صومالي', 'فرنك جيبوتي', 'فرنك قمري',
+                          'أوقية موريتانية', 'شيكل متداول في فلسطين', 'دولار أمريكي', 'يورو',
+                        ].map(c => (
                           <button
                             key={c}
                             type="button"
@@ -1204,7 +1216,7 @@ export default function SettingsView({
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="font-black text-xs text-emerald-950">كود متجركم للربط السحابي (Store Code)</h4>
+                          <h4 className="font-black text-xs text-navy-850">رمز المتجر لتسجيل الدخول</h4>
                           <span className="text-[10px] bg-emerald-200/70 text-emerald-900 font-bold px-2 py-0.5 rounded-full">معتمد لجميع أجهزتكم</span>
                         </div>
                         <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
@@ -1411,8 +1423,8 @@ export default function SettingsView({
                         <Cloud size={22} />
                       </div>
                       <div>
-                        <h3 className="font-bold text-sm text-white">سحابة Cloudflare Edge & D1 SQL</h3>
-                        <p className="text-[11px] text-slate-400 font-mono">https://khodar-pos.pages.dev</p>
+                        <h3 className="font-bold text-sm text-white">المزامنة والتخزين السحابي</h3>
+                        <p className="text-[11px] text-slate-400">تابع حالة بياناتك واحتفظ بنسخة احتياطية</p>
                       </div>
                     </div>
 
@@ -1420,32 +1432,24 @@ export default function SettingsView({
                       {syncStatus.isOnline ? (
                         <>
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                          <span className="font-bold text-emerald-400">الاتصال متاح</span>
+                          <span className="font-bold text-emerald-400">الجهاز متصل بالإنترنت</span>
                         </>
                       ) : (
                         <>
                           <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                          <span className="font-bold text-amber-400">يعمل أوفلاين</span>
+                          <span className="font-bold text-amber-400">لا يوجد اتصال بالإنترنت</span>
                         </>
                       )}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-800 text-xs">
+                  <div className="grid grid-cols-1 gap-3 pt-3 border-t border-slate-800 text-xs">
                     <div>
-                      <span className="text-slate-400 block text-[10px]">قاعدة البيانات السحابية:</span>
-                      <span className="font-mono text-slate-200 font-bold text-[11px]">Cloudflare D1 (SQL)</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">معرف قاعدة البيانات:</span>
-                      <span className="font-mono text-emerald-400 font-bold text-[11px] truncate block" title="bf2fbfa3-eb13-4687-ac97-b17740c300de">
-                        bf2fbfa3...300de
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[10px]">العمليات بانتظار الرفع:</span>
+                      <span className="text-slate-400 block text-[10px]">تغييرات بانتظار المزامنة:</span>
                       <span className="font-mono text-slate-200 font-bold text-[11px]">
-                        {syncStatus.queueLength || 0} عملية
+                        {Number.isInteger(syncStatus.queueLength) && syncStatus.queueLength >= 0
+                          ? syncStatus.queueLength
+                          : syncStatus.status === 'error' ? 'تعذر قراءة الحالة' : 'جارٍ التحقق…'}
                       </span>
                     </div>
                   </div>
@@ -1469,7 +1473,7 @@ export default function SettingsView({
                       className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition-colors"
                     >
                       <RefreshCw size={14} className={isCloudSyncing ? 'animate-spin' : ''} />
-                      <span>مزامنة سحابية فورية الآن</span>
+                      <span>مزامنة البيانات الآن</span>
                     </button>
 
                     <button
@@ -1479,15 +1483,15 @@ export default function SettingsView({
                       className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer transition-colors"
                     >
                       <Database size={14} />
-                      <span>حفظ نسخة سحابية مشفرة في D1</span>
+                      <span>حفظ نسخة احتياطية الآن</span>
                     </button>
                   </div>
                 </div>
 
                 <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-2xs space-y-4">
-                  <h3 className="font-bold text-sm text-navy-850">النسخ الاحتياطي المحلي (ملفات JSON)</h3>
+                  <h3 className="font-bold text-sm text-navy-850">نسخة احتياطية على الجهاز</h3>
                   <p className="text-[11px] text-slate-500">
-                    يمكنك تصدير نسخة كاملة من فواتيرك وحساباتك كملف آمن على جهازك واستيرادها في أي وقت.
+                    يمكنك تنزيل نسخة من بياناتك على جهازك واستيرادها عند الحاجة.
                   </p>
 
                   <div role="status" className={`p-3 rounded-xl text-xs border ${
@@ -1501,8 +1505,6 @@ export default function SettingsView({
                       uploading: 'جارٍ رفع النسخة', saved: 'تم حفظ النسخة السحابية بنجاح',
                       retrying: 'فشل الرفع وستتم إعادة المحاولة تلقائيًا'
                     }[backupStatus.status] || 'حالة النسخ غير معروفة'}
-                    {backupStatus.status === 'retrying' && backupStatus.error ?
-                      <span className="block mt-1">{backupStatus.error}</span> : null}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1512,7 +1514,7 @@ export default function SettingsView({
                       className="p-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
                     >
                       <Download size={16} />
-                      <span>تصدير ملف النسخة الاحتياطية (.JSON)</span>
+                      <span>تنزيل نسخة احتياطية</span>
                     </button>
 
                     <label className="p-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer text-center">
@@ -1527,20 +1529,6 @@ export default function SettingsView({
                     </label>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-100 text-center">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (window.confirm('تحذير: هل أنت متأكد من رغبتك في استعادة البيانات التجريبية الأولية؟')) {
-                          try { await resetToSampleData(); }
-                          catch (error) { alert(error.message); }
-                        }
-                      }}
-                      className="text-xs text-slate-400 hover:text-rose-600 font-medium underline transition-colors cursor-pointer"
-                    >
-                      استعادة البيانات التجريبية الأولية
-                    </button>
-                  </div>
                 </div>
               </motion.div>
             )}

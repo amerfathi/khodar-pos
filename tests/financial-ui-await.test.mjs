@@ -21,7 +21,7 @@ test('trial request UI does not confirm submission until server acknowledges per
     await act(async () => { root = TestRenderer.create(React.createElement(loaded.exports.default, { onOpenLogin() {}, store: {} })); });
     const button = label => root.root.findAllByType('button').find(node => text(node).includes(label));
     await act(async () => { button('اطلب تجربة مجانية شهر').props.onClick(); });
-    for(const [placeholder,value] of [['مثال: أحمد محمود','Test User'],['مثال: أسواق النور للخضار','Test Shop'],['010XXXXXXXX','01000000000']])
+    for(const [placeholder,value] of [['مثال: أحمد محمود','Test User'],['مثال: أسواق النور للخضار','Test Shop'],['+9665XXXXXXXX','+966500000000']])
       await act(async () => { root.root.findAllByType('input').find(node => node.props.placeholder === placeholder).props.onChange({ target: { value } }); });
     let pending;
     await act(async () => { pending = root.root.findByType('form').props.onSubmit({ preventDefault() {} }); });

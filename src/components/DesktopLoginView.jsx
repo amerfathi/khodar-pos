@@ -85,7 +85,7 @@ export default function DesktopLoginView({ store }) {
     }
 
     if (!storeCode.trim()) {
-      setErrorMessage('يرجى إدخال كود المتجر (Store Code)');
+      setErrorMessage('يرجى إدخال رمز المتجر');
       return;
     }
 
@@ -116,7 +116,7 @@ export default function DesktopLoginView({ store }) {
   };
 
   return (
-    <div className="h-screen w-screen bg-[#f8fafc] text-slate-800 flex flex-col font-sans select-none overflow-hidden" dir="rtl">
+    <div className="braka-login h-screen w-screen bg-[#f8fafc] text-slate-800 flex flex-col font-sans select-none overflow-hidden" dir="rtl">
       
       {/* 1. Seamless Electron Native Window Titlebar (Clean Light Theme) */}
       <header 
@@ -232,7 +232,7 @@ export default function DesktopLoginView({ store }) {
               <div className="mb-4 p-3 bg-emerald-50/50 border border-emerald-200 rounded-2xl animate-in fade-in">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-xs font-bold text-emerald-950">
-                    كود المتجر السحابي (Store Code)
+                    رمز المتجر
                   </label>
                   {storeCode && (
                     <button

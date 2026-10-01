@@ -9,8 +9,8 @@ const VARIANTS = {
   ghost: 'bg-transparent hover:bg-slate-100/90 text-slate-600 hover:text-slate-900 border border-transparent',
   danger: 'bg-rose-600 hover:bg-rose-700 text-white shadow-xs border border-rose-500/80 focus-visible:ring-rose-500/30',
   dangerLight: 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 focus-visible:ring-rose-500/30',
-  success: 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs border border-emerald-500/80 focus-visible:ring-emerald-500/30',
-  successLight: 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 focus-visible:ring-emerald-500/30',
+  success: 'bg-primary-600 hover:bg-primary-700 text-white shadow-xs border border-primary-500/80 focus-visible:ring-primary-500/30',
+  successLight: 'bg-primary-50 hover:bg-primary-100 text-primary-800 border border-primary-200 focus-visible:ring-primary-500/30',
 };
 
 const SIZES = {

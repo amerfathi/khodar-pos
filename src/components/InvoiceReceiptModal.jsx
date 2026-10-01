@@ -3,6 +3,8 @@ import { Printer, MessageCircle, Copy, X, Check, FileText, ArrowRight, Edit3 } f
 import { formatCurrency, formatWeight } from '../utils/formatters';
 import { openWhatsAppInvoice, generateWhatsAppInvoiceMessage } from '../utils/whatsapp';
 import { displayInvoiceNumber } from '../services/invoiceIdentity';
+import { BRRAKA_LOGO } from '../assets/branding';
+import { getStoreDisplayAddress } from '../utils/storeDisplay';
 
 export default function InvoiceReceiptModal({ isOpen, onClose, invoice, settings, onUpdateInvoiceNotes }) {
   const receiptRef = useRef(null);
@@ -75,12 +77,11 @@ export default function InvoiceReceiptModal({ isOpen, onClose, invoice, settings
           >
             {/* Store Header */}
             <div className="text-center pb-3 border-b-2 border-dashed border-slate-300">
-              <div className="inline-block p-2 bg-slate-900 text-white rounded-full font-black text-sm mb-1.5">
-                {settings.shopName || 'براكه'}
-              </div>
+              <img src={BRRAKA_LOGO} alt="شعار براكه" className="w-12 h-12 object-contain mx-auto mb-1.5" />
+              <div className="font-black text-sm text-slate-900">{settings.shopName || 'براكه'}</div>
               <p className="text-[11px] text-slate-600 font-medium">{settings.subTitle}</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">{settings.address}</p>
-              <p className="text-[11px] font-semibold text-slate-700 mt-0.5 dir-ltr text-center">📞 {settings.phone}</p>
+              {getStoreDisplayAddress(settings.address) && <p className="text-[10px] text-slate-500 mt-0.5">{getStoreDisplayAddress(settings.address)}</p>}
+              {settings.phone && <p className="text-[11px] font-semibold text-slate-700 mt-0.5 dir-ltr text-center">📞 {settings.phone}</p>}
             </div>
 
             {/* Invoice Meta */}

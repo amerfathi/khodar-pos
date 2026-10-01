@@ -3,8 +3,8 @@
  * Semantic Versioning: MAJOR.MINOR.PATCH
  */
 
-export const APP_VERSION = '2.6.9';
-export const APP_BUILD_NUMBER = 2690;
+export const APP_VERSION = '2.6.10';
+export const APP_BUILD_NUMBER = 26100;
 export const APP_RELEASE_DATE = '2026-09-30';
 export const MINIMUM_SUPPORTED_VERSION = '2.2.0';
 

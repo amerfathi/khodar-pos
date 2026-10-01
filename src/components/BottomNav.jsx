@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   LayoutGrid, ShoppingCart, FileText, Package, 
   Menu, X, Truck, Users, Scale, TrendingDown, 
   UserCheck, AlertOctagon, Coins, PieChart, 
   Settings, LogOut, ChevronLeft, Store
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls, useReducedMotion } from 'framer-motion';
 
 export default function BottomNav({ 
   currentTab, 
@@ -17,6 +17,25 @@ export default function BottomNav({
   activeBranch
 }) {
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const sheetDragControls = useDragControls();
+  const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    if (!isMoreOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const closeOnEscape = (event) => { if (event.key === 'Escape') setIsMoreOpen(false); };
+    document.addEventListener('keydown', closeOnEscape);
+    const closeOnBack = (event) => {
+      event.preventDefault();
+      setIsMoreOpen(false);
+    };
+    window.addEventListener('braka:ui-back', closeOnBack);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('braka:ui-back', closeOnBack);
+    };
+  }, [isMoreOpen]);
 
   // 1. Primary Bottom Bar Items (The 4 most critical daily flows + More Menu)
   const primaryTabs = [
@@ -59,7 +78,7 @@ export default function BottomNav({
     { id: 'workers', label: 'الموظفون والرواتب', icon: UserCheck, desc: 'الرواتب واليوميات', perm: 'canManagePayroll' },
     { id: 'damaged', label: 'التوالف والهالك', icon: AlertOctagon, desc: 'إعدام الخضار التالف', perm: 'canManageInventory' },
     { id: 'partners', label: 'الشركاء والأرباح', icon: Coins, desc: 'الأرباح والمسحوبات', perm: 'canViewFinance' },
-    { id: 'reports', label: 'تقارير A4 الرسمية', icon: PieChart, desc: 'الطباعة والمحاسبة', perm: 'canViewFinance' },
+    { id: 'reports', label: 'التقارير', icon: PieChart, desc: 'الطباعة والمحاسبة', perm: 'canViewFinance' },
     { id: 'settings', label: 'إعدادات وضبط النظام', icon: Settings, desc: 'الضرائب، الطابعات، والسحابة', perm: 'canAccessSettings' },
   ];
 
@@ -84,7 +103,8 @@ export default function BottomNav({
         role="navigation"
         aria-label="شريط التنقل السفلي"
       >
-        <div className="max-w-lg mx-auto grid grid-cols-5 gap-0.5 items-center">
+        <div className="max-w-lg mx-auto grid gap-0.5 items-center"
+          style={{ gridTemplateColumns: `repeat(${visiblePrimaryTabs.length + 1}, minmax(0, 1fr))` }}>
           
           {visiblePrimaryTabs.map((tab) => {
             const Icon = tab.icon;
@@ -117,7 +137,7 @@ export default function BottomNav({
                   </span>
                   
                   {tab.badge && (
-                    <span className="absolute -top-1 -right-1 z-20 min-w-4 h-4 px-1 bg-rose-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center shadow-xs">
+                    <span className="absolute -top-1 -right-1 z-20 min-w-4 h-4 px-1 bg-primary-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center shadow-xs">
                       {tab.badge}
                     </span>
                   )}
@@ -192,11 +212,19 @@ export default function BottomNav({
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 350 }}
+              transition={reducedMotion ? { duration: 0 } : { type: 'spring', damping: 30, stiffness: 350 }}
+              drag="y"
+              dragListener={false}
+              dragControls={sheetDragControls}
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0, bottom: 0.25 }}
+              onDragEnd={(_, info) => { if (info.offset.y > 80 || info.velocity.y > 500) setIsMoreOpen(false); }}
               className="relative bg-white rounded-t-3xl border-t border-slate-200/90 shadow-2xl z-10 max-h-[85vh] flex flex-col pb-safe overflow-hidden"
             >
               {/* Drag Handle Pill */}
-              <div className="pt-3 pb-1 flex justify-center cursor-grab active:cursor-grabbing">
+              <div onPointerDown={(event) => sheetDragControls.start(event)}
+                style={{ touchAction: 'none' }}
+                className="pt-3 pb-1 min-h-11 flex justify-center items-center cursor-grab active:cursor-grabbing">
                 <div className="w-12 h-1.5 bg-slate-300 rounded-full" />
               </div>
 
@@ -208,7 +236,7 @@ export default function BottomNav({
                   </div>
                   <div className="text-right">
                     <h3 className="text-xs font-bold text-navy-850 leading-tight">
-                      كافة أقسام المنظومة
+                      أقسام المتجر
                     </h3>
                     <p className="text-[10px] text-slate-400">
                       {activeBranch?.name || 'الفرع الرئيسي'}

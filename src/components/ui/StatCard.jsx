@@ -30,7 +30,7 @@ export default function StatCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="space-y-1 min-w-0">
-          <span className="text-[11px] font-semibold text-slate-500 block truncate">
+          <span className="text-xs font-semibold text-slate-600 block truncate">
             {title}
           </span>
           <div className="flex items-baseline gap-1.5 flex-wrap">
@@ -38,7 +38,7 @@ export default function StatCard({
               {value}
             </span>
             {currency && (
-              <span className="text-[10px] font-medium text-slate-400">
+              <span className="text-xs font-medium text-slate-600">
                 {currency}
               </span>
             )}
