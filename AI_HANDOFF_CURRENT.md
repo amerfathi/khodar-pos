@@ -1,5 +1,16 @@
 # براكه — نقطة التسليم الحالية
 
+## لقطة Git الأخيرة (وقت الفحص)
+
+- Current Git HEAD (شيفرة المرشح): `28a35574d3cc4d1575b65dfdfa3618a3556971f7`.
+- Current branch: `main`؛ الشيفرة مدفوعة إلى origin/main.
+- `git status --porcelain=v1` بعد commit الشيفرة: فارغ. هذا التحديث التوثيقي وحده أُضيف بعد اللقطة؛ لا تعديلات شيفرة غير محفوظة.
+- آخر مهمة: مراجعة مالية/أمنية ومزامنة، إصلاح clock/device/replay/version، اختبارات الويب وElectron وبناء Android، تجهيز مرشح 2.6.13 دون نشر الإنتاج.
+- GitHub build: https://github.com/amerfathi/khodar-pos/actions/runs/37101108904 — publish=false وpublish_metadata=false؛ تشغيل البناء لا يعني نجاحه أو نشر إصدار.
+- أول خطوة: افحص نتائج GitHub ثم شغّل المحاكي من Android Studio واختبر Android محليًا. راجع كذلك fallback إذا غاب indexedDB في جلسة حقيقية؛ لا تسمح بماليّات معتمدة على localStorage وحده. لا تُسقط فشل اختبار localStorage القديم.
+- آخر workflow لإصدار2.6.12 فشل فقط في نشر metadata لأن رمز نشر Cloudflare غير موجود في GitHub؛ OAuth المحلي متاح. لا تدّع أن آلية نشر metadata الآلية تعمل.
+- لا توجد كلمات مرور إنتاجية أو رموز أو مفاتيح خاصة مسجلة في هذا الملف. معرفات الخدمات وpin العام ليست أسرارًا.
+
 ## تحديث أولوية — فحص وتجهيز 2.6.13 بتاريخ 2026-10-03
 
 تنبيه أخير: test:browser-crash (fixture القديم المعتمد على localStorage وحده) فشل بعد قتل Chrome فوريًا؛ لم يُخفَ أو يُغيَّر الاختبار. test:browser-idb-engine نجح بعد قتل العملية مع state/outbox/cursor؛ actual-app-durable نجح أيضًا. لذلك ممنوع الادعاء أن localStorage مصدر دائم، ويجب التحقق من عدم رجوع أي منصة إليه. لم يكتمل فحص Android ولا نشر الإنتاج. يُحفظ مرشح GitHub فقط لإكمال الفحوص.
