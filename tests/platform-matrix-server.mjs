@@ -5,6 +5,7 @@ import { resolve, relative, extname } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { hashPassword } from '../functions/_lib/passwords.js';
+import { attachConflictPreconditions } from '../src/services/syncConflictPolicy.js';
 
 const port = Number(process.env.BRAKA_MATRIX_PORT || 8788);
 if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw Error('Invalid matrix port');
@@ -13,6 +14,7 @@ const script = (await build({ entryPoints: ['tests/runtime-worker.js'], bundle: 
   write: false, format: 'esm', platform: 'browser', target: 'es2022' })).outputFiles[0].text;
 const mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: 'matrix', modules: true,
   script, compatibilityDate: '2024-09-01', d1Databases: ['DB'],
+  durableObjects: { PASSWORD_CRYPTO: { className: 'PasswordCrypto', useSQLite: true } },
   bindings: { AUTH_SECRET: crypto.randomUUID() + crypto.randomUUID() } }] }));
 const db = await mf.getD1Database('DB');
 for (const name of (await readdir('d1/migrations')).filter(name => name.endsWith('.sql')).sort()) {
@@ -28,6 +30,36 @@ await db.prepare('INSERT INTO tenants (id,store_code,company_name,username,passw
   .bind(tenantId, 'MATRIX', 'Isolated matrix fixture', 'owner', passwordHash, 'active', 'company_owner', 4).run();
 await db.prepare('INSERT INTO branches (id,tenant_id,name,code,is_main,status) VALUES (?,?,?,?,?,?)')
   .bind(branchId, tenantId, 'Main', 'MAIN', 1, 'active').run();
+
+// Explicitly opt-in local fixtures for actual multi-company UI testing.
+// This harness binds only loopback and never accesses the production database.
+if (process.env.BRAKA_MULTI_COMPANY === 'true') {
+  for (const company of ['CA', 'CB']) {
+    await db.prepare('INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role,allowed_branches) VALUES(?,?,?,?,?,?,?,?)')
+      .bind(company, company, `Fixture ${company}`, `owner-${company}`, passwordHash, 'active', 'company_owner', 3).run();
+    for (const index of [1, 2]) {
+      const branch = `${company}-branch-${index}`;
+      await db.prepare('INSERT INTO branches(id,tenant_id,name,code,is_main,status) VALUES(?,?,?,?,?,?)')
+        .bind(branch, company, `${company} branch ${index}`, `${company}${index}`, index === 1 ? 1 : 0, 'active').run();
+      const event = attachConflictPreconditions({ id: `seed-${branch}`, tenantId: company, branchId: branch,
+        entityType: 'product', entityId: `${branch}-product`, action: 'create', timestamp: Date.now(), payload: {
+          id: `${branch}-product`, tenantId: company, branchId: branch, name: `${company} Tomatoes ${index}`,
+          defaultPricePerKg: 10, costPerKg: 4, currentStockKg: 100, defaultUnit: 'كيلو', defaultTareKg: 0,
+          branchStock: { [branch]: 100 }
+        } }, index === 1 ? {} : { 'domain:inventory': `seed-${company}-branch-1` });
+      await db.prepare(`INSERT INTO sync_events_v2(id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,
+        client_timestamp,server_timestamp,conflict_policy_version,preconditions_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(event.id, company, branch, event.entityType, event.entityId, event.action, JSON.stringify(event.payload),
+          event.timestamp, event.timestamp, 1, JSON.stringify(event.preconditions)).run();
+      await db.prepare(`INSERT INTO users(id,tenant_id,name,username,password_hash,role,status,branch_id,branch_ids_json,permissions_json)
+        VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(`${company}-cashier-${index}`, company, `${company} Cashier ${index}`,
+          `cashier-${index}`, passwordHash, 'cashier', 'active', `${company}-branch-1`, JSON.stringify([`${company}-branch-1`]), '{}').run();
+    }
+    await db.prepare(`INSERT INTO users(id,tenant_id,name,username,password_hash,role,status,branch_id,branch_ids_json,permissions_json)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(`${company}-branch2-cashier`, company, `${company} branch2 cashier`, 'branch2-cashier',
+        passwordHash, 'cashier', 'active', `${company}-branch-2`, JSON.stringify([`${company}-branch-2`]), '{}').run();
+  }
+}
 
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml',

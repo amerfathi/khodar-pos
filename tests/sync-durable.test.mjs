@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CloudflareSyncService } from '../src/services/cloudflareSync.js';
 import { setSessionToken, setSessionUser } from '../src/services/authSession.js';
+import { AtomicStore } from '../src/services/atomicStore.js';
+import { attachConflictPreconditions, SYNC_HEADS_STATE_KEY } from '../src/services/syncConflictPolicy.js';
 
 const memoryStorage = () => {
   const rows = new Map();
@@ -13,6 +15,50 @@ const memoryStorage = () => {
     get length() { return rows.size; }
   };
 };
+
+test('409 sales recovery durably rebases before retrying and only clears an acknowledged invoice', async () => {
+  const oldSession = globalThis.sessionStorage, oldFetch = globalThis.fetch;
+  globalThis.sessionStorage = memoryStorage();
+  const identity = { id: crypto.randomUUID(), tenantId: 'rebase-service' };
+  setSessionToken('fixture-token'); setSessionUser({ ...identity, sessionExpiresAt: new Date(Date.now()+60000).toISOString() });
+  const backend = memoryStorage(), repository = new AtomicStore(identity, { marker: 0, [SYNC_HEADS_STATE_KEY]: {} }, backend);
+  await repository.acquire();
+  const sale = id => ({ id, tenantId: identity.tenantId, branchId: 'main', entityId: id, entityType: 'invoice', action: 'create',
+    payload: { id, branchId: 'main', status: 'active', items: [] } });
+  repository.transact(() => { repository.enqueue(sale('local')); repository.set('marker', 1); });
+  const heads = {}, remote = attachConflictPreconditions(sale('remote'), heads);
+  const service = new CloudflareSyncService();
+  service.isOnline = true; service.currentTenantId = identity.tenantId; service.repository = repository;
+  service.updateHandler = (events, cursor, heads, _partial, proposal) =>
+    repository.reconcileSales(events, cursor, () => repository.set('marker', 2), heads, proposal);
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push(url);
+    if (url.endsWith('/rebase')) return Response.json({ success: true, protocol: 'independent-sales-v1',
+      events: [remote], nextCursor: 1, conflictHeads: heads, acceptedIds: [] });
+    const event = JSON.parse(options.body).events[0];
+    return event.preconditions['domain:inventory'] === 'remote'
+      ? Response.json({ success: true, acceptedIds: [event.id] }) : Response.json({ error: 'stale' }, { status: 409 });
+  };
+  try {
+    const before = JSON.stringify(repository.current), write = backend.setItem;
+    backend.setItem = () => { throw Error('quota'); };
+    assert.equal(await service.flushQueue({pullAfterFlush:false}), false);
+    assert.equal(JSON.stringify(repository.current), before);
+    assert.equal(service.lastError, 'quota');
+    backend.setItem = write;
+    assert.equal(await service.flushQueue({pullAfterFlush:false}), false);
+    assert.equal(repository.current.outbox.length, 1);
+    assert.equal(repository.read('marker'), 2);
+    assert.equal(await service.flushQueue({pullAfterFlush:false}), true);
+    assert.equal(repository.current.outbox.length, 0);
+    assert.equal(repository.read('marker'), 2);
+    assert.equal(requests.filter(url=>url.endsWith('/rebase')).length, 2);
+  } finally {
+    service.stopAutoSync(); await repository.close();
+    globalThis.fetch = oldFetch; globalThis.sessionStorage = oldSession;
+  }
+});
 
 test('server acceptance waits for durable outbox acknowledgement before sync success', async () => {
   const oldSession = globalThis.sessionStorage, oldFetch = globalThis.fetch;
@@ -126,6 +172,24 @@ test('manual sync does not claim success when outbound queue is still pending', 
     assert.equal(pulls,0);
     assert.deepEqual(service.repository.current.outbox,[event]);
   } finally {globalThis.sessionStorage=oldSession;}
+});
+
+test('a sale committed during inbound fetch prevents that response overwriting the pending ledger', async () => {
+  const oldSession = globalThis.sessionStorage, oldFetch = globalThis.fetch;
+  globalThis.sessionStorage = memoryStorage(); setSessionToken('fixture-token');
+  const service = new CloudflareSyncService(); service.isOnline = true; service.currentTenantId = 'test-tenant';
+  const current = { outbox: [], cursor: 0 }; service.repository = { current };
+  let complete, applied = 0;
+  globalThis.fetch = () => new Promise(resolve => { complete = resolve; });
+  try {
+    const pending = service.pullUpdates('test-tenant', () => { applied++; });
+    current.outbox.push({ id: 'new-sale', tenantId: 'test-tenant' });
+    complete(Response.json({ success: true, events: [{ id: 'remote-snapshot' }], nextCursor: 1, hasMore: false }));
+    assert.equal(await pending, 0);
+    assert.equal(applied, 0);
+    assert.equal(current.cursor, 0);
+    assert.equal(current.outbox.length, 1);
+  } finally { service.stopAutoSync(); globalThis.fetch = oldFetch; globalThis.sessionStorage = oldSession; }
 });
 
 test('manual sync waits for inbound application after a complete outbound flush', async () => {

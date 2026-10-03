@@ -796,14 +796,17 @@ export function useAppStore(options = {}) {
   };
 
   const inboundRef = useRef(null);
-  inboundRef.current = (events, cursor, serverHeads, partialVisibility = false) => {
+  inboundRef.current = (events, cursor, serverHeads, partialVisibility = false, proposal = null) => {
     const apply = batch => {
       refreshBindings();
       applyInboundSyncEvents(batch);
     };
-    if (local.durable) return local.receiveDurable(events, cursor, apply, serverHeads, partialVisibility).finally(refreshBindings);
+    if (local.durable) return (proposal
+      ? local.reconcileSalesDurable(events, cursor, apply, serverHeads, proposal)
+      : local.receiveDurable(events, cursor, apply, serverHeads, partialVisibility)).finally(refreshBindings);
     try {
-      return local.receive(events, cursor, apply, serverHeads, partialVisibility);
+      return proposal ? local.reconcileSales(events, cursor, apply, serverHeads, proposal)
+        : local.receive(events, cursor, apply, serverHeads, partialVisibility);
     } finally { refreshBindings(); }
   };
   const handleInboundSyncEvents = useCallback((...args) => inboundRef.current(...args), []);

@@ -5,6 +5,7 @@ import { applySalesReturnInvoice, applySalesReturnInventory, applyPurchaseInvent
 import { applyInvoiceInventory } from './invoiceInventory.js';
 import { backupToState, validateBackup } from './backupValidation.js';
 import { applyAcceptedConflictEvent, attachConflictPreconditions, SYNC_HEADS_STATE_KEY } from './syncConflictPolicy.js';
+import { isIndependentSale, isIndependentSalesQueue } from './independentSales.js';
 
 const clone = value => structuredClone(value);
 const LEGACY_BUSINESS_KEYS = [
@@ -909,5 +910,37 @@ export class AtomicStore {
   }
   receiveDurable(events, cursor, apply, serverHeads, partialVisibility = false) {
     return this.transactDurable(() => this.applyReceive(events, cursor, apply, serverHeads, partialVisibility));
+  }
+  applySalesReconciliation(events, cursor, apply, serverHeads, proposal) {
+    if (proposal?.protocol !== 'independent-sales-v1' || !isIndependentSalesQueue(this.draft.outbox) ||
+        this.draft.cursor !== proposal.cursor || JSON.stringify(this.draft.outbox) !== JSON.stringify(proposal.queue))
+      throw new Error('Pending sales changed during reconciliation');
+    if (!Array.isArray(events) || !events.every(isIndependentSale) || !serverHeads ||
+        !Array.isArray(proposal.acceptedIds) || new Set(proposal.acceptedIds).size !== proposal.acceptedIds.length)
+      throw new Error('Invalid sales reconciliation');
+    const accepted = new Set(proposal.acceptedIds);
+    for (const id of accepted) {
+      const pending = this.draft.outbox.find(event => event.id === id);
+      if (!pending || serverHeads[`record:invoice:${pending.entityId}`] !== id)
+        throw new Error('Unrelated sales acknowledgement');
+    }
+    for (const event of events) {
+      const pending = this.draft.outbox.find(item => item.entityId === event.entityId || item.id === event.id);
+      if (pending && (!accepted.has(pending.id) || pending.id !== event.id ||
+          JSON.stringify(pending.payload) !== JSON.stringify(event.payload))) throw new Error('Conflicting invoice identity');
+    }
+    // Only this server-audited additive path may receive while local sales are
+    // pending. Their effects already exist locally and must never be replayed.
+    this.applyReceive(events, cursor, apply, serverHeads, true);
+    const heads = { ...serverHeads };
+    this.draft.outbox = this.draft.outbox.filter(event => !accepted.has(event.id))
+      .map(event => attachConflictPreconditions(event, heads));
+    this.draft.state[SYNC_HEADS_STATE_KEY] = heads;
+  }
+  reconcileSales(events, cursor, apply, serverHeads, proposal) {
+    return this.transact(() => this.applySalesReconciliation(events, cursor, apply, serverHeads, proposal));
+  }
+  reconcileSalesDurable(events, cursor, apply, serverHeads, proposal) {
+    return this.transactDurable(() => this.applySalesReconciliation(events, cursor, apply, serverHeads, proposal));
   }
 }

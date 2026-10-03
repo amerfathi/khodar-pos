@@ -13,6 +13,7 @@
  */
 
 import { getApiBaseUrl } from '../config/appVersion.js';
+import { isIndependentSalesQueue } from './independentSales.js';
 
 const QUEUE_STORAGE_KEY = 'khodar_offline_sync_queue';
 const ACTIVITY_REFRESH_MIN_MS = 5 * 60_000;
@@ -276,6 +277,29 @@ export class CloudflareSyncService {
         return !pendingForTenant;
       } else {
         const details=await response.json().catch(()=>null);
+        if (response.status === 409 && this.repository && typeof this.updateHandler === 'function' &&
+            isIndependentSalesQueue(queue)) {
+          const cursor = this.repository.current.cursor;
+          const reconciliation = await fetch(`${baseUrl}/api/sync/rebase`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ tenantId, cursor, events: batch })
+          });
+          if (token !== getSessionToken() || generation !== this.generation) return false;
+          if (reconciliation.ok) {
+            const proposal = await reconciliation.json();
+            if (token !== getSessionToken() || generation !== this.generation) return false;
+            if (!proposal.success || proposal.protocol !== 'independent-sales-v1') throw new Error('Invalid reconciliation response');
+            await this.updateHandler(proposal.events, proposal.nextCursor, proposal.conflictHeads, true,
+              { protocol: proposal.protocol, acceptedIds: proposal.acceptedIds, queue, cursor });
+            this.lastError = null;
+            // Backoff also bounds repeated races with active cashiers. Never
+            // recursively hammer push/rebase or mark unaccepted sales as synced.
+            if (this.getQueue().length) this.schedulePendingRetry();
+            return this.getQueue().length === 0;
+          }
+          if (![400, 403, 409].includes(reconciliation.status))
+            throw new Error(`Sales reconciliation unavailable: HTTP ${reconciliation.status}`);
+        }
         const failure = Object.assign(new Error(response.status===409
           ? 'تعارض بين جهازين: لم تُرفع الحركة المحلية. زامن وراجع الحركة قبل إعادة المحاولة'
           : details?.error || `Sync push failed: HTTP ${response.status}`),
@@ -318,6 +342,9 @@ export class CloudflareSyncService {
         if (!data.success || !Array.isArray(data.events) || !Number.isSafeInteger(data.nextCursor) || data.nextCursor < cursor)
           throw new Error('Invalid sync response');
         if (data.hasMore && data.nextCursor === cursor) throw new Error('Sync cursor did not advance');
+        // A checkout can commit while this network request is in flight.
+        // Leave its ledger/cursor intact and let outbound reconciliation run.
+        if (this.repository?.current.outbox.some(event => event.tenantId === tenantId)) return received;
         if (typeof callback !== 'function') throw new Error('No durable sync receiver');
         await callback(data.events, data.nextCursor, data.conflictHeads, data.fullTenantVisibility === false);
         if (token !== getSessionToken() || generation !== this.generation) return 0;

@@ -29,6 +29,39 @@ const post = (store, phase) => store.transact(() => {
   store.enqueue(event(store.user)); if(phase===4) throw new Error('Injected stop');
 });
 
+test('sale reconciliation atomically preserves local effects, reorders pending metadata and survives quota failure', async () => {
+  const identity = user(), backend = storage();
+  const store = new AtomicStore(identity, { marker: 0, [SYNC_HEADS_STATE_KEY]: {} }, backend);
+  await store.acquire();
+  try {
+    const sale = id => ({ id, tenantId: identity.tenantId, branchId: 'main', entityId: id,
+      entityType: 'invoice', action: 'create', payload: { id, branchId: 'main', status: 'active', items: [] } });
+    store.transact(() => { store.set('marker', 1); store.enqueue(sale('local')); });
+    const queue = structuredClone(store.current.outbox), cursor = store.current.cursor;
+    const heads = {}, remote = attachConflictPreconditions(sale('remote'), heads);
+    const proposal = { protocol: 'independent-sales-v1', acceptedIds: [], queue, cursor };
+    const before = JSON.stringify(store.current);
+    const write = backend.setItem;
+    backend.setItem = () => { throw Error('quota'); };
+    assert.throws(() => store.reconcileSales([remote], 1, () => store.set('marker', 2), heads, proposal), /quota/);
+    assert.equal(JSON.stringify(store.current), before);
+    backend.setItem = write;
+    store.reconcileSales([remote], 1, () => store.set('marker', 2), heads, proposal);
+    assert.equal(store.read('marker'), 2);
+    assert.equal(store.current.cursor, 1);
+    assert.deepEqual(store.current.outbox[0].payload, queue[0].payload);
+    assert.equal(store.current.outbox[0].preconditions['domain:inventory'], 'remote');
+    assert.throws(() => store.reconcileSales([remote], 1, () => {}, heads, proposal), /changed/);
+    const pending = structuredClone(store.current.outbox);
+    const acceptedHeads = { ...heads };
+    attachConflictPreconditions(pending[0], acceptedHeads);
+    store.reconcileSales([pending[0]], 2, () => { throw Error('duplicate effects'); }, acceptedHeads,
+      { ...proposal, queue: pending, cursor: 1, acceptedIds: ['local'] });
+    assert.equal(store.current.outbox.length, 0);
+    assert.equal(store.read('marker'), 2);
+  } finally { await store.close(); }
+});
+
 test('partial branch visibility accepts authorized events after hidden causal gaps and adopts server heads', async () => {
   const identity = user(), backend = storage();
   const store = new AtomicStore(identity, { marker: 0, [SYNC_HEADS_STATE_KEY]: {} }, backend);

@@ -95,6 +95,63 @@ before(async () => {
 });
 after(async () => { await mf?.dispose(); });
 
+test('independent offline sales obtain an audited rebase; stale edits and foreign tenants do not', async () => {
+  const tenantId = 'REBASE', branchId = 'fixture-rebase-main';
+  await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES('REBASE','REBASE','Rebase fixture','rebase-owner',?,'active','company_owner')")
+    .bind(await hashPassword(pass)).run();
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,code,is_main,status) VALUES(?,'REBASE','Rebase branch','MAIN',1,'active')").bind(branchId).run();
+  const b = await login('REBASE', 'rebase-owner', pass, 'rebase-fixture');
+  const snapshot = await (await call('/api/sync/pull?tenantId=REBASE', 'GET', undefined, b)).json();
+  const sale = id => attachConflictPreconditions({ id: `rebase-${id}`, tenantId, branchId,
+    entityType: 'invoice', entityId: `rebase-invoice-${id}`, action: 'create', timestamp: Date.now(),
+    payload: { id: `rebase-invoice-${id}`, branchId, status: 'active', customerId: 'walk_in',
+      saleType: 'cash', finalTotal: 10, paidAmount: 10, items: [] }
+  }, { ...snapshot.conflictHeads });
+  const first = sale('first'), second = sale('second');
+  assert.equal((await call('/api/sync/push', 'POST', { tenantId, events: [first] }, b)).status, 200);
+  assert.equal((await call('/api/sync/push', 'POST', { tenantId, events: [second] }, b)).status, 409);
+  const input = { tenantId, cursor: snapshot.nextCursor, events: [second] };
+  const proposal = await call('/api/sync/rebase', 'POST', input, b);
+  assert.equal(proposal.status, 200, await proposal.clone().text());
+  const data = await proposal.json();
+  assert.equal(data.protocol, 'independent-sales-v1');
+  assert.deepEqual(data.events.map(event => event.id), [first.id]);
+  assert.deepEqual(data.acceptedIds, []);
+  assert.equal((await call('/api/sync/rebase', 'POST', input, a)).status, 403);
+  assert.equal((await call('/api/sync/rebase', 'POST', { ...input, cursor: data.nextCursor + 1000 }, b)).status, 409);
+  const forged = structuredClone(second);
+  forged.preconditions['domain:inventory'] = 'invented-predecessor';
+  assert.equal((await call('/api/sync/rebase', 'POST', { ...input, events: [forged] }, b)).status, 409);
+  assert.equal((await call('/api/sync/rebase', 'POST', { ...input, events: [{ ...second, action: 'void' }] }, b)).status, 400);
+  const collision = { ...second, id: first.id };
+  assert.equal((await call('/api/sync/rebase', 'POST', { ...input, events: [collision] }, b)).status, 409);
+  const rebased = attachConflictPreconditions(second, { ...data.conflictHeads });
+  assert.deepEqual(rebased.payload, second.payload);
+  assert.equal((await call('/api/sync/push', 'POST', { tenantId, events: [rebased] }, b)).status, 200);
+  const retry = await call('/api/sync/rebase', 'POST', { ...input, events: [rebased] }, b);
+  assert.equal(retry.status, 200);
+  assert.deepEqual((await retry.json()).acceptedIds, [second.id]);
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,code,is_main,status) VALUES('rebase-hidden','REBASE','Hidden branch','HIDDEN',0,'active')").run();
+  await db.prepare("INSERT INTO users(id,tenant_id,name,username,password_hash,role,status,branch_ids_json,permissions_json) VALUES('rebase-staff','REBASE','Cashier','rebase-staff',?,'cashier','active',?,'{}')")
+    .bind(await hashPassword(pass), JSON.stringify([branchId])).run();
+  const restricted = await login('REBASE', 'rebase-staff', pass, 'rebase-restricted');
+  const fresh = await (await call('/api/sync/pull?tenantId=REBASE', 'GET', undefined, b)).json();
+  const hidden = attachConflictPreconditions({ ...sale('hidden'), branchId: 'rebase-hidden',
+    payload: { ...sale('hidden').payload, branchId: 'rebase-hidden', notes: 'private-hidden-branch' }
+  }, { ...fresh.conflictHeads });
+  assert.equal((await call('/api/sync/push', 'POST', { tenantId, events: [hidden] }, b)).status, 200);
+  const scoped = await call('/api/sync/rebase', 'POST', { ...input, events: [sale('scoped')] }, restricted);
+  assert.equal(scoped.status, 200, await scoped.clone().text());
+  const scopedData = await scoped.json();
+  assert.equal(JSON.stringify(scopedData.events).includes('private-hidden-branch'), false);
+  assert.ok(scopedData.events.every(event => event.branchId === branchId));
+  assert.equal((await call('/api/sync/rebase', 'POST', { ...input, events: [hidden] }, restricted)).status, 403);
+  const edit = { id: 'rebase-product-edit', entityType: 'product', entityId: 'rebase-product', action: 'update',
+    branchId, payload: { id: 'rebase-product', branchId, stock: 50 } };
+  assert.equal((await call('/api/sync/push', 'POST', { tenantId, events: [edit] }, b)).status, 200);
+  assert.equal((await call('/api/sync/rebase', 'POST', { ...input, events: [sale('third')] }, b)).status, 409);
+});
+
 test('schema bootstrap and numbered migrations produce identical database structures', async () => {
   const bootstrap=await mf.getD1Database('BOOTSTRAP');
   const sql=(await readFile('d1/schema.sql','utf8')).replace(/--[^\n]*/g,'');
