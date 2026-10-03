@@ -108,6 +108,48 @@ export class DurableAggregate {
     });
   }
 
+  // One strict IndexedDB transaction for a user's financial aggregate and a
+  // device/drawer journal. No caller may report either record committed alone.
+  async commitBatch(entries) {
+    if (!Array.isArray(entries) || entries.length < 2 ||
+        new Set(entries.map(entry => entry?.key)).size !== entries.length ||
+        entries.some(entry => !entry || typeof entry.key !== 'string' || !entry.key ||
+          entry.key.endsWith(MIGRATION_SOURCE_SUFFIX) || !entry.snapshot ||
+          !(entry.expectedRevision === null ||
+            (Number.isSafeInteger(entry.expectedRevision) && entry.expectedRevision >= 0)) ||
+          !Number.isSafeInteger(entry.snapshot.revision) ||
+          entry.snapshot.revision !== (entry.expectedRevision ?? -1) + 1))
+      throw new Error('مراجعات السجلات الدائمة المشتركة غير صالحة');
+    const next = entries.map(entry => ({ ...entry, snapshot: withoutCredentials(structuredClone(entry.snapshot)) }));
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      let conflict = null;
+      const tx = db.transaction(STORE_NAME, 'readwrite', { durability: 'strict' });
+      if (tx.durability !== 'strict') {
+        tx.abort();
+        reject(new Error('المتصفح لم يؤكد نمط الحفظ الصارم'));
+        return;
+      }
+      const store = tx.objectStore(STORE_NAME);
+      let checked = 0;
+      for (const entry of next) {
+        const request = store.get(entry.key);
+        request.onsuccess = () => {
+          if ((request.result?.revision ?? null) !== entry.expectedRevision) {
+            conflict = new Error('تغير السجل الدائم من عملية أخرى؛ أعد فتح التطبيق');
+            tx.abort();
+            return;
+          }
+          if (++checked === next.length)
+            for (const item of next) store.put(item.snapshot, item.key);
+        };
+      }
+      tx.oncomplete = () => resolve(next.map(entry => entry.snapshot));
+      tx.onerror = () => reject(conflict || tx.error || new Error('تعذر الحفظ الدائم المشترك'));
+      tx.onabort = () => reject(conflict || tx.error || new Error('أُلغي الحفظ الدائم المشترك'));
+    });
+  }
+
   // One-time import of an already validated aggregate. Never overwrite a
   // durable record, and preserve its original revision and pending outbox.
   async adoptIfEmpty(key, snapshot) {

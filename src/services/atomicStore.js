@@ -34,6 +34,7 @@ const FINANCIAL_EVENT_TYPES_BY_KEY = {
   khodar_pos_purchase_returns_v3: ['purchase_return'],
   khodar_pos_branches_v1: ['branch'],
   khodar_pos_stock_transfers_v1: ['stock_transfer'],
+  khodar_pos_cash_shifts_v1: ['cash_shift'],
   khodar_pos_settings_v3: ['settings','invoice'] // invoice numbering is updated in the same sale commit
 };
 const DIRECT_RECORD_EVENT_BY_KEY = {
@@ -48,7 +49,8 @@ const DIRECT_RECORD_EVENT_BY_KEY = {
   khodar_pos_purchase_returns_v3: 'purchase_return',
   khodar_pos_partner_drawings_v3: 'partner_drawing',
   khodar_pos_profit_distributions_v3: 'profit_distribution',
-  khodar_pos_stock_transfers_v1: 'stock_transfer'
+  khodar_pos_stock_transfers_v1: 'stock_transfer',
+  khodar_pos_cash_shifts_v1: 'cash_shift'
 };
 const DIRECT_RECORD_KEY_BY_EVENT = Object.fromEntries(
   Object.entries(DIRECT_RECORD_EVENT_BY_KEY).map(([key, type]) => [type, key]));
@@ -447,7 +449,7 @@ export class AtomicStore {
         throw new Error(`تغير مالي بلا حدث مزامنة مرتبط (${key})؛ لم تُحفظ العملية`);
       const directType = DIRECT_RECORD_EVENT_BY_KEY[key];
       if (!directType) continue; // Derived balances/stock still need business-effect reconciliation.
-      const previous = recordMap(before.state[key], key);
+      const previous = recordMap(key === 'khodar_pos_cash_shifts_v1' ? (before.state[key] ?? []) : before.state[key], key);
       const next = recordMap(after.state[key], key);
       for (const id of new Set([...previous.keys(), ...next.keys()])) {
         const oldRow = previous.get(id), newRow = next.get(id);

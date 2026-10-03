@@ -25,7 +25,7 @@ import {
   DEFAULT_PERMISSIONS,
   ROLE_PERMISSIONS_PRESETS
 } from '../data/initialData';
-import { getCurrentDateFormatted, getCurrentTimeFormatted } from '../utils/formatters';
+import { getCurrentDateFormatted, getCurrentTimeFormatted, setBusinessTimeZone, dateInTimeZone } from '../utils/formatters';
 import { adjustBalance, applyPurchaseInventory, applyPurchaseReturnPurchase, applyPurchaseReturnInventory, applyDamageInventory, applyWorkerAdvance, applyStockTransfer, applySalesReturnInventory, applySalesReturnInvoice } from '../services/businessEffects.js';
 import { backupToState, validateBackup } from '../services/backupValidation.js';
 import { SYNC_HEADS_STATE_KEY } from '../services/syncConflictPolicy.js';
@@ -41,6 +41,8 @@ import { acquireWithCheckedLegacyMigration } from '../services/checkedLegacyMigr
 import { fetchCloudCheckpointPage, fetchServerBranchManifest } from '../services/cloudMigrationApi.js';
 import { buildAccountingSnapshot } from '../services/accountingReconciliation.js';
 import { assignedBranchIds, canAccessBranch, visibleBranches, visibleBranchRecords } from '../services/branchAccess.js';
+import { cashMovementFromRecord } from '../services/cashMovement.js';
+import { openShift as openShiftEngine, postCashEvent, closeShift as closeShiftEngine } from '../services/cashShiftEngine.js';
 import { getApiBaseUrl } from '../config/appVersion';
 
 const STORAGE_KEYS = {
@@ -67,6 +69,7 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'khodar_pos_current_user_v1',
   BRANCHES: 'khodar_pos_branches_v1',
   ACTIVE_BRANCH_ID: 'khodar_pos_active_branch_id_v1',
+  CASH_SHIFTS: 'khodar_pos_cash_shifts_v1',
   STOCK_TRANSFERS: 'khodar_pos_stock_transfers_v1',
   TRIAL_REQUESTS: 'khodar_trial_leads_v1'
 };
@@ -139,6 +142,7 @@ export function useAppStore(options = {}) {
       [STORAGE_KEYS.USERS]: readInitial(STORAGE_KEYS.USERS, INITIAL_USERS),
       [STORAGE_KEYS.BRANCHES]: readInitial(STORAGE_KEYS.BRANCHES, getSessionUser() ? [] : INITIAL_BRANCHES),
       [STORAGE_KEYS.ACTIVE_BRANCH_ID]: readInitial(STORAGE_KEYS.ACTIVE_BRANCH_ID, getSessionUser() ? null : 'branch-main'),
+      [STORAGE_KEYS.CASH_SHIFTS]: readInitial(STORAGE_KEYS.CASH_SHIFTS, []),
       [STORAGE_KEYS.STOCK_TRANSFERS]: readInitial(STORAGE_KEYS.STOCK_TRANSFERS, INITIAL_STOCK_TRANSFERS),
       [STORAGE_KEYS.TRIAL_REQUESTS]: readInitial(STORAGE_KEYS.TRIAL_REQUESTS, []),
       [SYNC_HEADS_STATE_KEY]: {},
@@ -163,6 +167,7 @@ export function useAppStore(options = {}) {
   const setExpenseCategories = update => local.set(STORAGE_KEYS.EXPENSE_CATEGORIES, update);
   let settings = local.read(STORAGE_KEYS.SETTINGS);
   const setSettings = update => local.set(STORAGE_KEYS.SETTINGS, update);
+  if (settings?.timeZone) setBusinessTimeZone(settings.timeZone);
   let damagedItems = local.read(STORAGE_KEYS.DAMAGED);
   const setDamagedItems = update => local.set(STORAGE_KEYS.DAMAGED, update);
   let workers = local.read(STORAGE_KEYS.WORKERS);
@@ -210,6 +215,8 @@ export function useAppStore(options = {}) {
   };
   let stockTransfers = local.read(STORAGE_KEYS.STOCK_TRANSFERS);
   const setStockTransfers = update => local.set(STORAGE_KEYS.STOCK_TRANSFERS, update);
+  let cashShifts = local.read(STORAGE_KEYS.CASH_SHIFTS);
+  const setCashShifts = update => local.set(STORAGE_KEYS.CASH_SHIFTS, update);
   let trialRequests = local.read(STORAGE_KEYS.TRIAL_REQUESTS);
   const setTrialRequests = update => local.set(STORAGE_KEYS.TRIAL_REQUESTS, update);
 
@@ -293,6 +300,7 @@ export function useAppStore(options = {}) {
     expenses = local.read(STORAGE_KEYS.EXPENSES);
     expenseCategories = local.read(STORAGE_KEYS.EXPENSE_CATEGORIES);
     settings = local.read(STORAGE_KEYS.SETTINGS);
+    if (settings?.timeZone) setBusinessTimeZone(settings.timeZone);
     damagedItems = local.read(STORAGE_KEYS.DAMAGED);
     workers = local.read(STORAGE_KEYS.WORKERS);
     workerTransactions = local.read(STORAGE_KEYS.WORKER_TRANSACTIONS);
@@ -309,6 +317,7 @@ export function useAppStore(options = {}) {
     users = local.read(STORAGE_KEYS.USERS);
     branches = visibleBranches(currentUser, local.read(STORAGE_KEYS.BRANCHES));
     activeBranchId = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
+    cashShifts = local.read(STORAGE_KEYS.CASH_SHIFTS);
     stockTransfers = local.read(STORAGE_KEYS.STOCK_TRANSFERS);
     trialRequests = local.read(STORAGE_KEYS.TRIAL_REQUESTS);
     refreshInboundRecords();
@@ -344,6 +353,50 @@ export function useAppStore(options = {}) {
         if (!result.success) throw new Error(('error' in result && result.error) || 'تعذر تحديث البيانات المالية قبل العملية');
         return commit();
       });
+  };
+
+  // When a shift is open for the record's branch, attribute the cash movement to
+  // that shift and append it to the shift journal in the same store transaction.
+  const attributeCashToOpenShift = (record, type) => {
+    const shifts = Array.isArray(cashShifts) ? cashShifts : [];
+    const shift = shifts.find(row => row.branchId === record.branchId && row.status === 'open');
+    if (!shift) return record;
+    let delta;
+    try { delta = cashMovementFromRecord(type, record); } catch { return record; }
+    if (!Number.isFinite(delta) || delta === 0) return record;
+    const nextShifts = postCashEvent(shifts, {
+      shiftId: shift.id, id: `cash:${record.clientTransactionId || record.id}`,
+      actorId: currentUser?.id, deviceId: shift.offlineDeviceId, amount: delta, at: new Date().toISOString()
+    });
+    setCashShifts(nextShifts);
+    const updatedShift = nextShifts.find(row => row.id === shift.id);
+    local.enqueue({ id: `cash-shift:${shift.id}:cash:${record.clientTransactionId || record.id}`,
+      tenantId: shift.tenantId, branchId: shift.branchId, entityType: 'cash_shift', entityId: shift.id,
+      action: 'update', payload: updatedShift, timestamp: Date.now() });
+    return { ...record, cashShiftId: shift.id };
+  };
+
+  // Open/close a cashier shift in the same store transaction as its sync event.
+  const openShift = (input) => {
+    if (input?.actorId !== currentUser?.id) throw new Error('هوية المحاسب لا تطابق مالك السجل المحلي');
+    if (input?.tenantId && input.tenantId !== currentUser?.tenantId) throw new Error('الوردية لا تخص هذا السجل');
+    const after = openShiftEngine(Array.isArray(cashShifts) ? cashShifts : [], input);
+    setCashShifts(after);
+    const shift = after.find(row => row.id === input.id);
+    local.enqueue({ id: `cash-shift:${shift.id}:open`, tenantId: shift.tenantId, branchId: shift.branchId,
+      entityType: 'cash_shift', entityId: shift.id, action: 'create', payload: shift, timestamp: Date.parse(input.at) });
+    return shift;
+  };
+
+  const closeShift = (input) => {
+    const after = closeShiftEngine(Array.isArray(cashShifts) ? cashShifts : [], {
+      ...input, mode: 'local', pendingEventCount: local.current.outbox.length
+    });
+    setCashShifts(after);
+    const shift = after.find(row => row.id === input.shiftId);
+    local.enqueue({ id: `cash-shift:${shift.id}:close`, tenantId: shift.tenantId, branchId: shift.branchId,
+      entityType: 'cash_shift', entityId: shift.id, action: 'update', payload: shift, timestamp: Date.parse(input.at) });
+    return shift;
   };
 
   // Server account changes are authoritative. A failed local cache commit must
@@ -936,13 +989,14 @@ export function useAppStore(options = {}) {
       notes: note || 'سداد دفعة نقدية'
     };
 
-    setCustomerPayments(prev => [newPayment, ...prev]);
+    const attributedPayment = attributeCashToOpenShift(newPayment, 'customer_payment');
+    setCustomerPayments(prev => [attributedPayment, ...prev]);
 
     try {
-      cloudflareSync.recordMutation(activeTenantId, branchId, 'customer_payment', newPayment.id, 'create', newPayment);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'customer_payment', attributedPayment.id, 'create', attributedPayment);
     } catch (e) { throw e; }
 
-    return newPayment;
+    return attributedPayment;
   };
 
   const deleteCustomerPayment = (paymentId) => {
@@ -1044,12 +1098,13 @@ export function useAppStore(options = {}) {
 
     setProducts(prev => applyInvoiceInventory(prev, newInvoice, -1));
 
-    setInvoices(prev => [newInvoice, ...prev]);
+    const attributedInvoice = attributeCashToOpenShift(newInvoice, 'invoice');
+    setInvoices(prev => [attributedInvoice, ...prev]);
 
     // Queue mutation for Cloudflare background sync
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'invoice', invoiceId, 'create', newInvoice);
+      cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'invoice', invoiceId, 'create', attributedInvoice);
     } catch (e) {
       throw e;
     }
@@ -1197,16 +1252,17 @@ export function useAppStore(options = {}) {
       createdAt: new Date().toISOString()
     };
 
-    setSalesReturns(prev => [newReturn, ...prev]);
+    const attributedReturn = attributeCashToOpenShift(newReturn, 'sales_return');
+    setSalesReturns(prev => [attributedReturn, ...prev]);
     setProducts(prev => applySalesReturnInventory(prev, originalInvoice, newReturn, 1));
     setInvoices(prev => applySalesReturnInvoice(prev, newReturn, 1));
 
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, originalInvoice.branchId || null, 'sales_return', newReturn.id, 'create', newReturn);
+      cloudflareSync.recordMutation(activeTenantId, originalInvoice.branchId || null, 'sales_return', attributedReturn.id, 'create', attributedReturn);
     } catch (e) { throw e; }
 
-    return newReturn;
+    return attributedReturn;
   };
 
   const deleteSalesReturn = (returnId) => {
@@ -1276,16 +1332,17 @@ export function useAppStore(options = {}) {
       branchId: activeB?.id || 'branch-main',
       branchName: activeB?.name || 'الفرع الرئيسي',
       category: trimmedCat,
-      date: exp.date || new Date().toISOString().split('T')[0],
+      date: exp.date || getCurrentDateFormatted(),
       amount: Number(exp.amount) || 0
     };
-    setExpenses(prev => [newExp, ...prev]);
+    const attributedExp = attributeCashToOpenShift(newExp, 'expense');
+    setExpenses(prev => [attributedExp, ...prev]);
 
     try {
-      cloudflareSync.recordMutation(activeTenantId, newExp.branchId, 'expense', newExp.id, 'create', newExp);
+      cloudflareSync.recordMutation(activeTenantId, attributedExp.branchId, 'expense', attributedExp.id, 'create', attributedExp);
     } catch (e) { throw e; }
 
-    return newExp;
+    return attributedExp;
   };
 
   const deleteExpense = (id) => {
@@ -1317,7 +1374,7 @@ export function useAppStore(options = {}) {
       id: `dmg-${crypto.randomUUID()}`,
       branchId: targetBranchId,
       branchName: activeB?.name || 'الفرع الرئيسي',
-      date: item.date || new Date().toISOString().split('T')[0],
+      date: item.date || getCurrentDateFormatted(),
       quantityKg: qtyKg,
       costPerKg,
       totalLoss: Math.round(qtyKg * costPerKg * 100) / 100
@@ -1356,7 +1413,7 @@ export function useAppStore(options = {}) {
       id: `work-${crypto.randomUUID()}`,
       baseSalary: Number(worker.baseSalary) || 0,
       currentAdvance: 0,
-      startDate: worker.startDate || new Date().toISOString().split('T')[0]
+      startDate: worker.startDate || getCurrentDateFormatted()
     };
     setWorkers(prev => [newWorker, ...prev]);
     try {
@@ -1395,12 +1452,13 @@ export function useAppStore(options = {}) {
       id: transaction.id || `wt-${crypto.randomUUID()}`,
       amount,
       paymentMethod,
-      date: transaction.date || new Date().toISOString().split('T')[0]
+      date: transaction.date || getCurrentDateFormatted()
     };
 
     setWorkers(prev => applyWorkerAdvance(prev, newTx, 1));
 
-    setWorkerTransactions(prev => [newTx, ...prev]);
+    const attributedTx = attributeCashToOpenShift(newTx, 'worker_transaction');
+    setWorkerTransactions(prev => [attributedTx, ...prev]);
 
     // ONLY salaries are operational expenses. Advances are Balance Sheet assets (Employee Receivables), not P&L expenses.
     // Tag with isWorkerPayment: true to prevent double deduction in cash calculations.
@@ -1423,10 +1481,10 @@ export function useAppStore(options = {}) {
     // Cloudflare sync
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, branchId, 'worker_transaction', newTx.id, 'create', newTx);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'worker_transaction', attributedTx.id, 'create', attributedTx);
     } catch (e) { throw e; }
 
-    return newTx;
+    return attributedTx;
   };
 
   const recordWorkerTransactionWithUpdate = (workerId, updates, transaction, updateBefore = false) => {
@@ -1465,6 +1523,7 @@ export function useAppStore(options = {}) {
 
   // Settings Actions (مع المزامنة السحابية اللحظية)
   const updateSettings = (updates) => {
+    if (updates?.timeZone !== undefined) dateInTimeZone(new Date(), updates.timeZone);
     const activeTenantId = currentUser?.tenantId || 'tenant-demo';
     const branchId = Array.isArray(currentUser?.branchIds) ? requireWorkingBranch() : null;
     setSettings(prev => {
@@ -1599,7 +1658,8 @@ export function useAppStore(options = {}) {
       notes: notes || (paymentMethod === 'cash' ? 'سداد دفعة نقدية من الخزينة' : 'حوالة بنكية للمورد')
     };
 
-    setSupplierPayments(prev => [newPayment, ...prev]);
+    const attributedPayment = attributeCashToOpenShift(newPayment, 'supplier_payment');
+    setSupplierPayments(prev => [attributedPayment, ...prev]);
 
     // If paid cash from drawer, log as expense for visibility, tagged to prevent double counting
     if (paymentMethod === 'cash') {
@@ -1619,10 +1679,10 @@ export function useAppStore(options = {}) {
 
     try {
       const activeTenantId = currentUser?.tenantId || targetSupplier?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, branchId, 'supplier_payment', newPayment.id, 'create', newPayment);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'supplier_payment', attributedPayment.id, 'create', attributedPayment);
     } catch (e) { throw e; }
 
-    return newPayment;
+    return attributedPayment;
   };
 
   const deleteSupplierPayment = (paymentId) => {
@@ -1834,11 +1894,12 @@ export function useAppStore(options = {}) {
       }));
     }
 
-    setPurchases(prev => [newPurchase, ...prev]);
+    const attributedPurchase = attributeCashToOpenShift(newPurchase, 'purchase');
+    setPurchases(prev => [attributedPurchase, ...prev]);
 
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'purchase', newPurchase.id, 'create', newPurchase);
+      cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'purchase', attributedPurchase.id, 'create', attributedPurchase);
     } catch (e) { throw e; }
 
     return newPurchase;
@@ -1906,17 +1967,18 @@ export function useAppStore(options = {}) {
       createdAt: new Date().toISOString()
     };
 
-    setPurchaseReturns(prev => [newReturn, ...prev]);
+    const attributedReturn = attributeCashToOpenShift(newReturn, 'purchase_return');
+    setPurchaseReturns(prev => [attributedReturn, ...prev]);
     setPurchases(prev=>applyPurchaseReturnPurchase(prev,newReturn,1));
     setProducts(prev=>applyPurchaseReturnInventory(prev,originalPurchase,newReturn,1));
     if (refundMethod === 'supplier_debt_deduction') setSuppliers(prev=>adjustBalance(prev,originalPurchase.supplierId,-totalRefund));
 
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, originalPurchase.branchId || null, 'purchase_return', newReturn.id, 'create', newReturn);
+      cloudflareSync.recordMutation(activeTenantId, originalPurchase.branchId || null, 'purchase_return', attributedReturn.id, 'create', attributedReturn);
     } catch (e) { throw e; }
 
-    return newReturn;
+    return attributedReturn;
   };
 
   const deletePurchaseReturn = (returnId) => {
@@ -1995,7 +2057,7 @@ export function useAppStore(options = {}) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `khodar-full-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `khodar-full-backup-${getCurrentDateFormatted()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -2061,11 +2123,12 @@ export function useAppStore(options = {}) {
       notes: drawingData.notes || '',
       createdAt: new Date().toISOString()
     };
-    setPartnerDrawings(prev => [newDrawing, ...prev]);
+    const attributedDrawing = attributeCashToOpenShift(newDrawing, 'partner_drawing');
+    setPartnerDrawings(prev => [attributedDrawing, ...prev]);
     try {
-      cloudflareSync.recordMutation(activeTenantId, branchId, 'partner_drawing', newDrawing.id, 'create', newDrawing);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'partner_drawing', attributedDrawing.id, 'create', attributedDrawing);
     } catch (e) { throw e; }
-    return newDrawing;
+    return attributedDrawing;
   };
 
   const deletePartnerDrawing = (id) => {
@@ -2095,11 +2158,12 @@ export function useAppStore(options = {}) {
       notes: distData.notes || '',
       createdAt: new Date().toISOString()
     };
-    setProfitDistributions(prev => [newDist, ...prev]);
+    const attributedDist = attributeCashToOpenShift(newDist, 'profit_distribution');
+    setProfitDistributions(prev => [attributedDist, ...prev]);
     try {
-      cloudflareSync.recordMutation(activeTenantId, branchId, 'profit_distribution', newDist.id, 'create', newDist);
+      cloudflareSync.recordMutation(activeTenantId, branchId, 'profit_distribution', attributedDist.id, 'create', attributedDist);
     } catch (e) { throw e; }
-    return newDist;
+    return attributedDist;
   };
 
   const deleteProfitDistribution = (id) => {
@@ -2362,6 +2426,7 @@ export function useAppStore(options = {}) {
       const user = { ...result.user, isStaff: result.userType === 'staff', status: 'active', sessionExpiresAt: result.session.expiresAt };
       user.permissions = resolveUserPermissions(user);
       setSessionUser(user);
+      setBusinessTimeZone(result.tenant?.timeZone);
       // The old store must not receive the new identity before the remount.
       writeTenantLoginContext(result.tenant, user, result.branches);
       localStorage.setItem('khodar_remembered_store_code', result.tenant.storeCode || storeCode);
@@ -2689,6 +2754,9 @@ export function useAppStore(options = {}) {
     branches,
     activeBranchId,
     activeBranch,
+    cashShifts,
+    openShift: atomicAction(openShift),
+    closeShift: atomicAction(closeShift),
     stockTransfers,
     changeActiveBranch: atomicAction(changeActiveBranch),
     addBranch: atomicAction(addBranch),

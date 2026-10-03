@@ -5,7 +5,7 @@ import {
   Settings, ArrowLeft, TrendingDown, Scale, Coins, Store, LogOut
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, getCurrentDateFormatted } from '../utils/formatters';
 import { TAB_PERMISSION_MAP } from './DesktopSidebar';
 import { BRRAKA_LOGO } from '../assets/branding';
 
@@ -17,7 +17,7 @@ export default function MobileHomeHub({
   const { invoices = [], customers = [], products = [], settings, suppliers = [], partners = [], getFinancialPosition } = store;
 
   // Quick Daily Stats & Financial Position
-  const today = new Date().toISOString().split('T')[0];
+  const today = getCurrentDateFormatted();
   const todayInvoices = invoices.filter(i => i.date === today);
   const todaySales = todayInvoices.reduce((sum, inv) => sum + (Number(inv.finalTotal) || 0), 0);
   const totalDebts = customers.reduce((sum, c) => sum + Math.max(0, Number(c.balance) || 0), 0);

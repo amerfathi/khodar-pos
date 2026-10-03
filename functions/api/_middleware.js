@@ -13,6 +13,8 @@ export async function onRequest(context) {
       if (auth.error) return auth.error;
       context.data.auth = auth;
     }
+    if (new URL(context.request.url).pathname.startsWith('/api/cash/') && context.env.CASH_SHIFTS_ENABLED !== 'true')
+      return json({ success: false, error: 'Cash shifts are not enabled' }, 503);
     const response = await context.next();
     const secured = new Response(response.body, response);
     secured.headers.set('Cache-Control', 'no-store');

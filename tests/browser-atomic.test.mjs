@@ -93,8 +93,29 @@ try {
     if (races.filter(result => result.status === 'fulfilled').length !== 1 ||
         races.filter(result => result.status === 'rejected').length !== 1) throw Error('concurrent compare-and-commit was not exclusive');
     const final = await durable.read('current');
+    if (typeof durable.commitBatch !== 'function') throw Error('Durable multi-record commit is unavailable');
+    const left = { revision: 0, state: { invoice: 'sale-1' } };
+    const right = { revision: 0, state: { drawerSequence: 1 } };
+    await durable.commitBatch([
+      { key: 'cashier-ledger', snapshot: left, expectedRevision: null },
+      { key: 'drawer-journal', snapshot: right, expectedRevision: null }
+    ]);
+    try {
+      await durable.commitBatch([
+        { key: 'cashier-ledger', snapshot: { revision: 1, state: { invoice: 'sale-2' } }, expectedRevision: 0 },
+        { key: 'drawer-journal', snapshot: { revision: 100, state: { drawerSequence: 2 } }, expectedRevision: 99 }
+      ]);
+      throw Error('stale drawer journal unexpectedly accepted');
+    } catch (error) { if (!error.message.includes('تغير السجل الدائم')) throw error; }
+    if ((await durable.read('cashier-ledger')).revision !== 0 || (await durable.read('drawer-journal')).revision !== 0)
+      throw Error('a failed paired commit partially changed durable state');
+    await durable.commitBatch([
+      { key: 'cashier-ledger', snapshot: { revision: 1, state: { invoice: 'sale-2' } }, expectedRevision: 0 },
+      { key: 'drawer-journal', snapshot: { revision: 1, state: { drawerSequence: 2 } }, expectedRevision: 0 }
+    ]);
+    const pair = [await durable.read('cashier-ledger'), await durable.read('drawer-journal')];
     durable.close();
-    return final;
+    return { final, pair };
   }, state) : null;
   const engineSnapshot = engineProbe ? await first.evaluate(async () => {
     const { AtomicStore } = await import('/atomicStore.js');
@@ -185,13 +206,15 @@ try {
     const durable = await reopened.evaluate(async () => {
       const { DurableAggregate } = await import('/durableAggregate.js');
       const repository = new DurableAggregate(indexedDB, 'braka-strict-probe');
-      const snapshot = await repository.read('current');
+      const snapshot = { final: await repository.read('current'), pair: [
+        await repository.read('cashier-ledger'), await repository.read('drawer-journal')] };
       repository.close();
       return snapshot;
     });
     assert.deepEqual(durable, strictSnapshot, 'strict transaction and concurrent winner must survive process termination');
-    assert.deepEqual(durable.outbox.map(event => event.id), ['browser-event']);
-    console.log('Chrome strict IndexedDB feasibility probe passed; application storage is still localStorage.');
+    assert.deepEqual(durable.final.outbox.map(event => event.id), ['browser-event']);
+    assert.deepEqual(durable.pair.map(row => row.revision), [1,1]);
+    console.log('Chrome strict IndexedDB single and paired commits survived process termination.');
   } else {
     assert.deepEqual({invoices:recovered.state.invoices,stock:recovered.state.stock,debt:recovered.state.debt}, { invoices: [{ id: 'sale' }], stock: 17, debt: 15 });
     assert.equal(recovered.state.khodar_pos_sync_heads_v1['domain:inventory'],'browser-event');

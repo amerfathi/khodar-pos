@@ -553,6 +553,46 @@ export default function SettingsView({
                         ))}
                       </div>
                     </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-bold text-slate-700 mb-1">المنطقة الزمنية للشركة</label>
+                      <select
+                        value={form.timeZone || 'Asia/Riyadh'}
+                        onChange={(e) => setForm(prev => ({ ...prev, timeZone: e.target.value }))}
+                        className="w-full px-3.5 py-2.5 bg-slate-50/70 border border-slate-200 rounded-xl text-slate-800 focus:bg-white focus:ring-2 focus:ring-primary-500 transition-all text-xs"
+                      >
+                        {[
+                          ['Asia/Riyadh', 'السعودية (Asia/Riyadh)'],
+                          ['Asia/Dubai', 'الإمارات (Asia/Dubai)'],
+                          ['Asia/Bahrain', 'البحرين (Asia/Bahrain)'],
+                          ['Asia/Kuwait', 'الكويت (Asia/Kuwait)'],
+                          ['Asia/Muscat', 'عُمان (Asia/Muscat)'],
+                          ['Asia/Qatar', 'قطر (Asia/Qatar)'],
+                          ['Africa/Cairo', 'مصر (Africa/Cairo)'],
+                          ['Africa/Tripoli', 'ليبيا (Africa/Tripoli)'],
+                          ['Asia/Amman', 'الأردن (Asia/Amman)'],
+                          ['Asia/Baghdad', 'العراق (Asia/Baghdad)'],
+                          ['Africa/Tunis', 'تونس (Africa/Tunis)'],
+                          ['Africa/Algiers', 'الجزائر (Africa/Algiers)'],
+                          ['Africa/Casablanca', 'المغرب (Africa/Casablanca)'],
+                          ['Africa/Khartoum', 'السودان (Africa/Khartoum)'],
+                          ['Asia/Damascus', 'سوريا (Asia/Damascus)'],
+                          ['Asia/Beirut', 'لبنان (Asia/Beirut)'],
+                          ['Asia/Aden', 'اليمن (Asia/Aden)'],
+                          ['Africa/Mogadishu', 'الصومال (Africa/Mogadishu)'],
+                          ['Africa/Djibouti', 'جيبوتي (Africa/Djibouti)'],
+                          ['Africa/Nouakchott', 'موريتانيا (Africa/Nouakchott)'],
+                          ['Asia/Gaza', 'فلسطين (Asia/Gaza)'],
+                          ['America/New_York', 'أمريكا الشرقية (America/New_York)'],
+                          ['Europe/London', 'بريطانيا (Europe/London)'],
+                          ['Europe/Paris', 'أوروبا الوسطى (Europe/Paris)'],
+                          ['Asia/Istanbul', 'تركيا (Asia/Istanbul)']
+                        ].map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-slate-400 mt-1">يحدده المالك مرة واحدة ويُطبَّق على كل فروع الشركة في التقارير والتواريخ.</p>
+                    </div>
                   </div>
                 </div>
 

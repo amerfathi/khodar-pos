@@ -8,6 +8,7 @@ export const INITIAL_SETTINGS = {
   phone: '',
   secondaryPhone: '',
   currency: 'ريال',
+  timeZone: 'Asia/Riyadh', // توقيت الشركة: يحدده المالك مرة واحدة ويُطبَّق على كل الفروع
   address: '',
   taxNumber: '', // الرقم الضريبي للمنشأة (15 رقماً)
   commercialRegister: '', // رقم السجل التجاري

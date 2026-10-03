@@ -9,7 +9,7 @@ const permissions = {
   stock_transfer: 'canManageInventory', sales_return: 'canVoidInvoices',
   branch: 'canAccessSettings',
   purchase_return: 'canManagePurchases', damaged_item: 'canManageInventory', settings: 'canAccessSettings',
-  restore_snapshot: 'canAccessSettings'
+  restore_snapshot: 'canAccessSettings', cash_shift: 'canSell'
 };
 export function canSync(principal, type, action = 'read') {
   if (!Object.hasOwn(permissions, type)) return false;

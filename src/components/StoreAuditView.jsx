@@ -6,7 +6,7 @@ import {
   FileCheck2, ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { formatCurrency, getCurrentDateFormatted } from '../utils/formatters';
+import { formatCurrency, getCurrentDateFormatted, getDateFormattedOffset } from '../utils/formatters';
 
 export default function StoreAuditView({ store, onOpenA4Report }) {
   const { 
@@ -45,11 +45,7 @@ export default function StoreAuditView({ store, onOpenA4Report }) {
     if (auditPeriod === 'today') return dateStr === todayStr;
 
     const now = new Date();
-    if (auditPeriod === 'yesterday') {
-      const yesterday = new Date(now);
-      yesterday.setDate(yesterday.getDate() - 1);
-      return dateStr === yesterday.toISOString().split('T')[0];
-    }
+    if (auditPeriod === 'yesterday') return dateStr === getDateFormattedOffset(-1);
     if (auditPeriod === 'week') {
       const weekAgo = new Date(now);
       weekAgo.setDate(weekAgo.getDate() - 7);

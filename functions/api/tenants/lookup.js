@@ -65,7 +65,8 @@ export async function onRequestPost({ request, env }) {
     };
     return json({ success: true, authenticated: true, userType: principal.type === 'tenant' ? 'owner' : 'staff', session, user: loginUser,
       tenant: { id: tenant.id, storeCode: tenant.store_code, companyName: tenant.company_name, status: tenant.status,
-        expiresAt: tenant.expires_at, allowedBranches: tenant.allowed_branches }, branches: visibleBranches(loginUser, branches) });
+        expiresAt: tenant.expires_at, allowedBranches: tenant.allowed_branches, timeZone: tenant.time_zone || 'Asia/Riyadh' },
+      branches: visibleBranches(loginUser, branches) });
   } catch {
     return json({ success: false, error: 'Authentication failed' }, 500);
   }

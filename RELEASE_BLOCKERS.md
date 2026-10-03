@@ -1,5 +1,19 @@
 # Authoritative release blocker register
 
+## مطابقة العمل المحلي للورديات — 2026-10-03
+
+هذه إضافة لنطاق الميزة الجديدة؛ حالات الجدول الأساسي أدناه تبقى أدلة تاريخية بنطاقها، ولا تثبت اكتمال الورديات. المرجع الحالي للملفات غير المحفوظة وتصنيفها هو `AI_HANDOFF_CURRENT.md`.
+
+| ID | Severity | State | الدليل ومتطلب الإغلاق |
+|---|---|---|---|
+| CASH-AUTH | Critical | IN_PROGRESS | إصدار ECDSA مرتبط بجلسة وجهاز، pin عام، تخزين وفكّ محلي 24 ساعة موجودة؛ الدخول الحقيقي غير موصول. يلزم تثبيت هوية الجهاز دون سباق، تحقق تغيير الصلاحيات/الاعتماد، وربط الدخول الفعلي واختبار pin الإنتاج. اكتمال OA-07 مذكور ولم يُتحقق من الخدمة في هذه المطابقة. |
+| CASH-SOURCES | Critical | IN_PROGRESS | hooks تنسب بعض السجلات إلى أول وردية مفتوحة في الفرع داخل aggregate المستخدم. يلزم اختيار درج المستخدم والجهاز الحقيقي، rollback عند خطأ اشتقاق النقد، وcommitBatch للفواتير/السداد/العكس مع سجل الدرج المشترك ومصادر outbox؛ اختبار مصروف واحد لا يغلق ذلك. |
+| CASH-REPLAY | Critical | IN_PROGRESS | صُحح قبول درج شركة أخرى باختبار فشل قبل الإصلاح ثم نجاحه؛ replay لنفس المحاسب يدعم الآن open→sale→close→next-open في دفعة واحدة، مع رفض تسوية ناقصة دون حفظ جزئي وإعادة ACK دون تكرار. يلزم تفويض محاسبين مختلفين، إثبات الجهاز، immutability للوردية، وإعادة actor أصلي دون تجاوز الصلاحيات. |
+| CASH-RESTORE | Critical | OPEN | ledger الجديد وسجل الدرج والأجهزة والتصاريح ليست ضمن بروتوكول backup/restore متكامل؛ inbound cash_shift غير موصول. يلزم إعادة المصادقة والاسترداد بعد فقد الجهاز وحفظ pending source events دون relabel أو فقد. |
+| CASH-PLATFORMS | High | OPEN | لا يوجد اختبار للميزة الكاملة على Web/Windows/Android؛ يلزم محاسبان ودرجان/جهازان، انتهاء يوم، انقطاع إنترنت، kill/reopen وlost ACK. UI تبقى مخفية. |
+
+عولج كذلك تاريخ ثابت في fixture تسوية الوردية: تاريخ الفتح واليوم المحاسبي يُشتقان الآن من وقت الاختبار؛ لم تتغير قاعدة مالية لهذا الإصلاح. فحوص التشغيل النهائية تُسجّل في ملف التسليم بعد اكتمالها.
+
 Checkpoint: 2026-09-28. This register supersedes ambiguous historical statuses; detailed audit files retain their evidence and limitations. Allowed states: OPEN, IN_PROGRESS, FIXED_NOT_VERIFIED, VERIFIED, BLOCKED_EXTERNAL, NOT_APPLICABLE.
 
 ## Baseline reconciliation

@@ -3,6 +3,8 @@ import { badRequest, json, options, readJson } from '../../_lib/http.js';
 import { canSync, validateTenantPayload } from '../../_lib/syncPolicy.js';
 import { conflictKeysForEvent } from '../../../src/services/syncConflictPolicy.js';
 import { canAccessBranch } from '../../../src/services/branchAccess.js';
+import { cashMovementFromRecord } from '../../../src/services/cashMovement.js';
+import { accountingDate } from '../../../src/services/cashShiftEngine.js';
 
 export const onRequestOptions = options;
 export async function onRequestPost({ request, env }) {
@@ -13,10 +15,23 @@ export async function onRequestPost({ request, env }) {
     const accessError = requireTenant(auth, tenantId);
     if (accessError) return accessError;
     if (!Array.isArray(events) || events.length < 1 || events.length > 100) return badRequest('events must contain 1-100 mutations');
+    if (env.CASH_SHIFTS_ENABLED !== 'true' && events.some(event => event?.entityType === 'cash_shift' || event?.payload?.cashShiftId))
+      return json({ success: false, error: 'Cash shifts are not enabled' }, 503);
     const now = Date.now();
     const statements = [];
     const creatingBranches = new Set();
     const entityBranches = new Map();
+    const pendingCashCreates = new Map();
+    const pendingCashReversals = new Set();
+    const replayShifts = new Map();
+    const pendingCashDeltas = new Map();
+    const cashShiftById = async id => {
+      if (replayShifts.has(id)) return replayShifts.get(id);
+      const shift = await env.DB.prepare('SELECT * FROM cash_shifts WHERE id = ? AND tenant_id = ?')
+        .bind(id, tenantId).first();
+      if (shift) replayShifts.set(id, shift);
+      return shift;
+    };
     const knownEntityBranch = async (type, id) => {
       const key = `${type}:${id}`;
       if (entityBranches.has(key)) return entityBranches.get(key);
@@ -57,6 +72,13 @@ export async function onRequestPost({ request, env }) {
       validateTenantPayload(event.payload, tenantId);
       if (event.payload.id && event.payload.id !== event.entityId) return badRequest('Entity ID mismatch');
       const branch = event.branchId ?? branchId ?? null;
+      if (event.entityType === 'settings' && event.payload.timeZone !== undefined) {
+        if (branch || auth.principal.type !== 'tenant' || !['company_owner', 'super_admin'].includes(auth.principal.role))
+          return json({ success: false, error: 'Only the company owner can change its timezone' }, 403);
+        if (typeof event.payload.timeZone !== 'string' || !event.payload.timeZone.trim()) return badRequest('Invalid timezone');
+        try { accountingDate(new Date(now).toISOString(), event.payload.timeZone); }
+        catch { return badRequest('Invalid timezone'); }
+      }
       if (branch === 'all') return badRequest('Aggregate branch view is read-only');
       const tenantWideEvent = ['branch', 'stock_transfer', 'restore_snapshot', 'settings'].includes(event.entityType);
       if (!tenantWideEvent && !branch) return badRequest('Financial mutations require an explicit branch');
@@ -103,6 +125,50 @@ export async function onRequestPost({ request, env }) {
           if (typeof id !== 'string' || (!creatingBranches.has(id) &&
               !await env.DB.prepare('SELECT id FROM branches WHERE id = ? AND tenant_id = ?').bind(id, tenantId).first())) return badRequest('Unknown transfer branch');
         }
+      } else if (event.entityType === 'cash_shift') {
+        const p = event.payload;
+        if (!['create', 'update'].includes(event.action)) return badRequest('Unsupported cash shift action');
+        for (const field of ['tenantId', 'branchId', 'drawerId', 'actorId', 'offlineDeviceId', 'timeZone', 'accountingDate', 'openedAt'])
+          if (typeof p?.[field] !== 'string' || !p[field]) return badRequest('Invalid cash shift');
+        if (!Number.isFinite(Number(p.openingCash)) || Number(p.openingCash) < 0) return badRequest('Invalid opening cash');
+        if (p.tenantId !== tenantId) return json({ success: false, error: 'Cash shift tenant mismatch' }, 403);
+        if (p.actorId !== auth.principal.id) return json({ success: false, error: 'Cash shift belongs to another cashier' }, 403);
+        if (p.branchId !== branch) return badRequest('Cash shift branch mismatch');
+        const drawer = await env.DB.prepare("SELECT id FROM cash_drawers WHERE id = ? AND tenant_id = ? AND branch_id = ? AND status = 'active'")
+          .bind(p.drawerId, tenantId, branch).first();
+        if (!drawer) return badRequest('Unknown active drawer for this tenant and branch');
+        if (event.action === 'create') {
+          const existing = await cashShiftById(p.id);
+          if (!existing) replayShifts.set(p.id, { id: p.id, tenant_id: tenantId, branch_id: branch,
+            drawer_id: p.drawerId, opened_by: p.actorId, offline_device_id: p.offlineDeviceId,
+            time_zone: p.timeZone, accounting_date: p.accountingDate, opened_at: p.openedAt,
+            opening_cash_cents: Math.round(Number(p.openingCash) * 100), status: 'open' });
+          statements.push(env.DB.prepare(`INSERT INTO cash_shifts
+            (id, tenant_id, branch_id, drawer_id, opened_by, offline_device_id, time_zone, accounting_date, opened_at, opening_cash_cents, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+            ON CONFLICT(id) DO NOTHING`)
+            .bind(p.id, p.tenantId, p.branchId, p.drawerId, p.actorId, p.offlineDeviceId, p.timeZone, p.accountingDate,
+              p.openedAt, Math.round(Number(p.openingCash) * 100)));
+        } else if (['closed_local', 'closed'].includes(p.status)) {
+          if (typeof p.closedAt !== 'string' || !p.closedAt || typeof p.closedBy !== 'string' || !p.closedBy)
+            return badRequest('Invalid cash shift close');
+          if (p.closedBy !== auth.principal.id) return json({ success: false, error: 'Cash shift belongs to another cashier' }, 403);
+          if (!Number.isFinite(Number(p.countedCash)) || Number(p.countedCash) < 0) return badRequest('Invalid counted cash');
+          const shift = await cashShiftById(p.id);
+          if (!shift) return badRequest('Cash shift not found');
+          if (shift.opened_by !== auth.principal.id) return json({ success: false, error: 'Cash shift belongs to another cashier' }, 403);
+          const movement = await env.DB.prepare('SELECT COALESCE(SUM(amount_cents), 0) AS delta FROM cash_shift_movements WHERE tenant_id = ? AND shift_id = ?')
+            .bind(tenantId, p.id).first();
+          const expectedCents = shift.opening_cash_cents + Number(movement?.delta || 0) + (pendingCashDeltas.get(p.id) || 0);
+          if (expectedCents !== Math.round(Number(p.expectedCash) * 100))
+            return json({ success: false, error: 'Cash movements have not fully reconciled; retry after sync' }, 409);
+          const countedCents = Math.round(Number(p.countedCash) * 100);
+          statements.push(env.DB.prepare(`UPDATE cash_shifts SET status = 'closed', closed_at = ?, closed_by = ?,
+            counted_cash_cents = ?, expected_cash_cents = ?, variance_cents = ?
+            WHERE id = ? AND tenant_id = ? AND status = 'open'`)
+            .bind(p.closedAt, auth.principal.id, countedCents, expectedCents, countedCents - expectedCents, p.id, tenantId));
+          replayShifts.set(p.id, { ...shift, status: 'closed' });
+        }
       } else {
         if (event.payload.branchId && event.payload.branchId !== branch) return badRequest('Payload branch mismatch');
         if (branch && branch !== 'all' && !creatingBranches.has(branch) &&
@@ -112,9 +178,63 @@ export async function onRequestPost({ request, env }) {
       const preconditions = JSON.stringify(event.preconditions);
       if (new TextEncoder().encode(payload).length > 5 * 1024 * 1024) return badRequest('Event payload is oversized');
       const groupId = event.groupId || null;
-      // Duplicate IDs with altered content are conflicts, not successful retries.
+      // An identical retry must be acknowledged even if its shift has since closed.
       const old = await env.DB.prepare('SELECT * FROM sync_events_v2 WHERE tenant_id = ? AND id = ?').bind(tenantId, event.id).first();
       if (old && (old.entity_type !== event.entityType || old.entity_id !== event.entityId || old.action !== event.action || old.payload_json !== payload || old.branch_id !== branch || old.group_id !== groupId || old.conflict_policy_version !== 1 || old.preconditions_json !== preconditions)) return json({ success: false, error: 'Idempotency conflict' }, 409);
+      if (old && event.payload.cashShiftId) {
+        if (groupId) {
+          const registered=await env.DB.prepare('SELECT event_count FROM sync_commit_groups WHERE tenant_id=? AND group_id=?')
+            .bind(tenantId,groupId).first();
+          if (!registered || registered.event_count !== groupCounts.get(groupId))
+            return json({success:false,error:'Commit group conflict'},409);
+        }
+        const recorded=await env.DB.prepare('SELECT source_event_id FROM cash_shift_movements WHERE tenant_id=? AND source_event_id=?')
+          .bind(tenantId,event.id).first();
+        if (!recorded) return json({success:false,error:'Cash source was accepted without its movement'},409);
+        continue;
+      }
+      let cashMovement = null;
+      let sourceMovement = null;
+      const cashEntityKey = `${branch}:${event.entityType}:${event.entityId}`;
+      if (['void','delete'].includes(event.action)) {
+        sourceMovement = await env.DB.prepare(`SELECT movement.source_event_id,movement.amount_cents
+          FROM cash_shift_movements movement JOIN sync_events_v2 source
+            ON source.tenant_id=movement.tenant_id AND source.id=movement.source_event_id
+          WHERE source.tenant_id=? AND source.branch_id=? AND source.entity_type=? AND source.entity_id=? AND source.action='create'
+          ORDER BY source.sequence LIMIT 1`).bind(tenantId,branch,event.entityType,event.entityId).first();
+        sourceMovement ||= pendingCashCreates.get(cashEntityKey) || null;
+        if (sourceMovement && !event.payload.cashShiftId)
+          return badRequest('Cash correction requires an open shift');
+      }
+      if (event.payload.cashShiftId) {
+        if (!['create','void','delete'].includes(event.action)) return badRequest('Unsupported cash shift mutation');
+        const shiftId = event.payload.cashShiftId;
+        if (typeof shiftId !== 'string' || shiftId.length > 128 || !branch) return badRequest('Invalid cash shift');
+        const shift = await cashShiftById(shiftId);
+        if (!shift || shift.tenant_id !== tenantId || shift.branch_id !== branch || shift.status !== 'open')
+          return badRequest('Cash shift is not open for this branch');
+        if (shift.opened_by !== auth.principal.id) return json({success:false,error:'Cash shift belongs to another cashier'},403);
+        const occurredAt = new Date(Number(event.timestamp)).toISOString();
+        if (occurredAt < shift.opened_at || accountingDate(occurredAt,shift.time_zone) !== shift.accounting_date)
+          return badRequest('Cash event falls outside its open accounting day');
+        if (sourceMovement) {
+          if (pendingCashReversals.has(sourceMovement.source_event_id))
+            return json({success:false,error:'Cash movement has already been reversed in this batch'},409);
+          const reversal = await env.DB.prepare('SELECT source_event_id FROM cash_shift_movements WHERE tenant_id=? AND reverses_source_event_id=?')
+            .bind(tenantId,sourceMovement.source_event_id).first();
+          if (reversal && reversal.source_event_id !== event.id)
+            return json({success:false,error:'Cash movement has already been reversed'},409);
+        }
+        const delta = sourceMovement ? -sourceMovement.amount_cents/100 :
+          event.action === 'create' ? cashMovementFromRecord(event.entityType,event.payload) : 0;
+        if (delta === 0) return badRequest('Cash shift cannot be assigned to a non-cash event');
+        cashMovement = {shiftId,drawerId:shift.drawer_id,accountingDate:shift.accounting_date,
+          amountCents:Math.round(delta*100),reversesSourceEventId:sourceMovement?.source_event_id || null};
+        pendingCashDeltas.set(shiftId, (pendingCashDeltas.get(shiftId) || 0) + cashMovement.amountCents);
+        if (event.action === 'create') pendingCashCreates.set(cashEntityKey,
+          {source_event_id:event.id,amount_cents:cashMovement.amountCents});
+        else pendingCashReversals.add(sourceMovement.source_event_id);
+      }
       if (groupId) {
         const registered = await env.DB.prepare('SELECT event_count FROM sync_commit_groups WHERE tenant_id = ? AND group_id = ?').bind(tenantId, groupId).first();
         if (registered && (!old || registered.event_count !== groupCounts.get(groupId)))
@@ -160,12 +280,20 @@ export async function onRequestPost({ request, env }) {
               p.managerName || null, p.isMain ? 1 : 0, p.status || 'active', event.entityId, tenantId));
         }
       }
+      if (!old && event.entityType === 'settings' && event.payload.timeZone !== undefined)
+        statements.push(env.DB.prepare('UPDATE tenants SET time_zone = ? WHERE id = ?')
+          .bind(event.payload.timeZone, tenantId));
       statements.push(env.DB.prepare(`INSERT INTO sync_events_v2
         (id, tenant_id, branch_id, entity_type, entity_id, action, payload_json, client_timestamp, server_timestamp, group_id, conflict_policy_version, preconditions_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(tenant_id, id) DO NOTHING`)
         .bind(event.id, auth.principal.tenantId, branch, event.entityType, event.entityId, event.action, payload, Number(event.timestamp) || now, now, groupId, 1, preconditions));
+      if (cashMovement) statements.push(env.DB.prepare(`INSERT INTO cash_shift_movements
+        (tenant_id,source_event_id,shift_id,branch_id,drawer_id,accounting_date,amount_cents,reverses_source_event_id)
+        VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,source_event_id) DO NOTHING`)
+        .bind(tenantId,event.id,cashMovement.shiftId,branch,cashMovement.drawerId,cashMovement.accountingDate,
+          cashMovement.amountCents,cashMovement.reversesSourceEventId));
     }
-    await env.DB.batch(statements);
+    if (statements.length) await env.DB.batch(statements);
     return json({ success: true, acceptedIds: events.map(event => event.id), syncedCount: events.length });
   } catch (error) {
     if (String(error?.message).includes('SYNC_IDEMPOTENCY_CONFLICT')) return json({ success: false, error: 'Idempotency conflict' }, 409);

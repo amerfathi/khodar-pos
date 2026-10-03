@@ -17,11 +17,15 @@ const DOMAINS_BY_TYPE = Object.freeze({
   worker_transaction:['domain:workers','domain:liquidity'], partner:['domain:partners'],
   partner_drawing:['domain:partners','domain:liquidity'],
   profit_distribution:['domain:partners','domain:liquidity'], branch:['domain:branches'],
-  settings:['domain:settings','domain:liquidity']
+  settings:['domain:settings','domain:liquidity'], cash_shift:['domain:cash_shifts','domain:liquidity']
 });
 
 export function conflictKeysForEvent(event) {
   if (event?.entityType === 'restore_snapshot') return ['tenant:*', ...CONFLICT_DOMAINS];
+  if (event?.entityType === 'cash_shift') {
+    const drawerId = typeof event.payload?.drawerId === 'string' && event.payload.drawerId ? event.payload.drawerId : event.entityId;
+    return ['domain:cash_shifts', 'domain:liquidity', `record:cash_shift:${event.entityId}`, `record:cash_shift_drawer:${drawerId}`];
+  }
   const domains = DOMAINS_BY_TYPE[event?.entityType];
   if (!domains || typeof event?.entityId !== 'string' || !event.entityId) return [];
   return [...domains, `record:${event.entityType}:${event.entityId}`];
