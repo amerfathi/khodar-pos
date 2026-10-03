@@ -1,5 +1,38 @@
 # Authoritative release blocker register
 
+Publication checkpoint2026-10-04:2.6.13 binaries/Web/update metadata published; source bb27b7403dec2565ad7a4a1b12c7edab0a8c9b78, CI233 integration tests pass. Extracted published Windows binary/production Web same-account offline/reconnect and renderer reload stock check passed. Updater signature and Android certificate compatibility verified. Installed Windows upgrade, signed Android UI, physical printing and full matrix remain unverified. This supersedes the distribution-pending wording below, not the broader OPEN blockers. Invoice numbering remains OPEN; no full release certification.
+
+## Independent sales reconciliation checkpoint — 2026-10-03
+
+This section supersedes the older OPEN claims for the narrowly verified invoice-create scenarios, not the broader register.
+
+| ID | Severity | State | Evidence / remaining requirement |
+|---|---|---|---|
+| SYNC-INDEPENDENT-SALES | Critical | VERIFIED | Audited authenticated read-only rebase; immutable invoice source, atomic state/outbox/cursor, final original push CAS. Real local and live Web/Electron/Android-debug offline/reconnect sales accepted once,pending0; same/different cashier accounts and local branch isolation verified. Final distribution references pending. See docs/sales-reconciliation-2026-10-03.md. |
+| SYNC-MULTI-DEVICE | Critical | IN_PROGRESS | Independent invoice creates now reconcile; mixed edits/reversals/restore/shift movements and >1000-event intervening history retain explicit conflict. No whole-business reconciliation certification. |
+| INVOICE-NUMBERING | High | OPEN | Printed sequential invoiceNumber remains device-local and can duplicate, despite unique internal source IDs. Needs offline-safe numbering/series and migration/print tests. |
+| LIVE-PLATFORM-MATRIX | High | IN_PROGRESS | Candidate2.6.13 Web/Electron and actual Android debug exercised the live server successfully. Published signed Android APK and Windows installer distribution still need final verification; no full matrix or installation certification. |
+
+## Production test checkpoint 2026-10-03
+
+| ID | Severity | State | Evidence / closing requirement |
+|---|---|---|---|
+| LIVE-AUTH-RESOURCE | Critical | VERIFIED | Scoped repair deployed b7928fe4: private Free SQLite Durable Object bcrypt12, same passwords/security. Live owner/staff login200, password change200, old password/session401, new password200. Tail outcomes allok, CPU6–21ms for logins (mostly6–10); last7ms/200. Some bursts exceed nominal10ms, so no universal capacity/no-future1102 guarantee. No paid subscription. See docs/auth-cpu-hotfix-2026-10-03.md. |
+| LIVE-PLATFORM-MATRIX | High | IN_PROGRESS | After auth repair, actual live Web/Windows different-company online and offline/reconnect accepted both invoices once,pending0. Same-company two-cashier offline still200/409,pending1 retained onreload. Androiddebug WebView login200 after removing a diagnostic-only CORS header; full publishedAPK financial journey remains untested. Published Web2.6.11/release2.6.12/candidate2.6.13 differ. No full live release certification. |
+
+## اختبار UI حقيقي لتعدد الشركات والكاشيرين — 2026-10-03
+
+المرجع: docs/multi-company-live-ui-audit-2026-10-03.md. هذه النتائج تتقدم على أي تعميم تاريخي بأن تعدد الكاشيرين مكتمل؛ نجاح منع stale write لا يعني نجاح رفع العمليتين.
+
+| ID | Severity | State | الدليل ومتطلب الإغلاق |
+|---|---|---|---|
+| SYNC-MULTI-DEVICE | Critical | OPEN | Web/Electron فعليان: حسابان بنفس الفرع أو نفس الحساب على جهازين، متصلين أو بعد offline، يتركان200 مقابل409/pending1. يلزم تسوية مصدرين ماليين مستقلين دون فقد أو جمع خاطئ للمخزون/الأرصدة؛ اختبار إعادة فتح وتجربة رفض المخزون غير الكافي. لا تتجاوز causal preconditions. |
+| SYNC-BRANCH-CONFLICT | High | OPEN | فرعان مستقلان للشركة نفسها تعارضا بسبب domain heads عامة. يلزم نطاق تعارض يطابق استقلال بيانات الفرع مع تغطية المناقلات والrestore والصلاحيات. |
+| INVOICE-NUMBERING | High | OPEN | عدة فواتير مقبولة بIDs مختلفة لكنها رقم1 داخل الفرع نفسه. مصدر الترقيم settings.nextInvoiceNumber محلي. يلزم سياسة رقم أعمال موحد/آمن offline دون تغيير سجل أو رقم مطبوع بصمت. |
+| MULTI-DEVICE-ANDROID | High | OPEN | لا جهاز adb متصل، ولم تختبر المصفوفة على Android أو APK المنشور. لا تستنتج native runtime من Chrome أو build. |
+
+لم يُعدّل منطق التطبيق بهذه المهمة، ولم يُنشر الإصدار أو تتغير بيانات الإنتاج.
+
 ## مطابقة العمل المحلي للورديات — 2026-10-03
 
 هذه إضافة لنطاق الميزة الجديدة؛ حالات الجدول الأساسي أدناه تبقى أدلة تاريخية بنطاقها، ولا تثبت اكتمال الورديات. المرجع الحالي للملفات غير المحفوظة وتصنيفها هو `AI_HANDOFF_CURRENT.md`.

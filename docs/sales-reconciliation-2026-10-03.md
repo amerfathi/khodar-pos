@@ -26,6 +26,10 @@ Artifacts are ignored under `scratch/artifacts/{multi-company,live-multi-company
 
 ## Publication and limits
 
+Final publication checkpoint2026-10-04: source bb27b7403dec2565ad7a4a1b12c7edab0a8c9b78; quality run37153236218 passed233 integration cases and security gates; production run37153318752 succeeded. Release https://github.com/amerfathi/khodar-pos/releases/tag/v2.6.13; Web https://421b2337.khodar-pos.pages.dev promoted to the production domain. Both public latest endpoints advertise2.6.13. Windows manifest signature and binary hash/size verified. Android certificate matches2.6.12.
+
+Additional production-domain tests: different-branch Web/Electron and same-account Web/extracted published Windows binary accepted each offline invoice once,pending0. Renderer reload verified the latest server cursor and stock independently from source records, without duplicated effects. The packaged Windows journey passed after changing the harness reload wait from network-idle to DOM readiness plus explicit durable assertions; the earlier generic timeout remains a single unlocalized automation observation, not a proven app defect. Installed Windows was untouched. Final signed Android APK UI and physical printing remain unverified; the Android live journey used the debug build.
+
 The final release/build/deployment references will be appended after verification. Production API packaging derives fromc10f4e5 plus the deployed authentication fix and this rebase route; candidate timezone/cash-shift database migrations are not deployed implicitly. Existing installed clients need the new client bundle for automatic reconciliation.
 
 Displayed sequential invoice numbers still repeat across offline devices; internal source/invoice IDs remain distinct. Safe invoice series/number allocation remains OPEN. The first writer can remain temporarily behind a later writer's inbound view until its next refresh; queue0 means outbound acknowledgement, not that every device has the newest inbound view. No1000-user capacity or full Windows-installer/physical-printer certification is claimed.

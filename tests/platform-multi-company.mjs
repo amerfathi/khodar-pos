@@ -179,12 +179,16 @@ async function commitSale(c) {
   throw Error(`Sale not durably saved (${c.platform}/${c.username}): ${(await c.page.evaluate(() => document.body.innerText)).slice(-800)}`);
 }
 async function scenario(name, identities, offline) {
+  const checkpoint = step => console.log(JSON.stringify({ scenario: name, step }));
+  checkpoint('login');
   const clients = [];
   for (const [company, username, platform, port] of identities) clients.push(await client(company, username, platform, port));
   const before = {};
   for (const company of new Set(clients.map(c => c.company))) before[company] = (await cloud(company)).events.filter(e => e.entityType === 'invoice').length;
+  checkpoint('prepare-sale');
   await Promise.all(clients.map((c, i) => prepareSale(c, `${name}-${runId}-${i}`)));
   if (offline) await Promise.all(clients.map(c => c.page.setOfflineMode(true)));
+  checkpoint('commit-sale');
   if (name.endsWith('sequential')) {
     for (const c of clients) {
       await commitSale(c);
@@ -202,8 +206,29 @@ async function scenario(name, identities, offline) {
     await delay(400);
   }
   const observations = [];
+  checkpoint('verify-server-and-restart');
   for (let i = 0; i < clients.length; i++) {
-    const c = clients[i], row = await durable(c.page), snapshot = await cloud(c.company);
+    const c = clients[i], snapshot = await cloud(c.company);
+    let row = await durable(c.page), restartVerified = false;
+    if (process.env.BRAKA_VERIFY_RESTART === 'true' && !row.outbox.length) {
+      checkpoint(`reload-${c.platform}`);
+      await c.page.reload({ waitUntil: 'domcontentloaded' });
+      for (let attempt = 0; attempt < 100; attempt++) {
+        row = await durable(c.page);
+        if (row && row.cursor >= snapshot.nextCursor && !row.outbox.length) break;
+        await delay(200);
+      }
+      assert.ok(row?.cursor >= snapshot.nextCursor, 'Restart did not refresh the accepted server prefix');
+      for (const product of row.state.khodar_pos_products_v3) {
+        const source = snapshot.events.find(event => event.entityType === 'product' && event.action === 'create' && event.entityId === product.id);
+        assert.ok(source, 'Fixture product source absent');
+        const weight = snapshot.events.filter(event => event.entityType === 'invoice' && event.action === 'create')
+          .flatMap(event => event.payload.items).filter(item => item.productId === product.id)
+          .reduce((sum, item) => sum + Number(item.netWeight || 0), 0);
+        assert.equal(product.currentStockKg, source.payload.currentStockKg - weight, 'Restart duplicated or lost sale stock effects');
+      }
+      restartVerified = true;
+    }
     const accepted = snapshot.events.filter(e => e.entityType === 'invoice' && e.payload?.notes === `${name}-${runId}-${i}`);
     const pending = row.outbox.filter(e => e.entityType === 'invoice' && e.payload?.notes === `${name}-${runId}-${i}`);
     const invoice = row.state.khodar_pos_invoices_v3.find(invoice => invoice.notes === `${name}-${runId}-${i}`);
@@ -220,12 +245,13 @@ async function scenario(name, identities, offline) {
       assert.equal(pendingSurvivesReload, true, 'Conflicted financial record lost on renderer restart');
       await c.page.waitForFunction(() => !document.body.innerText.includes('جاري تهيئة المنظومة'), { timeout: 20000 });
     }
+    checkpoint(`screenshot-${c.platform}`);
     await c.page.screenshot({ path: join(artifacts, `${name}-${i}.png`), fullPage: true });
     observations.push({ company: c.company, user: c.username, platform: c.platform,
       total: invoice.finalTotal ?? invoice.total, invoiceNumber: invoice.number ?? invoice.invoiceNumber,
       invoiceId: invoice.id,
       accepted: accepted.length, pending: pending.length, syncResponses: c.responses,
-      pendingSurvivesReload, errors: c.errors, localStock: row.state.khodar_pos_products_v3.map(p => ({ id: p.id, stock: p.currentStockKg })) });
+      pendingSurvivesReload, restartVerified, errors: c.errors, localStock: row.state.khodar_pos_products_v3.map(p => ({ id: p.id, stock: p.currentStockKg })) });
   }
   const result = { name, offline, observations, completelySynced: observations.every(o => o.accepted === 1 && o.pending === 0) };
   results.push(result); console.log(JSON.stringify(result));
