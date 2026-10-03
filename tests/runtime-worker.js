@@ -1,4 +1,5 @@
 // Test-only router: bundles the real Pages handlers and middleware into workerd.
+export { PasswordCrypto } from '../workers/password-crypto/index.js';
 import * as login from '../functions/api/tenants/lookup.js';
 import * as users from '../functions/api/users/index.js';
 import * as tenants from '../functions/api/tenants/index.js';

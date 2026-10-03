@@ -57,7 +57,7 @@ export async function changeOwnerCredentials(auth, env, body) {
       "SELECT id,username,password_hash,role,status FROM tenants WHERE id=? AND role='super_admin' LIMIT 1"
     ).bind(auth.principal.id).first();
     if (!owner || owner.status !== 'active') return json({ success: false, error: 'Platform owner account is unavailable' }, 403);
-    if (!(await verifyPassword(currentPassword, owner.password_hash)).valid)
+    if (!(await verifyPassword(currentPassword, owner.password_hash, env)).valid)
       return json({ success: false, error: 'Invalid current password' }, 403);
     if (newEmail && newEmail !== owner.username.toLowerCase()) {
       const duplicate = await env.DB.prepare('SELECT id FROM tenants WHERE LOWER(username)=? AND id<>? UNION SELECT id FROM users WHERE LOWER(username)=? LIMIT 1')
@@ -69,7 +69,7 @@ export async function changeOwnerCredentials(auth, env, body) {
     const assignments = [];
     const values = [];
     if (newEmail && newEmail !== owner.username.toLowerCase()) { assignments.push('username=?'); values.push(newEmail); fields.push('email'); }
-    if (newPassword) { assignments.push('password_hash=?'); values.push(await hashPassword(newPassword)); fields.push('password'); }
+    if (newPassword) { assignments.push('password_hash=?'); values.push(await hashPassword(newPassword, env)); fields.push('password'); }
     if (!fields.length) return badRequest('No credential change was requested');
     assignments.push("auth_version=COALESCE(auth_version,0)+1", "updated_at=datetime('now')");
     values.push(owner.id);

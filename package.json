@@ -13,7 +13,7 @@
     "release:sign-windows": "node scripts/sign-windows-release.cjs",
     "legacy:prepare-reset": "node scripts/prepare-legacy-reset.cjs",
     "d1:prepare-clean-state": "node scripts/prepare-precommercial-cleanup.cjs",
-    "test:security": "node tests/security_regression.cjs && node --test tests/release-version.test.mjs tests/cash-feature-gate.test.mjs",
+    "test:security": "node tests/security_regression.cjs && node --test tests/release-version.test.mjs tests/cash-feature-gate.test.mjs tests/password-crypto.test.mjs",
     "test:browser-atomic": "node tests/browser-atomic.test.mjs",
     "test:browser-cache-recovery": "node tests/browser-cache-recovery.test.mjs",
     "test:browser-crash": "node tests/browser-atomic.test.mjs --crash",

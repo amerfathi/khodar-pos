@@ -68,6 +68,7 @@ before(async () => {
   const grantPrivateJwk = await crypto.subtle.exportKey('jwk', grantKeys.privateKey);
   grantPublicJwk = await crypto.subtle.exportKey('jwk', grantKeys.publicKey);
   mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: 'test', modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2024-09-01',
+    durableObjects: { PASSWORD_CRYPTO: { className: 'PasswordCrypto', useSQLite: true } },
     d1Databases: ['DB', 'BOOTSTRAP', 'LEGACY'], bindings: { AUTH_SECRET: crypto.randomUUID() + crypto.randomUUID(),
       CASH_SHIFTS_ENABLED: 'true', OFFLINE_GRANT_PRIVATE_JWK: JSON.stringify(grantPrivateJwk) } }] }));
   db = await mf.getD1Database('DB');

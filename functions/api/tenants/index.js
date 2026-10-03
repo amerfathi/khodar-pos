@@ -127,7 +127,7 @@ export async function onRequestPost(context) {
        (id, store_code, company_name, username, password_hash, role, status, expires_at, allowed_branches, phone, notes, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM tenants WHERE id = ?), ?), ?)`
     ).bind(
-      id, storeCode, companyName, username, await hashPassword(password), role, status, expiresAt, allowedBranches, phone, notes, id, now, now
+      id, storeCode, companyName, username, await hashPassword(password, env), role, status, expiresAt, allowedBranches, phone, notes, id, now, now
     ), env.DB.prepare(`INSERT INTO branches
       (id, tenant_id, name, code, phone, address, manager_name, is_main, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -210,7 +210,7 @@ export async function onRequestPatch(context) {
     }
     if (body.password !== undefined) {
       updates.push("password_hash = ?");
-      bindings.push(await hashPassword(body.password));
+      bindings.push(await hashPassword(body.password, env));
       updates.push("auth_version = COALESCE(auth_version, 0) + 1");
     }
     if (body.status !== undefined) {

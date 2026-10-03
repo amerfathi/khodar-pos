@@ -11,7 +11,7 @@ export async function onRequestPost({ request, env }) {
     const row = await env.DB.prepare("SELECT * FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL AND datetime(expires_at)>datetime('now')").bind(tokenHash).first();
     if (!row) return badRequest('Invalid or expired reset token');
     if (!['tenant','user'].includes(row.principal_type)) return badRequest('Invalid reset principal');
-    const hashed = await hashPassword(newPassword);
+    const hashed = await hashPassword(newPassword, env);
     const accountUpdate = row.principal_type === 'tenant'
       ? env.DB.prepare(`UPDATE tenants SET password_hash=?,auth_version=COALESCE(auth_version,0)+1 WHERE id=? AND id=? AND EXISTS
         (SELECT 1 FROM password_reset_tokens WHERE token_hash=? AND principal_type='tenant' AND used_at IS NULL AND datetime(expires_at)>datetime('now'))`)

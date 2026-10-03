@@ -25,7 +25,7 @@ export async function onRequestPost({ request, env }) {
 
     let principal = null;
     if (tenant.username.toLowerCase() === user) {
-      const result = await verifyPassword(password, tenant.password_hash);
+      const result = await verifyPassword(password, tenant.password_hash, env);
       if (result.valid) {
         const credentialVersion = Number(tenant.auth_version || 0) + (result.legacy ? 1 : 0);
         principal = { id: tenant.id, tenantId: tenant.id, type: 'tenant', role: tenant.role, credentialVersion };
@@ -34,7 +34,7 @@ export async function onRequestPost({ request, env }) {
     if (!principal) {
       const staff = await env.DB.prepare('SELECT * FROM users WHERE tenant_id = ? AND LOWER(username) = ? LIMIT 1').bind(tenant.id, user).first();
       if (staff?.status === 'active') {
-        const result = await verifyPassword(password, staff.password_hash);
+        const result = await verifyPassword(password, staff.password_hash, env);
         if (result.valid) {
           const credentialVersion = Number(staff.auth_version || 0) + (result.legacy ? 1 : 0);
           principal = { id: staff.id, tenantId: tenant.id, type: 'user', role: staff.role, credentialVersion, staff };

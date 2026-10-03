@@ -60,7 +60,7 @@ export async function onRequestPost({ request, env }) {
     validate(user);
     if (!await validateBranches(env, auth.principal.tenantId, user.branchIds)) return badRequest('Invalid branch');
     const branch = user.branchIds[0];
-    const passwordHash = await hashPassword(user.password);
+    const passwordHash = await hashPassword(user.password, env);
     const id = user.id || crypto.randomUUID();
     if (await env.DB.prepare('SELECT id FROM users WHERE id = ? OR (tenant_id = ? AND LOWER(username) = ?)').bind(id, auth.principal.tenantId, user.username.trim().toLowerCase()).first()) return json({ success: false, error: 'User already exists' }, 409);
     await env.DB.prepare('INSERT INTO users (id, tenant_id, branch_id, branch_ids_json, name, username, password_hash, role, status, phone, permissions_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
@@ -80,7 +80,7 @@ export async function onRequestPatch({ request, env }) {
       branchIds: body.branchIds ?? (body.branchId !== undefined ? (body.branchId === 'all' ? [] : [body.branchId]) : serialize(old).branchIds) };
     validate(user);
     if (!await validateBranches(env, auth.principal.tenantId, user.branchIds)) return badRequest('Invalid branch');
-    const passwordHash = body.password === undefined ? old.password_hash : await hashPassword(body.password);
+    const passwordHash = body.password === undefined ? old.password_hash : await hashPassword(body.password, env);
     await env.DB.prepare("UPDATE users SET name = ?, username = ?, password_hash = ?, role = ?, status = ?, branch_id = ?, branch_ids_json = ?, phone = ?, permissions_json = ?, auth_version = auth_version + 1, updated_at = datetime('now') WHERE id = ? AND tenant_id = ?")
       .bind(user.name.trim(), user.username.trim().toLowerCase(), passwordHash, user.role, user.status, user.branchIds[0], JSON.stringify(user.branchIds), String(user.phone).slice(0,40), JSON.stringify(user.permissions), body.id, auth.principal.tenantId).run();
     return json({ success: true, user: serialize(await env.DB.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(body.id, auth.principal.tenantId).first()) });
