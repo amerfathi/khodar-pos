@@ -75,6 +75,20 @@ test('unsigned caller-provided claims cannot authorize an offline drawer opening
   await first.close();
 });
 
+test('a valid grant for another cashier cannot close or move this cashier drawer',async()=>{
+  const disk=durable(),storage=cache(),first=await storeFor('cashier-1',disk,storage);
+  await journal.commitDrawerShiftDurable(first,disk,locks,'open',open('shift-owner','cashier-1','2026-10-01T18:00:00Z'),await signedGrant('cashier-1'));
+  const before=structuredClone([...disk.rows]);
+  const other=await signedGrant('cashier-2');
+  await assert.rejects(journal.commitDrawerShiftDurable(first,disk,locks,'close',close('shift-owner','cashier-1','2026-10-01T19:00:00Z'),other),/محاسب|تصريح|مطابق/);
+  assert.deepEqual([...disk.rows],before);
+  await assert.rejects(journal.commitDrawerShiftDurable(first,disk,locks,'cash',{
+    shiftId:'shift-owner',actorId:'cashier-1',deviceId:'device-1',id:'unauthorized-cash',amount:5,at:'2026-10-01T18:05:00Z'
+  },other),/محاسب|تصريح|مطابق/);
+  assert.deepEqual([...disk.rows],before);
+  await first.close();
+});
+
 test('altering signed cashier or branch claims invalidates the offline grant',async()=>{
   const claims=grant('cashier-1');
   const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},keys.privateKey,

@@ -8,6 +8,73 @@ const part = value => encodeURIComponent(value);
 const keyFor = ({ tenantId, branchId, drawerId, deviceId }) =>
   `braka:${part(tenantId)}:${part(branchId)}:${part(drawerId)}:${part(deviceId)}:cash_drawer_journal_v1`;
 
+const cashTypes = new Set(['invoice','customer_payment','expense','purchase','supplier_payment',
+  'worker_transaction','partner_drawing','profit_distribution','sales_return','purchase_return']);
+
+// Opt-in integration for actual app actions that already append the cash event.
+// Never append a second event here. Verify the resulting projection instead.
+// Login/UI and server writer assignment remain required before enabling this.
+export async function commitDrawerFinancialAction(store, durable, locks, context, action) {
+  if (!store?.durable || store.durable !== durable || !durable?.commitBatch || !locks?.request)
+    throw new Error('الحفظ الدائم المشترك أو قفل الدرج غير متاح');
+  const owned = store.read(SHIFT_KEY) ?? [];
+  const shift = owned.find(row => row.id === context?.shiftId);
+  if (!shift || shift.actorId !== store.user?.id || shift.tenantId !== store.user?.tenantId ||
+      shift.offlineDeviceId !== context.deviceId || shift.status !== 'open')
+    throw new Error('الدرج أو المحاسب أو الجهاز لا يطابق تصريح الحركة');
+  const scope = {tenantId:shift.tenantId,branchId:shift.branchId,drawerId:shift.drawerId,deviceId:context.deviceId};
+  assertVerifiedOfflineGrant(context.verifiedClaims, {...scope,cashierId:store.user.id},new Date().toISOString());
+  const key = keyFor(scope);
+  return locks.request(key,{ifAvailable:true},async lock => {
+    if (!lock) throw new Error('الدرج قيد الاستخدام على نافذة أخرى');
+    const saved = await durable.read(key);
+    if (!saved || !Number.isSafeInteger(saved.revision) || !Array.isArray(saved.shifts) ||
+        !Array.isArray(saved.sources) || Object.entries(scope).some(([name,value])=>saved[name]!==value) ||
+        JSON.stringify(saved.shifts.find(row=>row.id===shift.id))!==JSON.stringify(shift))
+      throw new Error('وردية المحاسب تختلف عن سجل الدرج؛ لم تُحفظ العملية');
+    const wrapper = {commit:async(userKey,snapshot,expectedRevision)=>{
+      const known = new Set(store.value.outbox.map(event=>event.id));
+      const created = snapshot.outbox.filter(event=>!known.has(event.id));
+      const cashSources = [];
+      for (const event of created.filter(event=>cashTypes.has(event.entityType))) {
+        if (event.action !== 'create') throw new Error('عكس الحركة المالية يحتاج تسوية درج مدعومة؛ لم تُحفظ العملية');
+        const amount = cashMovementFromRecord(event.entityType,event.payload);
+        if (amount !== 0) cashSources.push({event,amount});
+      }
+      if (cashSources.length > 1) throw new Error('مصادر نقدية متعددة غير مدعومة في معاملة الدرج');
+      const cashEvents = created.filter(event=>event.entityType==='cash_shift');
+      let expected = owned;
+      if (cashSources.length) {
+        const {event,amount} = cashSources[0];
+        const nextShift = snapshot.state[SHIFT_KEY]?.find(row=>row.id===shift.id);
+        const entry = nextShift?.events?.at(-1);
+        if (event.tenantId!==scope.tenantId || event.branchId!==scope.branchId ||
+            event.payload.cashShiftId!==shift.id || cashEvents.length!==1 ||
+            cashEvents[0].entityId!==shift.id || cashEvents[0].action!=='update' ||
+            cashEvents[0].groupId!==event.groupId || !entry ||
+            entry.id!==`cash:${event.payload.clientTransactionId||event.payload.id}` || entry.amount!==amount)
+          throw new Error('مصدر الحركة لا يطابق حركة الدرج؛ لم تُحفظ العملية');
+        expected = postCashEvent(owned,{shiftId:shift.id,id:entry.id,actorId:store.user.id,
+          deviceId:context.deviceId,amount,at:entry.at});
+        if (JSON.stringify(cashEvents[0].payload)!==JSON.stringify(expected.find(row=>row.id===shift.id)))
+          throw new Error('مصدر الوردية لا يطابق حركة الدرج');
+      } else if (cashEvents.length) throw new Error('حركة درج دون مصدر نقدي');
+      if (JSON.stringify(snapshot.state[SHIFT_KEY])!==JSON.stringify(expected))
+        throw new Error('سجل الورديات لا يطابق مصادر الحركة');
+      const proofs = [];
+      for (const event of created) proofs.push(await signOfflineCashEvent(context.verifiedClaims,event));
+      const shifts = saved.shifts.map(row=>row.id===shift.id ? expected.find(item=>item.id===shift.id) : row);
+      const nextJournal = {...saved,revision:saved.revision+1,shifts,sources:[...saved.sources,...proofs]};
+      const [committed] = await durable.commitBatch([
+        {key:userKey,snapshot,expectedRevision},
+        {key,snapshot:nextJournal,expectedRevision:saved.revision}
+      ]);
+      return committed;
+    }};
+    return store.transactDurable(action,wrapper);
+  });
+}
+
 // Staged core only. Callers must cryptographically verify the server grant;
 // this module is not yet wired to login, sales, sync, or the UI.
 export async function commitDrawerShiftDurable(store, durable, locks, operation, input, verifiedClaims, options = {}) {
@@ -26,9 +93,8 @@ export async function commitDrawerShiftDurable(store, durable, locks, operation,
     throw new Error('هوية الدرج والجهاز غير صالحة');
   if (scope.tenantId !== store.user.tenantId || (operation !== 'open' && input.deviceId !== scope.deviceId))
     throw new Error('الدرج أو الجهاز لا يخص هذا السجل');
-  if (operation === 'open')
-    assertVerifiedOfflineGrant(verifiedClaims, { tenantId:scope.tenantId, cashierId:store.user.id,
-      deviceId:scope.deviceId, branchId:scope.branchId }, input.at);
+  assertVerifiedOfflineGrant(verifiedClaims, { tenantId:scope.tenantId, cashierId:store.user.id,
+    deviceId:scope.deviceId, branchId:scope.branchId }, input.at);
   const key = keyFor(scope);
   return locks.request(key, { ifAvailable:true }, async lock => {
     if (!lock) throw new Error('الدرج قيد الاستخدام على نافذة أخرى');

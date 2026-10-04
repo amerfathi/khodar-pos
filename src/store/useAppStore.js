@@ -45,6 +45,7 @@ import { assignedBranchIds, canAccessBranch, visibleBranches, visibleBranchRecor
 import { cashMovementFromRecord } from '../services/cashMovement.js';
 import { openShift as openShiftEngine, postCashEvent, closeShift as closeShiftEngine } from '../services/cashShiftEngine.js';
 import { getApiBaseUrl } from '../config/appVersion';
+import { commitDrawerFinancialAction, commitDrawerShiftDurable } from '../services/cashDrawerJournal.js';
 
 const STORAGE_KEYS = {
   PRODUCTS: 'khodar_pos_products_v3',
@@ -323,7 +324,7 @@ export function useAppStore(options = {}) {
     trialRequests = local.read(STORAGE_KEYS.TRIAL_REQUESTS);
     refreshInboundRecords();
   };
-  const atomicAction = action => (...args) => {
+  const atomicAction = (action, withDrawer = false) => (...args) => {
     if (local.read(INBOUND_REVIEW_KEY)?.length && action.name !== 'changeActiveBranch')
       throw new Error('توجد سجلات مستلمة تحتاج مراجعة؛ لم يُعدّل السجل غير المكتمل');
     if (activeBranchId === 'all' && !new Set([
@@ -336,7 +337,26 @@ export function useAppStore(options = {}) {
         !Object.hasOwn(local.value.state,SYNC_HEADS_STATE_KEY))
       throw new Error('انتظر اكتمال مزامنة سياسة تعارض الأجهزة قبل تسجيل حركة جديدة');
     const invoke = () => { refreshBindings(); return action(...args); };
-    if (local.durable) return local.transactDurable(invoke)
+    const drawerTransition = options.cashDrawerContext && (action === openShift || action === closeShift);
+    const commitDrawerTransition = async () => {
+      refreshBindings();
+      const context = options.cashDrawerContext, input = args[0];
+      const opening = action === openShift;
+      const ownShift = opening ? null : cashShifts?.find(row=>row.id===input?.shiftId);
+      const branchId = requireWorkingBranch();
+      if (!branchId || input?.actorId !== currentUser?.id ||
+          context.shiftId !== (opening ? input?.id : input?.shiftId) ||
+          (opening ? input?.tenantId !== currentUser?.tenantId || input?.branchId !== branchId ||
+            input?.offlineDeviceId !== context.deviceId :
+            ownShift?.branchId !== branchId || input?.deviceId !== context.deviceId))
+        throw new Error('الدرج أو المحاسب أو الجهاز أو الفرع لا يطابق تصريح الوردية');
+      return commitDrawerShiftDurable(local,local.durable,globalThis.navigator?.locks,
+        opening ? 'open' : 'close',input,context.verifiedClaims,{signSources:true});
+    };
+    if (drawerTransition && !local.durable) throw new Error('الورديات تتطلب الحفظ الدائم المشترك');
+    if (local.durable) return (drawerTransition ? commitDrawerTransition() : withDrawer && options.cashDrawerContext
+      ? commitDrawerFinancialAction(local,local.durable,globalThis.navigator?.locks,options.cashDrawerContext,invoke)
+      : local.transactDurable(invoke))
       .catch(error => {
         setPersistence(previous => ({ ...previous, error: error.message }));
         throw error;
@@ -352,7 +372,8 @@ export function useAppStore(options = {}) {
     const commit = () => {
       if (local.read(INBOUND_REVIEW_KEY)?.length)
         throw new Error('توجد سجلات مستلمة تحتاج مراجعة؛ الأرصدة غير مكتملة، ولم تُسجّل حركة مالية جديدة');
-      return atomicAction(action)(...args);
+      if (options.cashDrawerContext && !local.durable) throw new Error('حركات الدرج تتطلب الحفظ الدائم المشترك');
+      return atomicAction(action,true)(...args);
     };
     if (!currentUser || !getSessionToken() || !cloudflareSync.isOnline || !persistence.ready) return commit();
     return cloudflareSync.prepareFinancialMutation(currentUser.tenantId, handleInboundSyncEvents)
@@ -366,11 +387,14 @@ export function useAppStore(options = {}) {
   // that shift and append it to the shift journal in the same store transaction.
   const attributeCashToOpenShift = (record, type) => {
     const shifts = Array.isArray(cashShifts) ? cashShifts : [];
-    const shift = shifts.find(row => row.branchId === record.branchId && row.status === 'open');
-    if (!shift) return record;
     let delta;
     try { delta = cashMovementFromRecord(type, record); } catch { return record; }
     if (!Number.isFinite(delta) || delta === 0) return record;
+    const candidates = shifts.filter(row => row.tenantId === currentUser?.tenantId &&
+      row.branchId === record.branchId && row.actorId === currentUser?.id && row.status === 'open');
+    if (candidates.length > 1) throw new Error('يوجد أكثر من درج مفتوح لهذا المحاسب؛ يلزم تحديد الدرج قبل تسجيل الحركة');
+    const shift = candidates[0];
+    if (!shift) return record;
     const nextShifts = postCashEvent(shifts, {
       shiftId: shift.id, id: `cash:${record.clientTransactionId || record.id}`,
       actorId: currentUser?.id, deviceId: shift.offlineDeviceId, amount: delta, at: new Date().toISOString()
