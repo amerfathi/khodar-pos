@@ -10,6 +10,8 @@ export function assertOfflineShiftGrant(claims, context, at = new Date().toISOSt
     claims.deviceId !== context.deviceId || !Array.isArray(claims.branchIds) ||
     !claims.branchIds.includes(context.branchId))
     throw new Error('تصريح العمل دون اتصال لا يخص هذا المحاسب أو الجهاز أو الفرع');
+  if (context.drawerId !== undefined && (!Array.isArray(claims.drawerIds) || !claims.drawerIds.includes(context.drawerId)))
+    throw new Error('تصريح العمل دون اتصال لا يخول هذا الجهاز للعمل على الدرج');
   const verifiedAt = Date.parse(claims.onlineVerifiedAt);
   const now = Date.parse(at);
   if (!Number.isFinite(verifiedAt) || !Number.isFinite(now) || verifiedAt > now)

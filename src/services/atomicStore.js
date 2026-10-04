@@ -881,8 +881,8 @@ export class AtomicStore {
   acknowledge(ids) {
     this.transact(() => { this.draft.outbox = this.draft.outbox.filter(event => !ids.has(event.id)); });
   }
-  acknowledgeDurable(ids) {
-    return this.transactDurable(() => { this.draft.outbox = this.draft.outbox.filter(event => !ids.has(event.id)); });
+  acknowledgeDurable(ids, durable = this.durable) {
+    return this.transactDurable(() => { this.draft.outbox = this.draft.outbox.filter(event => !ids.has(event.id)); }, durable);
   }
   applyReceive(events, cursor, apply, serverHeads, partialVisibility = false) {
     if (!Number.isSafeInteger(cursor) || cursor < this.draft.cursor) throw new Error('Invalid sync cursor');

@@ -65,16 +65,60 @@ for (const scenario of ['own', 'other-first', 'ambiguous']) test(`cash expense s
   }
 });
 
+test('actual login enrolls its authenticated cashier without storing credentials in the grant',async()=>{
+  globalThis.localStorage=storage();globalThis.sessionStorage=storage();
+  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{onLine:false,locks}});
+  let reloads=0;
+  Object.defineProperty(globalThis,'window',{configurable:true,value:{addEventListener(){},removeEventListener(){},location:{origin:'https://test.invalid',reload(){reloads++;}}}});
+  Object.defineProperty(globalThis,'document',{configurable:true,value:{addEventListener(){},removeEventListener(){},visibilityState:'hidden'}});
+  const bundle=await build({stdin:{contents:"export {useAppStore} from './src/store/useAppStore.js';export {OfflineGrantStore,memoryBackend} from './src/services/offlineGrantStore.js';export {ensureOfflineDeviceIdentity} from './src/services/offlineDeviceIdentity.js';export {unlockOffline} from './src/services/offlineGrantEnrollment.js';",resolveDir:process.cwd()},bundle:true,write:false,define:{'import.meta.env':'{}'},format:'cjs',platform:'node',packages:'external'});
+  const loaded={exports:{}};new Function('require','module','exports',bundle.outputFiles[0].text)(createRequire(import.meta.url),loaded,loaded.exports);
+  const {useAppStore,OfflineGrantStore,memoryBackend,ensureOfflineDeviceIdentity,unlockOffline}=loaded.exports;
+  const grantStore=new OfflineGrantStore(memoryBackend());
+  const issuer=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const pin=await crypto.subtle.exportKey('jwk',issuer.publicKey);
+  const user={id:'login-cashier',tenantId:'A',role:'cashier',branchId:'branch-main',branchIds:['branch-main']};
+  const originalFetch=globalThis.fetch;let unavailable=false,registrations=0,app,root;
+  globalThis.fetch=async(url,init)=>{
+    if(String(url).endsWith('/api/tenants/lookup'))return Response.json({success:true,user,userType:'staff',tenant:{id:'A',storeCode:'LOCALTEST',timeZone:'Asia/Riyadh'},branches:[{id:'branch-main',tenantId:'A',name:'Main',isMain:true}],session:{token:'fixture-session',expiresAt:new Date(Date.now()+60000).toISOString()}});
+    assert.equal(new Headers(init.headers).get('Authorization'),'Bearer fixture-session');
+    if(String(url).endsWith('/api/cash/devices')){registrations++;return Response.json({success:true});}
+    if(String(url).endsWith('/api/cash/grants')){
+      if(unavailable)return Response.json({success:false,error:'Fixture grant unavailable'},{status:503});
+      const body=JSON.parse(init.body);
+      return Response.json({success:true,grant:await issueSignedOfflineGrant(await crypto.subtle.exportKey('jwk',issuer.privateKey),{tenantId:'A',cashierId:user.id,deviceId:body.deviceId,branchIds:user.branchIds,onlineVerifiedAt:new Date().toISOString(),eventPublicJwk:body.eventPublicJwk})});
+    }
+    throw Error('Unexpected fixture request');
+  };
+  function Harness(){app=useAppStore({cashGrantStore:grantStore,offlineGrantPublicJwk:pin});return null;}
+  try{
+    await act(async()=>{root=TestRenderer.create(React.createElement(Harness));});
+    let result;await act(async()=>{result=await app.login('cashier','fixture-password','LOCALTEST');});
+    assert.equal(result.success,true);assert.equal(result.offlineGrantStatus,'enrolled');
+    assert.equal(registrations,1);assert.equal(reloads,1);
+    const device=await ensureOfflineDeviceIdentity(grantStore);
+    const saved=await grantStore.loadRecord({tenantId:'A',cashierId:user.id,deviceId:device.deviceId});
+    assert.equal(saved.signingKeyVault.version,1);
+    assert.equal(JSON.stringify(saved).includes('fixture-password'),false);
+    assert.equal(JSON.stringify(saved).includes('fixture-session'),false);
+    await unlockOffline({store:grantStore,user,password:'fixture-password',branchId:'branch-main',pinnedPublicJwk:pin});
+    unavailable=true;
+    await act(async()=>{result=await app.login('cashier','fixture-password','LOCALTEST');});
+    assert.equal(result.success,true);assert.equal(result.offlineGrantStatus,'unavailable');
+    assert.equal(reloads,2);
+  }finally{globalThis.fetch=originalFetch;await act(async()=>{root?.unmount();});delete globalThis.window;delete globalThis.document;}
+});
+
 test('actual hook opens, sells, closes and hands over a signed local drawer atomically', async () => {
   globalThis.localStorage = storage();
   globalThis.sessionStorage = storage();
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false, locks } });
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, location: { origin: 'https://test.invalid' } } });
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, visibilityState: 'hidden' } });
-  const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';export {enrollOfflineGrant,unlockOfflineGrant} from './src/services/offlineUnlock.js';export {verifyOfflineCashEvent} from './src/services/verifiedOfflineGrant.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: { 'import.meta.env': '{}' }, format: 'cjs', platform: 'node', packages: 'external' });
+  const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';export {enrollOfflineGrant} from './src/services/offlineUnlock.js';export {verifyOfflineCashEvent} from './src/services/verifiedOfflineGrant.js';export {OfflineGrantStore,memoryBackend} from './src/services/offlineGrantStore.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: { 'import.meta.env': '{}' }, format: 'cjs', platform: 'node', packages: 'external' });
   const loaded = { exports: {} };
   new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), loaded, loaded.exports);
-  const { useAppStore, setSessionToken, setSessionUser, enrollOfflineGrant, unlockOfflineGrant, verifyOfflineCashEvent } = loaded.exports;
+  const { useAppStore, setSessionToken, setSessionUser, enrollOfflineGrant, verifyOfflineCashEvent, OfflineGrantStore, memoryBackend } = loaded.exports;
   const identity = { id: 'u', tenantId: 'A', role: 'cashier', branchId: 'branch-main', branchIds: ['branch-main'], sessionExpiresAt: new Date(Date.now() + 60000).toISOString() };
   const shift = openShift();
   const initial = seedAggregate(localStorage, identity, { cash_shifts_v1: [], expenses_v3: [], invoices_v3: [],
@@ -102,19 +146,23 @@ test('actual hook opens, sells, closes and hands over a signed local drawer atom
   const publicJwk = await crypto.subtle.exportKey('jwk', issuer.publicKey);
   const at = new Date().toISOString();
   const envelope = await issueSignedOfflineGrant(await crypto.subtle.exportKey('jwk', issuer.privateKey), {
-    tenantId: 'A', cashierId: 'u', deviceId: 'device-1', branchIds: ['branch-main'], onlineVerifiedAt: at,
+    tenantId: 'A', cashierId: 'u', deviceId: 'device-1', branchIds: ['branch-main'], drawerIds:['drawer-1'], onlineVerifiedAt: at,
     eventPublicJwk: await crypto.subtle.exportKey('jwk', eventKeys.publicKey)
   });
   const context = { tenantId: 'A', cashierId: 'u', deviceId: 'device-1', branchId: 'branch-main', password: 'fixture-only', pinnedPublicJwk: publicJwk, at };
   const enrolled = await enrollOfflineGrant({ ...context, envelope, eventPrivateJwk: await crypto.subtle.exportKey('jwk', eventKeys.privateKey) });
-  const handle = await unlockOfflineGrant(enrolled, context);
-  const cashDrawerContext = { shiftId: shift.id, deviceId: 'device-1', verifiedClaims: handle };
+  const grantStore=new OfflineGrantStore(memoryBackend());
+  const deviceIdentity={deviceId:'device-1',deviceProof:'a'.repeat(64)};
+  await grantStore.saveDeviceIdentity(deviceIdentity);
+  const grantScope={tenantId:'A',cashierId:'u',deviceId:'device-1'};
+  await grantStore.saveRecord(grantScope,enrolled);
   let app, root;
-  function Harness() { app = useAppStore({ durableRepository: disk, cashDrawerContext }); return null; }
+  function Harness() { app = useAppStore({ durableRepository: disk, cashGrantStore:grantStore, offlineGrantPublicJwk:publicJwk }); return null; }
   try {
     setSessionToken('test'); setSessionUser(identity);
     await act(async () => { root = TestRenderer.create(React.createElement(Harness)); await new Promise(resolve => setTimeout(resolve, 30)); });
     assert.equal(app.persistence.ready, true, app.persistence.error);
+    await act(async()=>{assert.deepEqual(await app.unlockCashDrawer('fixture-only',shift.id),{shiftId:shift.id,deviceId:'device-1'});});
     const opening = {id:shift.id,tenantId:'A',branchId:'branch-main',drawerId:'drawer-1',actorId:'u',offlineDeviceId:'device-1',openingCash:100,at:new Date().toISOString(),timeZone:'Asia/Riyadh'};
     const beforeOpen = structuredClone([...rows]);
     fail = true;
@@ -125,12 +173,18 @@ test('actual hook opens, sells, closes and hands over a signed local drawer atom
     await act(async () => { await app.openShift(opening); });
     assert.equal(rows.get(journalKey).sources.length, 1);
     const before = structuredClone([...rows]);
-    cashDrawerContext.deviceId = 'other-device';
-    await act(async () => { await assert.rejects(app.addExpense({ id: 'wrong-device', amount: 12 }), /الجهاز/); });
-    cashDrawerContext.deviceId = 'device-1';
-    cashDrawerContext.verifiedClaims = {};
-    await act(async () => { await assert.rejects(app.addExpense({ id: 'unsigned', amount: 12 }), /موثوق/); });
-    cashDrawerContext.verifiedClaims = handle;
+    await grantStore.saveDeviceIdentity({deviceId:'other-device',deviceProof:'b'.repeat(64)});
+    await act(async()=>{await assert.rejects(app.unlockCashDrawer('fixture-only',shift.id),/تحقق سابق/);});
+    await grantStore.saveDeviceIdentity(deviceIdentity);
+    await act(async()=>{await assert.rejects(app.unlockCashDrawer('wrong-password',shift.id),/كلمة المرور/);});
+    assert.throws(()=>app.addExpense({id:'locked-expense',amount:12}),/افتح تصريح/);
+    const expiredEnvelope=await issueSignedOfflineGrant(await crypto.subtle.exportKey('jwk',issuer.privateKey),{
+      ...envelope.claims,onlineVerifiedAt:new Date(Date.now()-25*60*60*1000).toISOString()
+    });
+    await grantStore.saveRecord(grantScope,{...enrolled,envelope:expiredEnvelope});
+    await act(async()=>{await assert.rejects(app.unlockCashDrawer('fixture-only',shift.id),/انتهى|صلاحية/);});
+    await grantStore.saveRecord(grantScope,enrolled);
+    await act(async()=>{await app.unlockCashDrawer('fixture-only',shift.id);});
     assert.deepEqual([...rows], before);
     fail = true;
     await act(async () => { await assert.rejects(app.addExpense({ id: 'failed-expense', title: 'Rent', amount: 12, paymentMethod: 'cash' }), /Injected paired failure/); });
@@ -194,16 +248,16 @@ test('actual hook opens, sells, closes and hands over a signed local drawer atom
     rows.set('braka:A:cashier-2:atomic_v1',secondInitial);
     const secondKeys = await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
     const secondEnvelope = await issueSignedOfflineGrant(await crypto.subtle.exportKey('jwk',issuer.privateKey),{
-      tenantId:'A',cashierId:'cashier-2',deviceId:'device-1',branchIds:['branch-main'],onlineVerifiedAt:at,
+      tenantId:'A',cashierId:'cashier-2',deviceId:'device-1',branchIds:['branch-main'],drawerIds:['drawer-1'],onlineVerifiedAt:at,
       eventPublicJwk:await crypto.subtle.exportKey('jwk',secondKeys.publicKey)
     });
     const secondContext = {...context,cashierId:'cashier-2'};
     const secondRecord = await enrollOfflineGrant({...secondContext,envelope:secondEnvelope,eventPrivateJwk:await crypto.subtle.exportKey('jwk',secondKeys.privateKey)});
-    cashDrawerContext.verifiedClaims = await unlockOfflineGrant(secondRecord,secondContext);
-    cashDrawerContext.shiftId = 'shift-2';
+    await grantStore.saveRecord({tenantId:'A',cashierId:'cashier-2',deviceId:'device-1'},secondRecord);
     setSessionUser(secondIdentity);
     await act(async () => { root=TestRenderer.create(React.createElement(Harness));await new Promise(resolve=>setTimeout(resolve,30)); });
     assert.equal(app.persistence.ready,true,app.persistence.error);
+    await act(async()=>{await app.unlockCashDrawer('fixture-only','shift-2');});
     await act(async () => { await app.openShift({...opening,id:'shift-2',actorId:'cashier-2',openingCash:115,at:new Date().toISOString()}); });
     assert.deepEqual(app.cashShifts.map(row=>row.id),['shift-2']);
     assert.deepEqual(rows.get(userKey),firstRecord);

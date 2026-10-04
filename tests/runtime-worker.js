@@ -24,12 +24,13 @@ import * as cashShifts from '../functions/api/cash/shifts.js';
 import * as closeCashShift from '../functions/api/cash/shifts/close.js';
 import * as cashDevices from '../functions/api/cash/devices.js';
 import * as cashGrants from '../functions/api/cash/grants.js';
+import * as cashReplay from '../functions/api/cash/replay.js';
 import { onRequest } from '../functions/api/_middleware.js';
 const routes = { '/api/auth/me': me, '/api/auth/reset': reset, '/api/auth/recovery-token': recovery, '/api/tenants/lookup': login, '/api/users': users, '/api/tenants': tenants,
   '/api/sync/push': push, '/api/sync/pull': pull, '/api/sync/rebase': rebase, '/api/sync/conflicts': conflicts, '/api/sync/resolutions':resolutions, '/api/sync/dependencies':dependencies, '/api/branches': branches, '/api/backup': backup,
   '/api/trial-requests': trials, '/api/releases': releases, '/api/auth/logout': logout, '/api/auth/password': password,
   '/api/auth/platform-owner': platformOwner, '/api/cash/drawers': cashDrawers, '/api/cash/shifts': cashShifts,
-  '/api/cash/shifts/close': closeCashShift, '/api/cash/devices': cashDevices, '/api/cash/grants': cashGrants };
+  '/api/cash/shifts/close': closeCashShift, '/api/cash/devices': cashDevices, '/api/cash/grants': cashGrants, '/api/cash/replay':cashReplay };
 export default {
   async fetch(request, env) {
     const handler = routes[new URL(request.url).pathname]?.['onRequest' + request.method[0] + request.method.slice(1).toLowerCase()];

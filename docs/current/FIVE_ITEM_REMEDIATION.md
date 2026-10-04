@@ -1,5 +1,17 @@
 # Five-item remediation checkpoint — 2026-10-04
 
+## Latest local progress: assigned drawer writer and signed source replay
+
+Final rerun supersedes pending statuses below: npm test exits0 with279 automated tests (5security,258integration,13review,3native), zero failures/skips. Seventeen inherited formula checks pass separately, not E2E. Lint/full typecheck/documentation checks pass; no credential pattern is found in canonical docs. This is a verified staged-code checkpoint, not five-item completion or a production release.
+
+This supersedes historical waiting states below, not the production gates. At HEAD099986b73f5d419f2471d29fe2bf94feb1cb1038 on main, uncommitted staged migrations0027/0028 add one device writer per physical drawer and immutable original-source evidence in the same D1 batch. Company owners alone assign an already registered active device; no reassignment API exists until audited lost-device recovery. Signed grants carry server-derived drawerIds, principal type and credential version. The original source actor is restored through an opaque verified internal handle, never through untrusted caller identity overrides.
+
+Local actual API/D1 coverage: original cashier A open/expense12/close88 then cashier B open; retry leaves one movement; altered signatures, foreign tenants, revoked devices and changed original credentials are denied; proof updates/deletes fail. Schema bootstrap parity passes. These are local fixtures, not live device certification.
+
+Local acknowledgement primitive retains signed audit sources, verifies exact accepted IDs, preserves them on lost response or failed storage, does not split groups at100, and re-reads under the drawer lock before CAS to preserve concurrent additions. Not wired into production sync yet; default App.jsx has no grant-store provisioning. Full offline login beyond expired session, UI, backups, restore, and unsigned legacy cash endpoint bypass closure remain prerequisites. Cash stays disabled and migrations are not applied remotely. Large-history review and full in-app Windows update remain open.
+
+Acknowledgement now pairs the current user's aggregate and the shared journal in one commitBatch. It clears only exact signed sources from that user's queue, retains another cashier's queue, and later clears already-accepted originals on that cashier's return without a network resend. Focused28 hook/journal/sync tests, lint, full typecheck and Web build pass; build retains a large-chunk warning. A subsequent full test run257/258 exposed a fixture clock-order failure in signed replay, diagnosed through an allowlisted time-validation reason. The fixture now places source time after both server grants; production time validation is unchanged. Final full rerun pending at this checkpoint. Usage read82% primary/69% weekly; no purchased/reset credits.
+
 Requested scope: cash-drawer closing, large-company conflict settlement, complex financial conflicts, reproducible server deployment from Git, and Windows update installation.
 
 Baseline: main at 84022ebb008b06c4802998485f165ae7a14e0261; published runtime 2.6.14. No new release is certified by this checkpoint.
@@ -48,6 +60,8 @@ Subsequent Windows evidence: user confirmed final install; actual NSIS wizard co
 
 Hosted follow-up: run37221158729 failed246/247 on a shared-fixture login rate bucket (429), not a passed gate. Fixture login now isolates default connection identity; production rate limiting is unchanged. Local integration rerun247/247 passes, and a new real API test proves a shared client still receives429 on attempt16 with Retry-After60. Next hosted run remains to be verified. IndexedDB file comparison found7 before/7 after with0 missing old files; this is not row-level financial validation.
 # متابعة محلية إضافية — 2026-10-04
+
+ربط أحدث محلي: login الفعلي يصدر ويحفظ تصريحًا مشفرًا فقط إذا زُوّد cashGrantStore صراحة؛ فشل الإصدار لا يفشل الدخول العادي ويعيد offlineGrantStatus=unavailable، وعرضه للمستخدم لم ينفذ بعد. unlockCashDrawer يتحقق كلمة المرور والهوية والفرع والجهاز ومدة24h ويُلغي السياق عند الفشل والخروج أو تبدل الهوية أثناء الانتظار. اختبار lifecycle صار يستخدم unlock الفعلي بدل حقن مقبض، ويثبت رفض الجهاز الآخر وكلمة المرور الخاطئة والتصريح المنتهي. 27 اختبارًا مركزًا وlint/typecheck نجحت؛ لا E2E أجهزة لهذه المتابعة. جلسة التطبيق ما زالت شرطًا، فلا تزعم login offline كامل بعد انتهاء session. App.jsx لم يفعّل هذا الخيار، وserver writer/replay/UI/backup ما زالت مفتوحة. CI37223609647 ناجح للمصدر099986b السابق، لا تعديل هذه المتابعة.
 
 الأحدث: رُبط الفتح والإقفال الفعليان بالحفظ المشترك والتوقيع opt-in، بمطابقة الحساب/الجهاز/الفرع/معرف الوردية. الاختبار الحقيقي للhook يبدأ بلا وردية ويثبت rollback الفتح والإقفال، ثم مصروف12 وبيع27 وإقفال رصيد115 بلا فرق وتسليم الدرج لحساب ثانٍ مع مصادر الأصل وعزل السجلات. مقارنة مرجع الدالة تمنع اختلاف أسماء bundler من تجاوز الربط. كذلك رُفض تصريح محاسب آخر عند cash/close، بعد اختبار فشل قبل الإصلاح. 10 اختبارات مركزة وlint/full typecheck نجحت. لا ربط login/UI/server writer/replay/backup بعد، ولا نشر/تفعيل؛ دليل repository الذاكرة ليس تحققًا native أو power-loss.
 

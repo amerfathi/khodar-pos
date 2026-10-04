@@ -8,6 +8,69 @@ const part = value => encodeURIComponent(value);
 const keyFor = ({ tenantId, branchId, drawerId, deviceId }) =>
   `braka:${part(tenantId)}:${part(branchId)}:${part(drawerId)}:${part(deviceId)}:cash_drawer_journal_v1`;
 
+// Staged transport boundary: send authenticates the current uploader/device.
+// Preserve every original proof; acknowledgements never migrate another
+// cashier's sources into this user's financial aggregate.
+export async function replayDrawerJournal(durable,locks,scope,send,{repository=null}={}) {
+  if (!durable?.read || !durable?.commitBatch || !locks?.request || typeof send!=='function' ||
+      ['tenantId','branchId','drawerId','deviceId'].some(name=>typeof scope?.[name]!=='string'||!scope[name]))
+    throw Error('Invalid drawer replay scope');
+  if(repository && (repository.durable!==durable || repository.user?.tenantId!==scope.tenantId))
+    throw Error('Drawer acknowledgement repository scope mismatch');
+  const key=keyFor(scope);
+  const validate=saved=>{
+    if(!saved || !Number.isSafeInteger(saved.revision) || !Array.isArray(saved.sources) ||
+        Object.entries(scope).some(([name,value])=>saved[name]!==value) ||
+        saved.sources.some(proof=>!proof?.source?.id||proof.source.tenantId!==scope.tenantId||
+          proof.source.branchId!==scope.branchId) ||
+        new Set(saved.sources.map(proof=>proof.source.id)).size!==saved.sources.length ||
+        (saved.acceptedIds!==undefined&&(!Array.isArray(saved.acceptedIds)||
+          saved.acceptedIds.some(id=>!saved.sources.some(proof=>proof.source.id===id)))))
+      throw Error('Invalid durable drawer replay journal');
+    return saved;
+  };
+  const saved=validate(await durable.read(key)),accepted=new Set(saved.acceptedIds||[]);
+  const pending=saved.sources.filter(proof=>!accepted.has(proof.source.id));
+  // Never split the actual app's atomic commit group at the API's 100 limit.
+  let end=Math.min(100,pending.length);
+  if(end<pending.length&&pending[end-1].source.groupId &&
+      pending[end-1].source.groupId===pending[end].source.groupId) {
+    const group=pending[end].source.groupId;
+    while(end>0&&pending[end-1].source.groupId===group)end--;
+  }
+  if(!end&&pending.length)throw Error('Drawer commit group exceeds replay limit');
+  const batch=pending.slice(0,end),result=batch.length?await send(structuredClone(batch)):
+    {success:true,acceptedIds:[]};
+  const ids=new Set(result?.acceptedIds||[]);
+  if(!result?.success || !Array.isArray(result.acceptedIds)||ids.size!==batch.length ||
+      result.acceptedIds.length!==batch.length||batch.some(proof=>!ids.has(proof.source.id)))
+    throw Error('Invalid drawer replay acknowledgement');
+  // Network waits do not hold the local financial writer lock. Re-read under
+  // that lock before CAS so sales created during the request cannot be lost.
+  return locks.request(key,{ifAvailable:true},async lock=>{
+    if(!lock)throw Error('Drawer acknowledgement lock unavailable');
+    const current=validate(await durable.read(key));
+    if(batch.some(proof=>JSON.stringify(current.sources.find(row=>row.source.id===proof.source.id))!==JSON.stringify(proof)))
+      throw Error('Drawer sources changed during replay');
+    const allAccepted=new Set([...(current.acceptedIds||[]),...ids]);
+    const snapshot={...current,revision:current.revision+1,acceptedIds:[...allAccepted]};
+    const own=repository?.current.outbox.filter(event=>allAccepted.has(event.id))||[];
+    if(own.some(event=>JSON.stringify(current.sources.find(proof=>proof.source.id===event.id)?.source)!==JSON.stringify(event)))
+      throw Error('Own queue differs from signed drawer source');
+    if(own.length) {
+      const wrapper={commit:async(userKey,value,expectedRevision)=>{
+        const [committed]=await durable.commitBatch([
+          {key:userKey,snapshot:value,expectedRevision},
+          {key,snapshot,expectedRevision:current.revision}
+        ]);
+        return committed;
+      }};
+      await repository.acknowledgeDurable(new Set(own.map(event=>event.id)),wrapper);
+    } else if(batch.length) await durable.commitBatch([{key,snapshot,expectedRevision:current.revision}]);
+    return current.sources.every(proof=>allAccepted.has(proof.source.id));
+  });
+}
+
 const cashTypes = new Set(['invoice','customer_payment','expense','purchase','supplier_payment',
   'worker_transaction','partner_drawing','profit_distribution','sales_return','purchase_return']);
 
@@ -94,7 +157,7 @@ export async function commitDrawerShiftDurable(store, durable, locks, operation,
   if (scope.tenantId !== store.user.tenantId || (operation !== 'open' && input.deviceId !== scope.deviceId))
     throw new Error('الدرج أو الجهاز لا يخص هذا السجل');
   assertVerifiedOfflineGrant(verifiedClaims, { tenantId:scope.tenantId, cashierId:store.user.id,
-    deviceId:scope.deviceId, branchId:scope.branchId }, input.at);
+    deviceId:scope.deviceId, branchId:scope.branchId, drawerId:scope.drawerId }, input.at);
   const key = keyFor(scope);
   return locks.request(key, { ifAvailable:true }, async lock => {
     if (!lock) throw new Error('الدرج قيد الاستخدام على نافذة أخرى');

@@ -7,9 +7,10 @@ import { cashMovementFromRecord } from '../../../src/services/cashMovement.js';
 import { accountingDate } from '../../../src/services/cashShiftEngine.js';
 import { resolutionStatements,readReviewSnapshot } from '../../_lib/reviewResolution.js';
 import { proveLegacyProduct } from '../../../src/services/legacyProductProof.js';
+import { cashReplayEntry } from '../../_lib/cashReplay.js';
 
 export const onRequestOptions = options;
-export async function onRequestPost({ request, env, reviewCommit = null }) {
+export async function onRequestPost({ request, env, reviewCommit = null, cashReplay = null }) {
   const auth = await authenticateRequest(request, env);
   if (auth.error) return auth.error;
   try {
@@ -71,6 +72,8 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
     }
     const seenGroups = new Set();
     for (const event of events) {
+      const replay = cashReplay ? cashReplayEntry(cashReplay, event) : null;
+      const principal = replay?.principal ?? auth.principal;
       if (!event || typeof event.id !== 'string' || event.id.length > 128 || !event.id ||
           typeof event.entityId !== 'string' || !event.entityId || event.entityId.length > 128 ||
           !['create','update','delete','void','reverse'].includes(event.action) ||
@@ -82,13 +85,13 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
       if (event.conflictPolicyVersion !== 1 || JSON.stringify(requiredConflictKeys) !== JSON.stringify(suppliedConflictKeys) ||
           Object.values(event.preconditions || {}).some(value=>value !== null && (typeof value !== 'string' || !value || value.length>128)))
         return badRequest('Missing or invalid conflict preconditions');
-      if (!canSync(auth.principal, event.entityType, event.action)) return json({ success: false, error: 'Operation not permitted' }, 403);
+      if (!canSync(principal, event.entityType, event.action)) return json({ success: false, error: 'Operation not permitted' }, 403);
       if (event.tenantId && event.tenantId !== tenantId) return json({ success: false, error: 'Event tenant mismatch' }, 403);
       validateTenantPayload(event.payload, tenantId);
       if (event.payload.id && event.payload.id !== event.entityId) return badRequest('Entity ID mismatch');
       const branch = event.branchId ?? branchId ?? null;
       if (event.entityType === 'settings' && event.payload.timeZone !== undefined) {
-        if (branch || auth.principal.type !== 'tenant' || !['company_owner', 'super_admin'].includes(auth.principal.role))
+        if (branch || principal.type !== 'tenant' || !['company_owner', 'super_admin'].includes(principal.role))
           return json({ success: false, error: 'Only the company owner can change its timezone' }, 403);
         if (typeof event.payload.timeZone !== 'string' || !event.payload.timeZone.trim()) return badRequest('Invalid timezone');
         try { accountingDate(new Date(now).toISOString(), event.payload.timeZone); }
@@ -99,7 +102,7 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
       if (!tenantWideEvent && !branch) return badRequest('Financial mutations require an explicit branch');
       if (!tenantWideEvent && event.action === 'create' && event.payload.branchId !== branch)
         return badRequest('Created financial record must belong to the selected branch');
-      if (!canAccessBranch(auth.principal, branch)) return json({ success: false, error: 'Branch access denied' }, 403);
+      if (!canAccessBranch(principal, branch)) return json({ success: false, error: 'Branch access denied' }, 403);
       if (!['branch', 'stock_transfer', 'restore_snapshot', 'settings'].includes(event.entityType)) {
         const existingBranch = await knownEntityBranch(event.entityType, event.entityId);
         if (existingBranch !== undefined && existingBranch !== branch)
@@ -147,13 +150,21 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
           if (typeof p?.[field] !== 'string' || !p[field]) return badRequest('Invalid cash shift');
         if (!Number.isFinite(Number(p.openingCash)) || Number(p.openingCash) < 0) return badRequest('Invalid opening cash');
         if (p.tenantId !== tenantId) return json({ success: false, error: 'Cash shift tenant mismatch' }, 403);
-        if (p.actorId !== auth.principal.id) return json({ success: false, error: 'Cash shift belongs to another cashier' }, 403);
+        if (p.actorId !== principal.id) return json({ success: false, error: 'Cash shift belongs to another cashier' }, 403);
+        if (replay && (p.offlineDeviceId !== replay.deviceId || p.drawerId !== replay.drawerId))
+          return json({ success: false, error: 'Signed drawer device mismatch' }, 403);
         if (p.branchId !== branch) return badRequest('Cash shift branch mismatch');
         const drawer = await env.DB.prepare("SELECT id FROM cash_drawers WHERE id = ? AND tenant_id = ? AND branch_id = ? AND status = 'active'")
           .bind(p.drawerId, tenantId, branch).first();
         if (!drawer) return badRequest('Unknown active drawer for this tenant and branch');
         if (event.action === 'create') {
           const existing = await cashShiftById(p.id);
+          if (replay && existing && (existing.drawer_id!==p.drawerId ||
+              existing.offline_device_id!==p.offlineDeviceId || existing.opened_by!==p.actorId ||
+              existing.branch_id!==p.branchId || existing.opened_at!==p.openedAt ||
+              existing.time_zone!==p.timeZone || existing.accounting_date!==p.accountingDate ||
+              existing.opening_cash_cents!==Math.round(Number(p.openingCash)*100)))
+            return json({success:false,error:'Existing signed shift identity mismatch'},409);
           if (!existing) replayShifts.set(p.id, { id: p.id, tenant_id: tenantId, branch_id: branch,
             drawer_id: p.drawerId, opened_by: p.actorId, offline_device_id: p.offlineDeviceId,
             time_zone: p.timeZone, accounting_date: p.accountingDate, opened_at: p.openedAt,
@@ -167,11 +178,13 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
         } else if (['closed_local', 'closed'].includes(p.status)) {
           if (typeof p.closedAt !== 'string' || !p.closedAt || typeof p.closedBy !== 'string' || !p.closedBy)
             return badRequest('Invalid cash shift close');
-          if (p.closedBy !== auth.principal.id) return json({ success: false, error: 'Cash shift belongs to another cashier' }, 403);
+          if (p.closedBy !== principal.id) return json({ success: false, error: 'Cash shift belongs to another cashier' }, 403);
           if (!Number.isFinite(Number(p.countedCash)) || Number(p.countedCash) < 0) return badRequest('Invalid counted cash');
           const shift = await cashShiftById(p.id);
           if (!shift) return badRequest('Cash shift not found');
-          if (shift.opened_by !== auth.principal.id) return json({ success: false, error: 'Cash shift belongs to another cashier' }, 403);
+          if (shift.opened_by !== principal.id) return json({ success: false, error: 'Cash shift belongs to another cashier' }, 403);
+          if (replay && (shift.offline_device_id!==replay.deviceId || shift.drawer_id!==replay.drawerId))
+            return json({success:false,error:'Signed shift writer mismatch'},403);
           const movement = await env.DB.prepare('SELECT COALESCE(SUM(amount_cents), 0) AS delta FROM cash_shift_movements WHERE tenant_id = ? AND shift_id = ?')
             .bind(tenantId, p.id).first();
           const expectedCents = shift.opening_cash_cents + Number(movement?.delta || 0) + (pendingCashDeltas.get(p.id) || 0);
@@ -181,7 +194,7 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
           statements.push(env.DB.prepare(`UPDATE cash_shifts SET status = 'closed', closed_at = ?, closed_by = ?,
             counted_cash_cents = ?, expected_cash_cents = ?, variance_cents = ?
             WHERE id = ? AND tenant_id = ? AND status = 'open'`)
-            .bind(p.closedAt, auth.principal.id, countedCents, expectedCents, countedCents - expectedCents, p.id, tenantId));
+            .bind(p.closedAt, principal.id, countedCents, expectedCents, countedCents - expectedCents, p.id, tenantId));
           replayShifts.set(p.id, { ...shift, status: 'closed' });
         }
       } else {
@@ -228,7 +241,9 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
         const shift = await cashShiftById(shiftId);
         if (!shift || shift.tenant_id !== tenantId || shift.branch_id !== branch || shift.status !== 'open')
           return badRequest('Cash shift is not open for this branch');
-        if (shift.opened_by !== auth.principal.id) return json({success:false,error:'Cash shift belongs to another cashier'},403);
+        if (shift.opened_by !== principal.id) return json({success:false,error:'Cash shift belongs to another cashier'},403);
+        if (replay && (shift.offline_device_id!==replay.deviceId || shift.drawer_id!==replay.drawerId))
+          return json({success:false,error:'Signed shift writer mismatch'},403);
         const occurredAt = new Date(Number(event.timestamp)).toISOString();
         if (occurredAt < shift.opened_at || accountingDate(occurredAt,shift.time_zone) !== shift.accounting_date)
           return badRequest('Cash event falls outside its open accounting day');
@@ -301,17 +316,27 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
       statements.push(env.DB.prepare(`INSERT INTO sync_events_v2
         (id, tenant_id, branch_id, entity_type, entity_id, action, payload_json, client_timestamp, server_timestamp, group_id, conflict_policy_version, preconditions_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(tenant_id, id) DO NOTHING`)
-        .bind(event.id, auth.principal.tenantId, branch, event.entityType, event.entityId, event.action, payload, Number(event.timestamp) || now, now, groupId, 1, preconditions));
+        .bind(event.id, principal.tenantId, branch, event.entityType, event.entityId, event.action, payload, Number(event.timestamp) || now, now, groupId, 1, preconditions));
       if (cashMovement) statements.push(env.DB.prepare(`INSERT INTO cash_shift_movements
         (tenant_id,source_event_id,shift_id,branch_id,drawer_id,accounting_date,amount_cents,reverses_source_event_id)
         VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,source_event_id) DO NOTHING`)
         .bind(tenantId,event.id,cashMovement.shiftId,branch,cashMovement.drawerId,cashMovement.accountingDate,
           cashMovement.amountCents,cashMovement.reversesSourceEventId));
     }
+    if (cashReplay) for (const event of events) {
+      const entry = cashReplayEntry(cashReplay, event);
+      statements.push(env.DB.prepare(`INSERT INTO cash_source_proofs
+        (tenant_id,event_id,device_id,cashier_id,principal_type,credential_version,drawer_id,proof_json)
+        VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,event_id) DO NOTHING`)
+        .bind(tenantId,event.id,entry.deviceId,entry.principal.id,entry.principal.type,
+          entry.principal.credentialVersion,entry.drawerId,JSON.stringify(entry.proof)));
+    }
     if(reviewCommit){const [claim,finish]=resolutionStatements(env,reviewCommit);statements.unshift(claim);statements.push(finish);}
     if (statements.length) await env.DB.batch(statements);
     return json({ success: true, acceptedIds: events.map(event => event.id), syncedCount: events.length });
   } catch (error) {
+    if(String(error?.message).includes('CASH_SOURCE_AUTH_CHANGED'))
+      return json({success:false,error:'Cashier or drawer authorization changed; retain local sources'},403);
     if(String(error?.message).includes('SYNC_REVIEW_STALE'))return json({success:false,error:'Review changed; refresh before deciding'},409);
     if (String(error?.message).includes('SYNC_IDEMPOTENCY_CONFLICT')) return json({ success: false, error: 'Idempotency conflict' }, 409);
     if (String(error?.message).includes('SYNC_CAUSAL_CONFLICT')) return json({ success: false, error: 'Stale multi-device mutation; synchronize and resolve the conflict' }, 409);

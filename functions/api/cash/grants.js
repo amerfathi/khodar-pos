@@ -28,7 +28,7 @@ async function authorizedBranchIds(env, tenantId, principal) {
 // Issues a signed, login-bound, device-bound 24-hour offline grant. The cashier,
 // tenant, and branch permissions come from the authenticated session and the
 // database; the verification time is the server clock. Caller-supplied grant
-// claims and public keys are ignored by construction.
+// claims are ignored; the validated event public key is bound into the signed grant.
 export async function onRequestPost({ request, env }) {
   const auth = await authenticateRequest(request, env);
   if (auth.error) return auth.error;
@@ -55,14 +55,22 @@ export async function onRequestPost({ request, env }) {
     if (device.device_proof_hash !== await hashCashDeviceProof(env.AUTH_SECRET, input.deviceProof))
       return forbidden('Device proof mismatch');
     const branchIds = await authorizedBranchIds(env, auth.principal.tenantId, auth.principal);
+    const assigned=await env.DB.prepare(`SELECT writer.drawer_id AS id FROM cash_drawer_writers writer
+      JOIN cash_drawers drawer ON drawer.id=writer.drawer_id AND drawer.tenant_id=writer.tenant_id
+      WHERE writer.tenant_id=? AND writer.device_id=? AND drawer.status='active'
+        AND drawer.branch_id IN(SELECT value FROM json_each(?)) ORDER BY writer.drawer_id`)
+      .bind(auth.principal.tenantId,input.deviceId,JSON.stringify(branchIds)).all();
     let privateJwk = null;
     try { privateJwk = JSON.parse(env.OFFLINE_GRANT_PRIVATE_JWK || ''); } catch { privateJwk = null; }
     if (!privateJwk) return json({ success: false, error: 'Offline grants are not configured' }, 503);
     const claims = {
       tenantId: auth.principal.tenantId,
       cashierId: auth.principal.id,
+      principalType:auth.principal.type,
+      credentialVersion:auth.principal.credentialVersion,
       deviceId: input.deviceId,
       branchIds,
+      drawerIds:assigned.results.map(row=>row.id),
       ...(eventPublicJwk?{eventPublicJwk}:{}),
       onlineVerifiedAt: new Date().toISOString()
     };

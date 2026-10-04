@@ -1,6 +1,6 @@
 // Thin, injectable wiring between the local unlock primitives and the server.
-// It is deliberately not called from the login UI yet; the offline cashier
-// feature stays hidden until the full flow is verified on every platform.
+// Actual login calls this only with an explicitly provisioned cashGrantStore.
+// Production does not provision it yet; offline cashier UI remains hidden.
 import { OfflineGrantStore } from './offlineGrantStore.js';
 import { ensureOfflineDeviceIdentity } from './offlineDeviceIdentity.js';
 import { enrollOfflineGrant, unlockOfflineGrant } from './offlineUnlock.js';

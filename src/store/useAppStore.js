@@ -46,6 +46,8 @@ import { cashMovementFromRecord } from '../services/cashMovement.js';
 import { openShift as openShiftEngine, postCashEvent, closeShift as closeShiftEngine } from '../services/cashShiftEngine.js';
 import { getApiBaseUrl } from '../config/appVersion';
 import { commitDrawerFinancialAction, commitDrawerShiftDurable } from '../services/cashDrawerJournal.js';
+import { enrollOnline, unlockOffline } from '../services/offlineGrantEnrollment.js';
+import { ensureOfflineDeviceIdentity } from '../services/offlineDeviceIdentity.js';
 
 const STORAGE_KEYS = {
   PRODUCTS: 'khodar_pos_products_v3',
@@ -97,6 +99,9 @@ export const resolveUserPermissions = (user) => {
 
 export function useAppStore(options = {}) {
   const [currentUser, setCurrentUser] = useState(() => getSessionUser());
+  const [unlockedDrawer, setUnlockedDrawer] = useState(null);
+  const unlockGeneration = useRef(0);
+  const cashDrawerContext = options.cashDrawerContext || unlockedDrawer;
   const [persistence, setPersistence] = useState({ ready: false, error: null });
   const [, redraw] = useState(0);
   // Keep the repository bound to this mounted identity.
@@ -337,10 +342,11 @@ export function useAppStore(options = {}) {
         !Object.hasOwn(local.value.state,SYNC_HEADS_STATE_KEY))
       throw new Error('انتظر اكتمال مزامنة سياسة تعارض الأجهزة قبل تسجيل حركة جديدة');
     const invoke = () => { refreshBindings(); return action(...args); };
-    const drawerTransition = options.cashDrawerContext && (action === openShift || action === closeShift);
+    const drawerTransition = (options.cashGrantStore || cashDrawerContext) && (action === openShift || action === closeShift);
     const commitDrawerTransition = async () => {
       refreshBindings();
-      const context = options.cashDrawerContext, input = args[0];
+      const context = cashDrawerContext, input = args[0];
+      if (!context) throw new Error('افتح تصريح المحاسب قبل فتح أو إقفال الدرج');
       const opening = action === openShift;
       const ownShift = opening ? null : cashShifts?.find(row=>row.id===input?.shiftId);
       const branchId = requireWorkingBranch();
@@ -354,8 +360,8 @@ export function useAppStore(options = {}) {
         opening ? 'open' : 'close',input,context.verifiedClaims,{signSources:true});
     };
     if (drawerTransition && !local.durable) throw new Error('الورديات تتطلب الحفظ الدائم المشترك');
-    if (local.durable) return (drawerTransition ? commitDrawerTransition() : withDrawer && options.cashDrawerContext
-      ? commitDrawerFinancialAction(local,local.durable,globalThis.navigator?.locks,options.cashDrawerContext,invoke)
+    if (local.durable) return (drawerTransition ? commitDrawerTransition() : withDrawer && cashDrawerContext
+      ? commitDrawerFinancialAction(local,local.durable,globalThis.navigator?.locks,cashDrawerContext,invoke)
       : local.transactDurable(invoke))
       .catch(error => {
         setPersistence(previous => ({ ...previous, error: error.message }));
@@ -372,7 +378,8 @@ export function useAppStore(options = {}) {
     const commit = () => {
       if (local.read(INBOUND_REVIEW_KEY)?.length)
         throw new Error('توجد سجلات مستلمة تحتاج مراجعة؛ الأرصدة غير مكتملة، ولم تُسجّل حركة مالية جديدة');
-      if (options.cashDrawerContext && !local.durable) throw new Error('حركات الدرج تتطلب الحفظ الدائم المشترك');
+      if (options.cashGrantStore && !cashDrawerContext) throw new Error('افتح تصريح المحاسب قبل تسجيل حركة');
+      if (cashDrawerContext && !local.durable) throw new Error('حركات الدرج تتطلب الحفظ الدائم المشترك');
       return atomicAction(action,true)(...args);
     };
     if (!currentUser || !getSessionToken() || !cloudflareSync.isOnline || !persistence.ready) return commit();
@@ -2459,6 +2466,23 @@ export function useAppStore(options = {}) {
   };
 
   // Authentication & Multi-Tenant Actions (with Store Code support)
+  const unlockCashDrawer = async (password,shiftId) => {
+    const generation = ++unlockGeneration.current;
+    setUnlockedDrawer(null);
+    if (!options.cashGrantStore || !currentUser || !local.durable || !persistence.ready ||
+        typeof shiftId !== 'string' || !shiftId)
+      throw new Error('الدخول أو الحفظ الدائم أو تصريح المحاسب غير جاهز');
+    const branchId = requireWorkingBranch();
+    const verifiedClaims = await unlockOffline({store:options.cashGrantStore,user:currentUser,password,branchId,
+      ...(options.offlineGrantPublicJwk ? {pinnedPublicJwk:options.offlineGrantPublicJwk} : {})});
+    const {deviceId} = await ensureOfflineDeviceIdentity(options.cashGrantStore);
+    const session = getSessionUser();
+    if (generation !== unlockGeneration.current || session?.id !== currentUser.id ||
+        session?.tenantId !== currentUser.tenantId || local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID) !== branchId || !local.writable)
+      throw new Error('تغير الحساب أو الفرع أثناء فتح التصريح؛ أعد المحاولة');
+    setUnlockedDrawer({shiftId,deviceId,verifiedClaims});
+    return {shiftId,deviceId};
+  };
   const login = async (username, password, explicitStoreCode = '') => {
     const cleanUser = String(username || '').trim().toLowerCase();
     const storeCode = explicitStoreCode.trim() || localStorage.getItem('khodar_remembered_store_code') || '';
@@ -2473,6 +2497,15 @@ export function useAppStore(options = {}) {
       setSessionToken(result.session.token);
       const user = { ...result.user, isStaff: result.userType === 'staff', status: 'active', sessionExpiresAt: result.session.expiresAt };
       user.permissions = resolveUserPermissions(user);
+      let offlineGrantStatus = 'disabled';
+      if (options.cashGrantStore) {
+        try {
+          await enrollOnline({store:options.cashGrantStore,apiBaseUrl:getApiBaseUrl(),token:result.session.token,
+            user,password,fetchFn:fetch,
+            ...(options.offlineGrantPublicJwk ? {pinnedPublicJwk:options.offlineGrantPublicJwk} : {})});
+          offlineGrantStatus = 'enrolled';
+        } catch { offlineGrantStatus = 'unavailable'; }
+      }
       setSessionUser(user);
       setBusinessTimeZone(result.tenant?.timeZone);
       // The old store must not receive the new identity before the remount.
@@ -2480,13 +2513,15 @@ export function useAppStore(options = {}) {
       localStorage.setItem('khodar_remembered_store_code', result.tenant.storeCode || storeCode);
       localStorage.setItem('khodar_remembered_username', cleanUser);
       window.location.reload(); // Remount every store slice under the authenticated tenant/user namespace.
-      return { success: true, user };
+      return { success: true, user, offlineGrantStatus };
     } catch {
       return { success: false, error: 'تعذر الاتصال بخدمة تسجيل الدخول. العمليات المحلية المحفوظة لم تُحذف.' };
     }
   };
 
   const logout = () => {
+    unlockGeneration.current++;
+    setUnlockedDrawer(null);
     // Preserve unsent transactions and caches. Erasing business storage on logout
     // can destroy the only copy of offline financial records.
     const token = getSessionToken();
@@ -2814,6 +2849,7 @@ export function useAppStore(options = {}) {
     transferStockBetweenBranches: financialAction(transferStockBetweenBranches),
     login,
     logout,
+    unlockCashDrawer,
     changePassword,
     resetPassword,
     adminResetTenantPassword,

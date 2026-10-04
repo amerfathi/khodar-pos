@@ -563,6 +563,15 @@ test('offline cashier grant is login-bound, device-bound, and server-signed', as
   assert.equal((await call('/api/cash/devices', 'POST', { tenantId: 'GRANT', deviceId, deviceProof: deviceProof() }, cashier)).status, 409);
   assert.equal((await call('/api/cash/devices', 'POST', { tenantId: 'B', deviceId, deviceProof: deviceProof() }, cashier)).status, 403);
 
+  const owner=await login('GRANT','grantowner');
+  assert.equal((await call('/api/cash/drawers','POST',{tenantId:'GRANT',branchId:'grant-main',id:'grant-drawer',name:'Grant drawer'},owner)).status,201);
+  const assignment={tenantId:'GRANT',branchId:'grant-main',drawerId:'grant-drawer',deviceId};
+  assert.equal((await call('/api/cash/drawers','PATCH',assignment,cashier)).status,403);
+  assert.equal((await call('/api/cash/drawers','PATCH',assignment,owner)).status,201);
+  assert.equal((await call('/api/cash/drawers','PATCH',assignment,owner)).status,200);
+  assert.equal((await call('/api/cash/drawers','PATCH',{...assignment,deviceId:'race-device'},owner)).status,409);
+  assert.equal((await call('/api/cash/drawers','PATCH',{...assignment,tenantId:'B'},owner)).status,403);
+
   assert.equal((await call('/api/cash/grants', 'POST', { tenantId: 'GRANT', deviceId, deviceProof: proof })).status, 401);
   assert.equal((await call('/api/cash/grants', 'POST', { tenantId: 'GRANT', deviceId, deviceProof: deviceProof() }, cashier)).status, 403);
   assert.equal((await call('/api/cash/grants', 'POST', { tenantId: 'GRANT', deviceId: 'unknown-device', deviceProof: proof }, cashier)).status, 403);
@@ -581,13 +590,70 @@ test('offline cashier grant is login-bound, device-bound, and server-signed', as
   assert.equal(grant.claims.deviceId, deviceId);
   assert.deepEqual(grant.claims.eventPublicJwk,{kty:'EC',crv:'P-256',x:eventPublicJwk.x,y:eventPublicJwk.y});
   assert.deepEqual(grant.claims.branchIds, ['grant-main']);
+  assert.deepEqual(grant.claims.drawerIds,['grant-drawer']);
   assert.equal(Date.parse(grant.claims.onlineVerifiedAt) > Date.now() - 60_000, true);
 
   const handle = await verifySignedOfflineGrant(grant, grantPublicJwk);
   assert.equal(assertVerifiedOfflineGrant(handle, { tenantId: 'GRANT', cashierId: 'grant-cashier', deviceId, branchId: 'grant-main' },
     new Date(Date.now() + 60_000).toISOString()), true);
   assert.throws(() => assertVerifiedOfflineGrant(handle, { tenantId: 'GRANT', cashierId: 'grant-cashier', deviceId, branchId: 'grant-second' }), /تصريح/);
+  assert.equal(assertVerifiedOfflineGrant(handle,{tenantId:'GRANT',cashierId:'grant-cashier',deviceId,branchId:'grant-main',drawerId:'grant-drawer'}),true);
+  assert.throws(()=>assertVerifiedOfflineGrant(handle,{tenantId:'GRANT',cashierId:'grant-cashier',deviceId,branchId:'grant-main',drawerId:'other-drawer'}),/درج|تصريح/);
   await assert.rejects(() => verifySignedOfflineGrant({ ...grant, claims: { ...grant.claims, cashierId: 'attacker' } }, grantPublicJwk), /توقيع/);
+});
+
+test('signed drawer replay preserves original cashiers across account handover and rejects forgery',async()=>{
+  await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES('SIGNED','SIGNED','Signed replay','signedowner',?,'active','company_owner')").bind(await hashPassword(pass)).run();
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,is_main,status) VALUES('signed-main','SIGNED','Main',1,'active')").run();
+  for(const id of ['signed-1','signed-2'])await db.prepare(`INSERT INTO users(id,tenant_id,name,username,password_hash,role,status,branch_ids_json,permissions_json)
+    VALUES(?,'SIGNED',?,?,?,'custom','active','["signed-main"]','{"canSell":true,"canManageExpenses":true}')`).bind(id,id,id,await hashPassword(pass)).run();
+  const owner=await login('SIGNED','signedowner'),first=await login('SIGNED','signed-1'),second=await login('SIGNED','signed-2');
+  const deviceId='signed-device',proof=deviceProof();
+  assert.equal((await call('/api/cash/devices','POST',{tenantId:'SIGNED',deviceId,deviceProof:proof},first)).status,201);
+  assert.equal((await call('/api/cash/drawers','POST',{tenantId:'SIGNED',branchId:'signed-main',id:'signed-drawer',name:'Drawer'},owner)).status,201);
+  assert.equal((await call('/api/cash/drawers','PATCH',{tenantId:'SIGNED',branchId:'signed-main',drawerId:'signed-drawer',deviceId},owner)).status,201);
+  const pairs=await Promise.all([first,second].map(async token=>{
+    const keys=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+    const response=await call('/api/cash/grants','POST',{tenantId:'SIGNED',deviceId,deviceProof:proof,eventPublicJwk:await crypto.subtle.exportKey('jwk',keys.publicKey)},token);
+    assert.equal(response.status,200);return {keys,grant:(await response.json()).grant};
+  }));
+  // Miniflare's worker clock and the Node fixture clock need not tick together.
+  // The source is deliberately created after both authenticated grants.
+  const timestamp=Math.max(Date.now(),...pairs.map(pair=>Date.parse(pair.grant.claims.onlineVerifiedAt)));
+  const at=new Date(timestamp).toISOString(),heads={};
+  const opened={id:'signed-shift-1',tenantId:'SIGNED',branchId:'signed-main',drawerId:'signed-drawer',actorId:'signed-1',offlineDeviceId:deviceId,
+    timeZone:'Asia/Riyadh',accountingDate:accountingDate(at,'Asia/Riyadh'),openedAt:at,openingCash:100,status:'open',events:[]};
+  const source=(id,type,payload,action='create')=>attachConflictPreconditions({id,tenantId:'SIGNED',branchId:'signed-main',entityType:type,entityId:payload.id,action,payload,timestamp,groupId:crypto.randomUUID()},heads);
+  const events=[source('signed-open','cash_shift',opened),
+    source('signed-expense','expense',{id:'signed-expense-row',tenantId:'SIGNED',branchId:'signed-main',amount:12,paymentMethod:'cash',cashShiftId:opened.id}),
+    source('signed-close','cash_shift',{...opened,status:'closed_local',closedAt:at,closedBy:'signed-1',countedCash:88,expectedCash:88,variance:0},'update'),
+    source('signed-next-open','cash_shift',{...opened,id:'signed-shift-2',actorId:'signed-2',openingCash:88})];
+  const proofs=await Promise.all(events.map(async(source,index)=>{
+    const pair=pairs[index===3?1:0];
+    const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},pair.keys.privateKey,new TextEncoder().encode(JSON.stringify(source)));
+    return {source,grant:pair.grant,signature:Buffer.from(signature).toString('base64url')};
+  }));
+  const body={tenantId:'SIGNED',deviceId,deviceProof:proof,proofs};
+  const tampered=structuredClone(body);tampered.proofs[1].source.payload.amount=13;
+  assert.equal((await call('/api/cash/replay','POST',tampered,second)).status,403);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM sync_events_v2 WHERE tenant_id='SIGNED'").first()).n,0);
+  assert.equal((await call('/api/cash/replay','POST',body,b)).status,403);
+  const accepted=await call('/api/cash/replay','POST',body,second);
+  assert.equal(accepted.status,200,await accepted.clone().text());
+  assert.deepEqual((await accepted.json()).acceptedIds,events.map(event=>event.id));
+  const shifts=await db.prepare("SELECT opened_by,status,expected_cash_cents FROM cash_shifts WHERE tenant_id='SIGNED' ORDER BY id").all();
+  assert.deepEqual(shifts.results,[{opened_by:'signed-1',status:'closed',expected_cash_cents:8800},{opened_by:'signed-2',status:'open',expected_cash_cents:null}]);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM cash_source_proofs WHERE tenant_id='SIGNED'").first()).n,4);
+  const retry=await call('/api/cash/replay','POST',body,second);
+  assert.equal(retry.status,200,await retry.clone().text());
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM cash_shift_movements WHERE tenant_id='SIGNED'").first()).n,1);
+  await assert.rejects(db.prepare("UPDATE cash_source_proofs SET cashier_id='signed-2' WHERE tenant_id='SIGNED'").run(),/CASH_SOURCE_PROOF_IMMUTABLE/);
+  await assert.rejects(db.prepare("DELETE FROM cash_source_proofs WHERE tenant_id='SIGNED'").run(),/CASH_SOURCE_PROOF_IMMUTABLE/);
+  await db.prepare("UPDATE users SET auth_version=auth_version+1 WHERE id='signed-1'").run();
+  assert.equal((await call('/api/cash/replay','POST',body,second)).status,403);
+  await db.prepare("UPDATE users SET auth_version=auth_version-1 WHERE id='signed-1'").run();
+  await db.prepare("UPDATE cash_devices SET revoked_at=datetime('now') WHERE tenant_id='SIGNED' AND id=?").bind(deviceId).run();
+  assert.equal((await call('/api/cash/replay','POST',body,second)).status,403);
 });
 
 test('sync sequence migration preserves events from the preceding schema', async () => {

@@ -37,3 +37,29 @@ export async function onRequestPost({request,env}) {
     return badRequest(error.message);
   }
 }
+
+// Deliberately no reassignment API: an old device may have unsent financial
+// work even after 24h. Changing its writer requires an audited recovery flow.
+export async function onRequestPatch({request,env}) {
+  const auth=await authenticateRequest(request,env);
+  if(auth.error)return auth.error;
+  try {
+    const {tenantId,branchId,drawerId,deviceId}=await readJson(request);
+    const denied=requireTenant(auth,tenantId);
+    if(denied)return denied;
+    if(auth.principal.type!=='tenant'||!['company_owner','super_admin'].includes(auth.principal.role)||
+      !canAccessBranch(auth.principal,branchId))return forbidden('Only the company owner can assign its drawer device');
+    if(![branchId,drawerId,deviceId].every(value=>text(value,128)))return badRequest('Invalid drawer writer');
+    const drawer=await env.DB.prepare("SELECT id FROM cash_drawers WHERE id=? AND tenant_id=? AND branch_id=? AND status='active'")
+      .bind(drawerId,tenantId,branchId).first();
+    const device=await env.DB.prepare('SELECT id FROM cash_devices WHERE id=? AND tenant_id=? AND revoked_at IS NULL')
+      .bind(deviceId,tenantId).first();
+    if(!drawer||!device)return badRequest('Unknown active drawer or device');
+    const result=await env.DB.prepare(`INSERT INTO cash_drawer_writers(tenant_id,drawer_id,device_id,assigned_by)
+      VALUES(?,?,?,?) ON CONFLICT(tenant_id,drawer_id) DO NOTHING`).bind(tenantId,drawerId,deviceId,auth.principal.id).run();
+    const saved=await env.DB.prepare('SELECT device_id FROM cash_drawer_writers WHERE tenant_id=? AND drawer_id=?')
+      .bind(tenantId,drawerId).first();
+    if(saved?.device_id!==deviceId)return json({success:false,error:'Drawer writer already assigned; audited device recovery is required'},409);
+    return json({success:true,drawerId,deviceId},result.meta.changes?201:200);
+  } catch(error){return badRequest(error.message);}
+}

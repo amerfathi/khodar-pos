@@ -26,11 +26,11 @@ const storeFor = async (id,disk,storage,initial={}) => {
   const store=new AtomicStore({id,tenantId:'tenant-a'},initial,storage,{durableFirst:true});
   assert.equal(await store.acquire(locks,disk),true);return store;
 };
-const grant = cashierId => ({tenantId:'tenant-a',cashierId,deviceId:'device-1',branchIds:['branch-1'],onlineVerifiedAt:'2026-10-01T17:00:00Z'});
+const grant = cashierId => ({tenantId:'tenant-a',cashierId,deviceId:'device-1',branchIds:['branch-1'],drawerIds:['drawer-1'],onlineVerifiedAt:'2026-10-01T17:00:00Z'});
 const keys = await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
 const publicJwk = await crypto.subtle.exportKey('jwk',keys.publicKey);
-const signedGrant = async cashierId => {
-  const claims=grant(cashierId);
+const signedGrant = async (cashierId,drawerIds=['drawer-1']) => {
+  const claims={...grant(cashierId),drawerIds};
   const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},keys.privateKey,
     new TextEncoder().encode(JSON.stringify(claims)));
   return verifySignedOfflineGrant({claims,signature:Buffer.from(signature).toString('base64url')},publicJwk);
@@ -38,6 +38,33 @@ const signedGrant = async cashierId => {
 const open = (id,actorId,at) => ({id,tenantId:'tenant-a',branchId:'branch-1',drawerId:'drawer-1',actorId,
   offlineDeviceId:'device-1',openingCash:100,at,timeZone:'Asia/Riyadh'});
 const close = (id,actorId,at) => ({shiftId:id,actorId,deviceId:'device-1',countedCash:100,at});
+
+test('shared replay preserves proofs on lost response or failed acknowledgement and never mixes user queues',async()=>{
+  const disk=durable(),scope={tenantId:'tenant-a',branchId:'branch-1',drawerId:'drawer-1',deviceId:'device-1'};
+  const key='braka:tenant-a:branch-1:drawer-1:device-1:cash_drawer_journal_v1';
+  const source=id=>({source:{id,tenantId:'tenant-a',branchId:'branch-1',groupId:id},signature:'fixture',grant:{}});
+  const sources=[source('first'),source('second')];
+  disk.rows.set(key,{revision:0,...scope,shifts:[],sources});
+  assert.equal(typeof journal.replayDrawerJournal,'function');
+  const invoke=send=>journal.replayDrawerJournal(disk,locks,scope,send);
+  await assert.rejects(invoke(async()=>{throw Error('Lost response');}),/Lost response/);
+  assert.deepEqual(disk.rows.get(key).sources,sources);
+  await assert.rejects(invoke(async()=>({success:true,acceptedIds:['first']})),/acknowledgement/);
+  assert.equal(disk.rows.get(key).revision,0);
+  disk.fail=true;
+  await assert.rejects(invoke(async()=>({success:true,acceptedIds:['first','second']})),/Injected/);
+  assert.equal(disk.rows.get(key).revision,0);
+  disk.fail=false;
+  assert.equal(await invoke(async batch=>{
+    assert.deepEqual(batch,sources);
+    return {success:true,acceptedIds:['first','second']};
+  }),true);
+  assert.deepEqual(disk.rows.get(key).sources,sources); // Audit proofs are not deleted.
+  assert.deepEqual(disk.rows.get(key).acceptedIds,['first','second']);
+  let requests=0;
+  assert.equal(await invoke(async()=>{requests++;}),true);
+  assert.equal(requests,0);
+});
 
 test('two pre-enrolled cashier claim fixtures hand over a local drawer without mixing user records',async()=>{
   assert.equal(typeof journal.commitDrawerShiftDurable,'function');
@@ -57,6 +84,52 @@ test('two pre-enrolled cashier claim fixtures hand over a local drawer without m
   await reopened.close();
 });
 
+test('replay never splits a commit group and retains sources appended during the request',async()=>{
+  const disk=durable(),scope={tenantId:'tenant-a',branchId:'branch-1',drawerId:'drawer-1',deviceId:'device-1'};
+  const key='braka:tenant-a:branch-1:drawer-1:device-1:cash_drawer_journal_v1';
+  const make=(id,groupId)=>({source:{id,groupId,tenantId:scope.tenantId,branchId:scope.branchId}});
+  const sources=Array.from({length:101},(_,i)=>make(String(i),i<99?'group-a':'group-b'));
+  disk.rows.set(key,{revision:0,...scope,shifts:[],sources});
+  assert.equal(await journal.replayDrawerJournal(disk,locks,scope,async batch=>{
+    assert.equal(batch.length,99);
+    const saved=disk.rows.get(key);
+    disk.rows.set(key,{...saved,revision:1,sources:[...saved.sources,make('new','group-c')]});
+    return {success:true,acceptedIds:batch.map(proof=>proof.source.id)};
+  }),false);
+  assert.equal(disk.rows.get(key).sources.length,102);
+  assert.equal(disk.rows.get(key).acceptedIds.length,99);
+  assert.equal(disk.rows.get(key).revision,2);
+  assert.equal(await journal.replayDrawerJournal(disk,locks,scope,async batch=>{
+    assert.deepEqual(batch.map(proof=>proof.source.id),['99','100','new']);
+    return {success:true,acceptedIds:batch.map(proof=>proof.source.id)};
+  }),true);
+  disk.rows.set(key,{revision:0,...scope,shifts:[],sources:sources.map(proof=>({...proof,source:{...proof.source,groupId:'huge'}}))});
+  await assert.rejects(journal.replayDrawerJournal(disk,locks,scope,async()=>{throw Error('Must not send');}),/exceeds replay limit/);
+});
+
+test('shared replay acknowledges only the current cashier queue in one paired durable commit',async()=>{
+  const disk=durable(),storage=cache(),a=await storeFor('cashier-a',disk,storage),b=await storeFor('cashier-b',disk,storage);
+  for(const {store,id} of [{store:a,id:'a-source'},{store:b,id:'b-source'}])await store.transactDurable(()=>store.enqueue({
+    id,tenantId:'tenant-a',branchId:'branch-1',entityType:'expense',entityId:id,action:'create',
+    payload:{id,tenantId:'tenant-a',branchId:'branch-1',amount:1}
+  }));
+  const scope={tenantId:'tenant-a',branchId:'branch-1',drawerId:'drawer-1',deviceId:'device-1'};
+  const key='braka:tenant-a:branch-1:drawer-1:device-1:cash_drawer_journal_v1';
+  const sources=[...a.value.outbox,...b.value.outbox].map(source=>({source,grant:{},signature:'fixture'}));
+  disk.rows.set(key,{revision:0,...scope,shifts:[],sources});
+  const send=async()=>({success:true,acceptedIds:sources.map(proof=>proof.source.id)});
+  disk.fail=true;
+  await assert.rejects(journal.replayDrawerJournal(disk,locks,scope,send,{repository:b}),/Injected/);
+  assert.equal(b.value.outbox.length,1);assert.equal(disk.rows.get(key).revision,0);
+  disk.fail=false;
+  assert.equal(await journal.replayDrawerJournal(disk,locks,scope,send,{repository:b}),true);
+  assert.equal(b.value.outbox.length,0);assert.equal(a.value.outbox.length,1);
+  assert.equal(disk.rows.get(b.key).outbox.length,0);
+  assert.equal(await journal.replayDrawerJournal(disk,locks,scope,async()=>{throw Error('No resend required');},{repository:a}),true);
+  assert.equal(a.value.outbox.length,0);
+  await a.close();await b.close();
+});
+
 test('failed paired commit cannot open a shift only in one of the two records',async()=>{
   assert.equal(typeof journal.commitDrawerShiftDurable,'function');
   const disk=durable(),storage=cache(),first=await storeFor('cashier-1',disk,storage);
@@ -72,6 +145,15 @@ test('unsigned caller-provided claims cannot authorize an offline drawer opening
   await assert.rejects(journal.commitDrawerShiftDurable(first,disk,locks,'open',
     open('shift-unsigned','cashier-1','2026-10-01T18:00:00Z'),grant('cashier-1')),/توقيع|موثوق/);
   assert.deepEqual(first.value.state,{});
+  await first.close();
+});
+
+test('a signed branch grant without drawer assignment cannot open a local drawer',async()=>{
+  const disk=durable(),storage=cache(),first=await storeFor('cashier-1',disk,storage);
+  const before=structuredClone([...disk.rows]);
+  await assert.rejects(journal.commitDrawerShiftDurable(first,disk,locks,'open',
+    open('unassigned','cashier-1','2026-10-01T18:00:00Z'),await signedGrant('cashier-1',[])),/الدرج/);
+  assert.deepEqual([...disk.rows],before);
   await first.close();
 });
 
