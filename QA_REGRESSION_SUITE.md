@@ -1,5 +1,7 @@
 # QA PERMANENT REGRESSION TEST SUITE — BRRAKA POS v2.6.1
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **System**: Brraka POS  
 **Coverage**: Mathematical Invariants, API Gates, Money Precision, Sync Deduplication, and Platform Base URLs  
 **Runner Scripts**:

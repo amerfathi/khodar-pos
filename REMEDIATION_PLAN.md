@@ -1,4 +1,6 @@
 # Remediation tracking — checkpoint 2026-09-22
+
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
 Not a completion certificate. Work is local on base fa10c6b; no production mutation, push or release. Previous optimistic status text is superseded by this checkpoint.
 
 ## Resume order

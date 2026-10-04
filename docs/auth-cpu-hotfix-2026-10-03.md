@@ -1,5 +1,7 @@
 # Live authentication CPU repair — 2026-10-03
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](../README.md) و[فهرس الوثائق](../docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 The owner requires no additional subscription. Cloudflare dashboard confirms Workers Free (10ms CPU per Pages request). A filtered live QA login trace returned `exceededCpu`, CPU18ms, wall196ms, HTTP503/1102.
 
 ## Repair

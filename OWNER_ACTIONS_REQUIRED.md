@@ -1,5 +1,7 @@
 # External owner actions required before release
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 Do not paste passwords, private keys, recovery codes, token values, or keystore files into chat. Store replacements only in the provider's secret manager or protected release infrastructure.
 
 | ID | Service/provider | Why required | Exact owner action | What NOT to share | Evidence of completion | Follow-up verification | Release-blocking |

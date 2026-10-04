@@ -1,5 +1,7 @@
 # QA FINAL CERTIFICATION & RELEASE SIGN-OFF
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **Product**: بركة كاشير ومحاسبة (Brraka POS & Accounting System)  
 **Version**: 2.6.1-production  
 **Build Target**: Multi-Platform (Web Cloudflare Pages + Electron Desktop + Android Capacitor)  

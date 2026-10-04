@@ -1,5 +1,7 @@
 # QA CROSS-PLATFORM COMPATIBILITY MATRIX — BRRAKA POS v2.6.1
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **Platforms Covered**:
 1. **Web**: Progressive Web App running on modern evergreen browsers (Chrome, Edge, Safari, Firefox).
 2. **Desktop**: Native Windows 64-bit Electron executable (`KhodarPOS-Setup.exe`).

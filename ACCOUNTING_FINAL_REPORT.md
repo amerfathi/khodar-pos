@@ -1,5 +1,7 @@
 # MASTER AUTONOMOUS ACCOUNTING AUDIT & REPAIR — FINAL EXECUTIVE REPORT
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **System Name**: Brraka POS (بركة - كاشير ومحاسبة سحابية متقدمة)  
 **System Version**: v2.6.1  
 **Audit Completion Date**: 2026-09-20  

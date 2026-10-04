@@ -1,5 +1,13 @@
 # براكه — نقطة التسليم الحالية
 
+## أحدث مهمة — توحيد التوثيق، 2026-10-04
+
+المرجع الشامل الحالي هوREADME.md وdocs/INDEX.md و7أدلة فيdocs/current:ARCHITECTURE،USER_GUIDE،ACCOUNTING،SYNC_AND_RECOVERY،SECURITY،OPERATIONS،CHANGE_HISTORY. أضيفت ملاحظاتdocs/releases/2.6.14.md، وأُشير إلى60وثيقة قديمة كسجل تاريخي دون تغيير أدلتها. تقرير2.6.14 المنشور وسجل الموانع يحتفظان بالفرق بين التحقق المحدد والتغطية غير المنجزة.
+
+هذه المهمة توثيق فقط: لا تغيير في المحرك المالي أوالمزامنة أوالهوية أوالمخطط، ولا إعادة بناء أو استبدال ثنائيات2.6.14. أضيفscripts/verify-docs.cjs للفحص المحلي: الروابط والفهرس وتنبيهات التاريخية وأنماط الاعتماد والإصدار وتنسيقbackup4. نجح الفحص، واختبار رابط مفقود متعمد رُفض ثم أزيل. فحصdocsليس اختبارًا ماليًا جديدًا.
+
+وثّقنا فجوة تشغيلية صراحة:stageالإنتاجscratch/sync-hotfix-20261003ignored وغير مستعاد باستنساخGitوحده؛ لا توجد وصفة آلية عامة معتمدة لإعادة تركيبه. لا تنشرmainhandlersأو0017–0022 لتعويض ذلك. معالجة reproducible deploymentمهمة تقنية منفصلة، وليست تغييرًا تم في هذه المهمة.
+
 ## المرجع الأحدث — نُشر2.6.14 بالفعل، 2026-10-04
 
 هذا القسم يتقدم على جميع عبارات «قيد العمل/غير منشور/اختيار فقط/ترقيمOPEN» التاريخية أدناه. الإصدار2.6.14 منشور: https://github.com/amerfathi/khodar-pos/releases/tag/v2.6.14، والويب https://khodar-pos.pages.dev عبر deployment https://d6d5e52a.khodar-pos.pages.dev. خدمات latest للويب وWindows وAndroid تعرض2.6.14؛ روابطها200 وmanifestWindows صحيح بالمفتاح المثبّت. تقرير الدليل والحدود:docs/release-2.6.14-verification.md، والسجل المحدّثRELEASE_BLOCKERS.md.
@@ -304,3 +312,95 @@ Git snapshot before this evidence-only commit: HEAD bb27b7403dec2565ad7a4a1b12c7
 - آخر مهمة:إكمال إصلاح تسوية تعارضات المالك واسترداد المصادر القديمة وترقيم الفواتير، ثم اختبارات مالية حية ونشر2.6.14 والتحقق من معلومات التحديثات والأصول العامة.
 - أول خطوة للنموذج التالي:اقرأ القسم الأحدث وهذا التقرير وافحصHEAD/branch/status؛ لا تعِد النشر ولا تشغّل ترحيلات0017–0022. أي توسعة لاحقة لتاريخ>2000أو cashshiftsأو رحلةsignedAPKالمالية تحتاج اختبارات مستقلة قبل إعلانها مكتملة.
 - فحص أنماط الاعتماد الفعلية بالوثيقة لم يجدPassword/Secret/Token/PrivateKeyأوbcryptliteral؛ أسماء الحقول ومفاتيح التوقيع العامة/hashالأدلة ليست أسرارًا. الاعتمادات لا تُنقل منscratchإلىgitأوالمحادثة.
+
+## لقطة تسليم التوثيق قبل commit — 2026-10-04
+
+Current Git HEAD:bcf0f5baf5641d5a0a4a29b5bcce9cea21ee3c09؛ Current branch:main. هذا snapshotقبلcommitالتوثيق نفسه، وليس hashذاتياً للملف. اقرأHEADالفعلي بعدالنشر. مصدرحزم2.6.14لم يتغير.
+
+آخر مهمة:توثيق كامل المشروع الحالي وقراراته وحدوده، والتحقق منالروابط/الفهرس/الأسرار ثمpushالتوثيق إلىGitHub. أولخطوةللنموذجالتالي:اقرأREADMEوdocs/INDEXوأحدثسجلالموانع ثمgitstatus؛ لا تُعد نشرالحزم بسببcommitتوثيق. إن طُلبنشر تقني لاحق، افحصDEPLOY-REPRODUCIBLEوتوافق المخطط أولًا.
+
+حالةGitوأسماءالملفات المعدلة/غيرالمرفوعة في هذهاللقطة:
+
+```text
+M ACCOUNTING_AUDIT_PLAN.md
+ M ACCOUNTING_FINAL_REPORT.md
+ M ACCOUNTING_FINDINGS.md
+ M ACCOUNTING_FIXES.md
+ M ACCOUNTING_RECONCILIATION.md
+ M ACCOUNTING_TEST_RESULTS.md
+ M AI_HANDOFF_CURRENT.md
+ M AUTHORIZATION_MATRIX.md
+ M CROSS_PLATFORM_AUDIT.md
+ M DATABASE_SCHEMA_AUDIT.md
+ M DATA_INTEGRITY_AUDIT.md
+ M FINAL_RELEASE_AUDIT.md
+ M OWNER_ACTIONS_REQUIRED.md
+ M QA_ACCOUNTING_RECONCILIATION.md
+ M QA_CROSS_PLATFORM_MATRIX.md
+ M QA_DEFECT_REGISTER.md
+ M QA_EVIDENCE_INDEX.md
+ M QA_FINAL_CERTIFICATION.md
+ M QA_MASTER_PLAN.md
+ M QA_PERFORMANCE_AUDIT.md
+ M QA_REGRESSION_SUITE.md
+ M QA_RELEASE_READINESS.md
+ M QA_SECURITY_AUDIT.md
+ M QA_SYNC_AUDIT.md
+ M QA_SYSTEM_INVENTORY.md
+ M QA_TEST_EXECUTION.md
+ M QA_TEST_REGISTRY.md
+ M REGRESSION_TEST_MATRIX.md
+ M RELEASE_BLOCKERS.md
+ M REMEDIATION_PLAN.md
+ M SECRETS_AUDIT.md
+ M SECURITY_REMEDIATION.md
+ M SYNC_REMEDIATION.md
+ M TENANT_ISOLATION_AUDIT.md
+ M audit/ACCOUNTING_AUDIT.md
+ M audit/AUDIT_BASELINE.md
+ M audit/BUG_REGISTER.md
+ M audit/FINAL_AUDIT_REPORT.md
+ M audit/FINAL_PRODUCTION_GATE.md
+ M audit/FINAL_VERIFICATION_REPORT.md
+ M audit/FIX_REGISTER.md
+ M audit/MOBILE_DUPLICATE_ROUTE_REPORT.md
+ M audit/MOBILE_UX_FINAL_REPORT.md
+ M audit/MOBILE_UX_INVENTORY.md
+ M audit/RBAC_MATRIX_FINAL.md
+ M audit/SECURITY_AUDIT.md
+ M audit/SYSTEM_INVENTORY.md
+ M audit/TEST_MATRIX.md
+ M audit/TEST_PLAN.md
+ M docs/MULTI_PLATFORM_ARCHITECTURE.md
+ M docs/accounting-day-drawer-shift-design.md
+ M docs/auth-cpu-hotfix-2026-10-03.md
+ M docs/conflict-owner-review-2026-10-04.md
+ M docs/inbound-dependency-recovery-2026-10-04.md
+ M docs/landing-refresh-2026-10-01.md
+ M docs/releases/2.6.10.md
+ M docs/releases/2.6.11.md
+ M docs/releases/2.6.12.md
+ M docs/releases/2.6.13.md
+ M docs/releases/2.6.9.md
+ M docs/sales-reconciliation-2026-10-03.md
+ M docs/sync-activity-design.md
+?? README.md
+?? docs/INDEX.md
+?? docs/current/ACCOUNTING.md
+?? docs/current/ARCHITECTURE.md
+?? docs/current/CHANGE_HISTORY.md
+?? docs/current/OPERATIONS.md
+?? docs/current/SECURITY.md
+?? docs/current/SYNC_AND_RECOVERY.md
+?? docs/current/USER_GUIDE.md
+?? docs/multi-company-live-ui-audit-2026-10-03.md
+?? docs/releases/2.6.14.md
+?? scripts/verify-docs.cjs
+?? tests/live-account-plan-probe.mjs
+?? tests/live-android-auth-probe.mjs
+?? tests/live-auth-resource-probe.mjs
+?? tests/live-auth-validation.mjs
+?? tests/live-test-provision.mjs
+```
+
+ملفاتdocs/multi-company-live-ui-audit-2026-10-03.md وtests/live-*التاريخية السابقة خارجالمهمة ولن تُضم للـcommit. باقيالوثائق الجديدة/المؤشرة وفاحصdocsمقصودة للنشر. فحصالاعتمادات لا يسجلالقيم؛configوexportsومفاتيحخاصة تبقى خارجGit.

@@ -1,5 +1,13 @@
 # Authoritative release blocker register
 
+## Documentation checkpoint — 2026-10-04
+
+Current entrypoints:README.md and docs/INDEX.md with7 maintained guides. Historical reports are explicitly marked and preserved. Documentation-only checks pass for links/index/secret patterns/current release/backup format; they do not add application/runtime certification.
+
+| ID | Severity | State | Evidence / closing requirement |
+|---|---|---|---|
+| DEPLOY-REPRODUCIBLE | High | OPEN | Current production compatible API stage is ignored scratch content and is not fully reconstructed by a fresh Git checkout. No validated automated packaging recipe exists for this exact stage. Preserve the operator stage; implement/test a tracked compatible deployment recipe before treating fresh-checkout Web deployment as reproducible. Do not deploy all main handlers or unrelated migrations to bypass this gap. |
+
 ## Authoritative scoped checkpoint — published2.6.14, 2026-10-04
 
 This section supersedes older numbering/review/publication statuses below, not unrelated OPEN blockers. Report:docs/release-2.6.14-verification.md. Web deploymentd6d5e52a; immutable GitHubv2.6.14; public update metadata and downloads verified for Web/Windows/Android.259 automated tests and17 separate inherited formula checks pass; hosted build37192819553 succeeds. Eight final production Web/extracted-Windows financial scenarios pass, plus Android-debug/Web offline/reconnect. Signed Android APK certificate/install/launch verified separately; full signed-APK financial journey, installed Windows upgrade and physical printing are not certified.

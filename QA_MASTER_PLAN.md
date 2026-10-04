@@ -1,5 +1,7 @@
 # QA MASTER PLAN — FULL PRODUCT VERIFICATION, AUDIT, VALIDATION & RELEASE CERTIFICATION
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **System**: Brraka POS (بركة - كاشير ومحاسبة سحابية متقدمة)  
 **Version**: v2.6.1  
 **Target Platforms**: Web (Cloudflare Pages) + Desktop (Electron Frameless) + Android (Capacitor Native)  

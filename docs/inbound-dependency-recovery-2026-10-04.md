@@ -1,5 +1,7 @@
 # Inbound missing-dependency recovery — candidate 2.6.14
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](../README.md) و[فهرس الوثائق](../docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 ## Latest implementation
 
 POST `/api/sync/dependencies` now authenticates the current principal, reads bounded complete tenant history and returns the immutable legacy product source ONLY when all accepted references prove one authorized branch. Explicit same-branch later edits preserve that proof; unscoped/foreign edits, multiple branches and transfer references reject it. Client hydration stores the proof and retries retained groups atomically without adding an outbound rewrite or editing the historical source. The API also checks this proof when a new authorized sale references that old product; source branch remains NULL in D1. This is proof-based recovery, not ownership guessed from the requesting cashier.

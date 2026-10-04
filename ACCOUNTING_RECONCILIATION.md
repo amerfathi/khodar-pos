@@ -1,4 +1,6 @@
 # Accounting reconciliation — 2026-09-22
+
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
 The 17 inherited accounting/QA tests pass but mostly reproduce formulas outside the application. They are NOT evidence of full application end-to-end correctness despite their console labels.
 New tests/store-sync.test.mjs mounts the real useAppStore with React. Before the fix a sale receipt scenario yielded stock 14 instead of expected 17. After repair:
 - Start stock 20 (branch main 20), customer debt 0.

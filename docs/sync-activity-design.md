@@ -1,5 +1,7 @@
 # Activity-driven financial synchronization
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](../README.md) و[فهرس الوثائق](../docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 ## Agreed intent
 
 - Push locally committed operations immediately; preserve the durable outbox until exact server acknowledgement.

@@ -1,5 +1,7 @@
 # QA SECURITY AUDIT & MULTI-TENANT ISOLATION — BRRAKA POS v2.6.1
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **Audit Scope**: Edge API Gateway, Cloudflare D1 SQL queries, Multi-Tenant Boundaries, Client Authentication & LocalStorage.  
 **Auditor**: Principal Security Engineer & Cloud Architect  
 **Timestamp**: 2026-09-20  

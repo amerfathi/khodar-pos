@@ -1,4 +1,6 @@
 # Final release audit — checkpoint, NOT release certification
+
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
 Date: 2026-09-22. Local changes only; no production deploy/push. Overall: **FAIL — DO NOT RELEASE**. External BLOCKED items do not excuse remaining code defects.
 
 Newest evidence: see the final section of RELEASE_BLOCKERS.md. The latest `npm test`, lint and Web build succeeded after migration 0009 and branch/restore containment changes. The current focused/integration suite is 59 tests across six distinct classes; historical counts below are superseded. Live-tenant restore and sample reset are now explicitly denied pending a safe cloud restore protocol. No release gate was closed by this containment.

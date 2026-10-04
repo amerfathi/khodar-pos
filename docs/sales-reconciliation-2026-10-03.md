@@ -1,5 +1,7 @@
 # Independent multi-cashier sales reconciliation
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](../README.md) و[فهرس الوثائق](../docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 Checkpoint: 2026-10-03. Scope: independent active invoice CREATE events without cash-shift attribution. This does not certify every financial conflict or the unfinished cash-shift feature.
 
 ## Cause and repair

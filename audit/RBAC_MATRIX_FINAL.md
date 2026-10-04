@@ -1,4 +1,6 @@
 # RBAC Matrix & Access Control Verification — v2.6.0
+
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](../README.md) و[فهرس الوثائق](../docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
 **Product**: Baraka / Khodar-POS (سوق الخضار الذكي)  
 **Date**: September 19, 2026  
 **Status**: VERIFIED & HARDENED

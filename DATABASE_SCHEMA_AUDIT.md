@@ -1,4 +1,6 @@
 # Database schema — 2026-09-22
+
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
 Migrations:
 0003 sessions, store codes, auth versions and trials;
 0004 revocation triggers and request limits;

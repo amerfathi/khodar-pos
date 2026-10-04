@@ -1,5 +1,7 @@
 # QA DEFECT REGISTER — BRRAKA POS v2.6.1
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **Last Updated**: 2026-09-20  
 **Defect Severity Scale**:
 - `CRITICAL`: Immediate financial corruption, data loss, or total authorization bypass.

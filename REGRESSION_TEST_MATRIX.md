@@ -1,4 +1,6 @@
 # Regression test matrix — 2026-09-22
+
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
 | Command / suite | Observed result | Limits |
 |---|---|---|
 | npm run test:integration | PASS: 32 tests, 0 failures | Local runtime only |

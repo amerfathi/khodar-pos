@@ -1,5 +1,7 @@
 # ACCOUNTING FINDINGS & VULNERABILITY REGISTER
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **Project**: Brraka POS (بركة)  
 **Version**: v2.6.1  
 **Audit Type**: Master Autonomous Accounting Audit & Repair  

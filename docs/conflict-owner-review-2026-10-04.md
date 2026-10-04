@@ -1,5 +1,7 @@
 # Owner conflict review — candidate 2.6.14
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](../README.md) و[فهرس الوثائق](../docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 Performance follow-up: additive migration0026 indexes original event IDs transactionally with each immutable resolution receipt. Ordinary pushes and recovery lookup use this index rather than scanning all receipt JSON. All259 automated tests and17 inherited formula checks passed; the final indexed API suite separately passed45 tests. Lint and typecheck passed. Native release verification and publication remain pending until the release report records evidence.
 
 ## Current result (supersedes the historical foundation notes below)

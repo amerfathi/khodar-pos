@@ -1,5 +1,7 @@
 # QA SYSTEM INVENTORY — BRRAKA POS v2.6.1
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **Generated Date**: 2026-09-20  
 **Target**: Comprehensive enumeration of all UI surfaces, Backend APIs, Database Schemas, and Platform Integrations.
 

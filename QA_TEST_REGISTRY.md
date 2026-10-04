@@ -1,5 +1,7 @@
 # QA TEST REGISTRY — BRRAKA POS v2.6.1
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](README.md) و[فهرس الوثائق](docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 **Registry Generation Date**: 2026-09-20  
 **Authority**: Master Test Case Registry for Enterprise Accounting Certification  
 **Status Legend**: `PASSED`, `FAILED`, `BLOCKED`, `NOT_APPLICABLE`, `PASSED`

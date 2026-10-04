@@ -1,5 +1,7 @@
 # Accounting day, drawers, and cashier shifts — approved design
 
+> سجل تاريخي محفوظ للأدلة؛ ليس المرجع الحالي أو شهادة إكمال. راجع [توثيق2.6.14 الحالي](../README.md) و[فهرس الوثائق](../docs/INDEX.md) قبل اعتماد حالة أو أمر تشغيل هنا. تاريخ توحيد المراجع:2026-10-04.
+
 Status: design approved by owner on 2026-10-01. Local implementation in progress; no release is implied.
 
 ## مطابقة 2026-10-03 — تتقدم على الادعاءات التاريخية أدناه
