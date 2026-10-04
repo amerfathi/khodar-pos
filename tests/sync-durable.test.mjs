@@ -16,6 +16,63 @@ const memoryStorage = () => {
   };
 };
 
+test('an owner-resolved original triggers authenticated recovery and waits for local durable installation',async()=>{
+  const oldSession=globalThis.sessionStorage,oldFetch=globalThis.fetch;
+  globalThis.sessionStorage=memoryStorage();setSessionToken('fixture-token');
+  const identity={id:'reviewed-user',tenantId:'reviewed-tenant',branchIds:['main']};setSessionUser({...identity,sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
+  const repository=new AtomicStore(identity,{khodar_pos_branches_v1:[{id:'main',tenantId:identity.tenantId}],khodar_pos_active_branch_id_v1:'main'},memoryStorage());await repository.acquire();
+  repository.transact(()=>repository.enqueue({id:'reviewed-original',tenantId:identity.tenantId,branchId:'main',entityType:'expense',entityId:'exp',action:'create',payload:{id:'exp',branchId:'main',amount:8}}));
+  const queue=structuredClone(repository.current.outbox),before=JSON.stringify(repository.value);
+  const service=new CloudflareSyncService();service.repository=repository;service.isOnline=true;service.currentTenantId=identity.tenantId;
+  service.updateHandler=(_events,_cursor,_heads,_partial,proposal)=>repository.installReviewedResolution(proposal);
+  globalThis.fetch=async url=>url.endsWith('/resolutions')?Response.json({success:true,ready:true,protocol:'owner-reviewed-ledger-v1',tenantId:identity.tenantId,
+    completeHistory:true,history:[],queue,branches:[{id:'main',tenantId:identity.tenantId}],nextCursor:0,conflictHeads:{},
+    receipts:[{reviewId:'resolved',tenantId:identity.tenantId,choice:'server',events:queue,acceptedEventIds:[]}]}):
+    Response.json({error:'Source resolved by company owner; recover reviewed checkpoint'},{status:409});
+  try{
+    repository.durable={commit:async()=>{throw Error('review quota');}};
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),false);assert.equal(JSON.stringify(repository.value),before);assert.equal(service.lastError,'review quota');
+    repository.durable=null;
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),true);assert.equal(repository.current.outbox.length,0);
+    assert.equal(repository.read('braka_review_recovery_archive_v1')[0].original.outbox[0].id,'reviewed-original');
+  }finally{service.stopAutoSync();await repository.close();globalThis.fetch=oldFetch;globalThis.sessionStorage=oldSession;}
+});
+
+test('stale nonadditive mutations reach owner review without acknowledging or rewriting the local ledger', async()=>{
+  const previousSession=globalThis.sessionStorage,previousFetch=globalThis.fetch;
+  globalThis.sessionStorage=memoryStorage();
+  const identity={id:'review-user',tenantId:'review-tenant'};
+  setSessionToken('fixture-token');setSessionUser({...identity,sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
+  const repository=new AtomicStore(identity,{marker:1,[SYNC_HEADS_STATE_KEY]:{}},memoryStorage());
+  await repository.acquire();
+  repository.transact(()=>repository.enqueue({id:'price-edit',tenantId:identity.tenantId,branchId:'main',entityId:'p',entityType:'product',action:'update',payload:{id:'p',price:7}}));
+  const service=new CloudflareSyncService();service.isOnline=true;service.currentTenantId=identity.tenantId;service.repository=repository;
+  const requests=[],status=[];service.subscribe(value=>status.push(value));
+  globalThis.fetch=async(url,options)=>{
+    requests.push({url,body:JSON.parse(options.body)});
+    return url.endsWith('/conflicts')?Response.json({success:true,reviewId:'review-id',posted:false}):Response.json({error:'Stale multi-device mutation; synchronize and resolve the conflict'},{status:409});
+  };
+  try{
+    const before=JSON.stringify(repository.current);
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),false);
+    assert.equal(requests.some(item=>item.url.endsWith('/conflicts')),true);
+    assert.deepEqual(requests.find(item=>item.url.endsWith('/conflicts')).body.events,repository.current.outbox);
+    assert.equal(JSON.stringify(repository.current),before);
+    assert.equal(status.some(item=>item.status==='review_pending'&&item.reviewId==='review-id'),true);
+    assert.match(service.lastError,/مالك الشركة/);
+    assert.equal(status.some(item=>item.status==='synced_batch'),false);
+    requests.length=0;
+    globalThis.fetch=async(url)=>{requests.push({url});return Response.json({error:'Idempotency conflict'},{status:409});};
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),false);
+    assert.equal(requests.some(item=>item.url.endsWith('/conflicts')),false);
+    assert.equal(JSON.stringify(repository.current),before);
+    globalThis.fetch=async(url)=>url.endsWith('/conflicts')?Response.json({error:'Unavailable'},{status:503}):Response.json({error:'Stale multi-device mutation; synchronize and resolve the conflict'},{status:409});
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),false);
+    assert.equal(JSON.stringify(repository.current),before);
+    assert.doesNotMatch(service.lastError,/حُفظ التعارض/);
+  }finally{service.stopAutoSync();await repository.close();globalThis.fetch=previousFetch;globalThis.sessionStorage=previousSession;}
+});
+
 test('409 sales recovery durably rebases before retrying and only clears an acknowledged invoice', async () => {
   const oldSession = globalThis.sessionStorage, oldFetch = globalThis.fetch;
   globalThis.sessionStorage = memoryStorage();

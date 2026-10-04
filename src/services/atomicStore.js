@@ -6,8 +6,11 @@ import { applyInvoiceInventory } from './invoiceInventory.js';
 import { backupToState, validateBackup } from './backupValidation.js';
 import { applyAcceptedConflictEvent, attachConflictPreconditions, SYNC_HEADS_STATE_KEY } from './syncConflictPolicy.js';
 import { isIndependentSale, isIndependentSalesQueue } from './independentSales.js';
+import { stageReviewedResolution, reviewedLedgerState } from './reviewLedgerReplay.js';
+import { canAccessBranch } from './branchAccess.js';
 
 const clone = value => structuredClone(value);
+export const INBOUND_REVIEW_KEY = 'braka_inbound_review_v1';
 const LEGACY_BUSINESS_KEYS = [
   'khodar_pos_products_v3','khodar_pos_customers_v3','khodar_pos_invoices_v3',
   'khodar_pos_expenses_v3','khodar_pos_damaged_v3','khodar_pos_workers_v3',
@@ -315,6 +318,7 @@ function assertWorkerAdvanceProjection(before, after, events) {
 // Web Locks are mandatory: localStorage has no cross-window compare-and-swap.
 export class AtomicStore {
   constructor(user, initialState, storage = globalThis.localStorage, { durableFirst = false } = {}) {
+    this.accessUser=user?withoutCredentials(clone(user)):null;
     this.user = user ? { id: user.id, tenantId: user.tenantId,
       syncScopeVersion: Number.isSafeInteger(Number(user.syncScopeVersion)) && Number(user.syncScopeVersion) > 0
         ? Number(user.syncScopeVersion) : 0 } : null;
@@ -434,6 +438,13 @@ export class AtomicStore {
 
   assertFinancialMutationHasProvenance(before, after) {
     if (this.user?.tenantId === 'tenant-demo') return;
+    if(this.reviewInstallation){
+      const expected=this.reviewInstallation;
+      if(Object.entries(expected.state).some(([key,value])=>JSON.stringify(after.state[key])!==JSON.stringify(value))||
+        after.cursor!==expected.cursor||after.outbox.length||JSON.stringify(after.applied)!==JSON.stringify(expected.applied))
+        throw new Error('Reviewed checkpoint changed before commit');
+      return;
+    }
     const restore = this.txEvents?.find(event => event.entityType === 'restore_snapshot');
     if (restore) {
       if (this.txEvents.at(-1) !== restore || restore.action !== 'create' || restore.payload?.id !== restore.entityId)
@@ -911,6 +922,100 @@ export class AtomicStore {
   receiveDurable(events, cursor, apply, serverHeads, partialVisibility = false) {
     return this.transactDurable(() => this.applyReceive(events, cursor, apply, serverHeads, partialVisibility));
   }
+  applyResilientReceive(events, cursor, apply, serverHeads, partialVisibility, retryReferences = true) {
+    const supported = new Set([...Object.values(FINANCIAL_EVENT_TYPES_BY_KEY).flat(),'restore_snapshot']);
+    if (!Array.isArray(events) || events.some(event => !supported.has(event?.entityType)))
+      throw new Error('حركة مزامنة غير مدعومة؛ لم يتقدم مؤشر الاستقبال');
+    const previousApplied = clone(this.draft.applied);
+    // Validate the transport/tenant/causal envelope before allowing business
+    // failures to be isolated. A cursor denotes durable receipt, not posting.
+    const previousTypes = new Set(this.txEventTypes), previousEvents = [...this.txEvents];
+    this.applyReceive(events, cursor, () => {}, serverHeads, partialVisibility);
+    this.draft.applied = previousApplied;
+    this.txEventTypes = previousTypes;
+    this.txEvents = previousEvents;
+    const pending = clone(this.draft.state[INBOUND_REVIEW_KEY] || []);
+    const known = new Map(pending.flatMap(group => group.events.map(event => [event.id,event])));
+    const groups = [...pending];
+    for (const event of events) {
+      if (previousApplied[event.id]) continue;
+      if (known.has(event.id)) {
+        if (JSON.stringify(known.get(event.id)) !== JSON.stringify(event)) throw new Error('Inbound retained identity changed');
+        continue;
+      }
+      const key = event.groupId || event.id;
+      let group = groups.find(group => group.key === key);
+      if (!group) { group = { key, events: [] }; groups.push(group); }
+      group.events.push(clone(event));
+      known.set(event.id,event);
+    }
+    const retained = [];
+    let referenceProgress = false;
+    for (const group of groups) {
+      // Baseline reference creates may unlock missing dependencies. Never
+      // reorder later financial effects across an unresolved earlier group.
+      const referenceOnly = group.events.every(event => event.action === 'create' &&
+        ['product','customer','supplier','worker','partner','branch'].includes(event.entityType));
+      if (retained.length && !referenceOnly) {
+        retained.push({ ...group, error: 'توجد حركة سابقة تحتاج مراجعة قبل تطبيق هذه المجموعة' });
+        continue;
+      }
+      const before = clone(this.draft), types = new Set(this.txEventTypes), history = [...this.txEvents];
+      try {
+        this.txEventTypes = new Set(group.events.map(event => event.entityType));
+        this.txEvents = clone(group.events);
+        apply(group.events);
+        this.validate(this.draft);
+        this.assertFinancialMutationHasProvenance(before, this.draft);
+        if (referenceOnly) referenceProgress = true;
+        for (const event of group.events) this.draft.applied[event.id] = true;
+        this.txEventTypes = new Set([...types,...this.txEventTypes]);
+        this.txEvents = [...history,...this.txEvents];
+      } catch (error) {
+        this.draft = before;
+        this.txEventTypes = types;
+        this.txEvents = history;
+        if (error.code !== 'MISSING_DEPENDENCY') throw error;
+        retained.push({ ...group, error: error.message });
+      }
+    }
+    this.draft.state[INBOUND_REVIEW_KEY] = retained;
+    if (retryReferences && referenceProgress && retained.length)
+      this.applyResilientReceive([],cursor,apply,serverHeads,partialVisibility,false);
+  }
+  receiveResilient(events, cursor, apply, serverHeads, partialVisibility = false) {
+    return this.transact(() => this.applyResilientReceive(events, cursor, apply, serverHeads, partialVisibility));
+  }
+  receiveResilientDurable(events, cursor, apply, serverHeads, partialVisibility = false) {
+    return this.transactDurable(() => this.applyResilientReceive(events, cursor, apply, serverHeads, partialVisibility));
+  }
+  recoverLegacyProducts(proofs, apply) {
+    const action=()=>{
+      if(!Array.isArray(proofs)||proofs.length>50||this.draft.outbox.length)throw new Error('Invalid dependency recovery');
+      const pending=(this.draft.state[INBOUND_REVIEW_KEY]||[]).flatMap(group=>group.events);
+      for(const proof of proofs){
+        const {source,parent,branchId}=proof || {};
+        const localParent=pending.find(event=>event.id===parent?.id);
+        if(proof.protocol!=='legacy-product-reference-v1'||source?.tenantId!==this.user.tenantId||parent?.tenantId!==this.user.tenantId||
+          !localParent||localParent.branchId!==branchId||JSON.stringify(localParent.payload)!==JSON.stringify(parent.payload)||
+          source.entityType!=='product'||source.action!=='create'||source.branchId||source.payload?.branchId||
+          source.payload?.id!==source.entityId||!Number.isSafeInteger(source.sequence)||source.sequence>=parent.sequence||
+          !localParent.payload.items?.some(item=>item.productId===source.entityId)||
+          !this.draft.state.khodar_pos_branches_v1?.some(branch=>branch.id===branchId&&branch.tenantId===this.user.tenantId))
+          throw new Error('Dependency proof does not match the retained branch source');
+        const rows=this.draft.state.khodar_pos_products_v3;
+        if(rows.some(row=>row.id===source.entityId))continue;
+        const payload={...clone(source.payload),tenantId:this.user.tenantId,branchId};
+        const event={id:`legacy-proof:${source.id}:${branchId}`,tenantId:this.user.tenantId,branchId,
+          entityType:'product',entityId:source.entityId,action:'create',payload};
+        this.draft.state.khodar_pos_products_v3=[payload,...rows];
+        this.txEventTypes.add('product');this.txEvents.push(event);
+        this.draft.state.braka_legacy_reference_proofs_v1=[...(this.draft.state.braka_legacy_reference_proofs_v1||[]),clone(proof)];
+      }
+      this.applyResilientReceive([],this.draft.cursor,apply,undefined,true);
+    };
+    return this.durable?this.transactDurable(action):this.transact(action);
+  }
   applySalesReconciliation(events, cursor, apply, serverHeads, proposal) {
     if (proposal?.protocol !== 'independent-sales-v1' || !isIndependentSalesQueue(this.draft.outbox) ||
         this.draft.cursor !== proposal.cursor || JSON.stringify(this.draft.outbox) !== JSON.stringify(proposal.queue))
@@ -942,5 +1047,45 @@ export class AtomicStore {
   }
   reconcileSalesDurable(events, cursor, apply, serverHeads, proposal) {
     return this.transactDurable(() => this.applySalesReconciliation(events, cursor, apply, serverHeads, proposal));
+  }
+  async installReviewedResolution(proposal){
+    if(this.pendingCommit||this.draft)throw new Error('Reviewed checkpoint writer busy');
+    if(proposal?.protocol!=='owner-reviewed-ledger-v1'||proposal.tenantId!==this.user.tenantId||proposal.completeHistory!==true||
+      JSON.stringify(proposal.queue)!==JSON.stringify(this.value.outbox)||!this.value.outbox.length)
+      throw new Error('Pending queue changed during reviewed recovery');
+    if(!Number.isSafeInteger(proposal.nextCursor)||proposal.nextCursor<this.value.cursor||!Array.isArray(proposal.history)||
+      !Array.isArray(proposal.branches)||!proposal.branches.length||proposal.branches.some(branch=>branch.tenantId!==this.user.tenantId||!canAccessBranch(this.accessUser,branch.id)))
+      throw new Error('Invalid reviewed checkpoint scope');
+    let sequence=0;
+    for(const event of proposal.history){
+      if(event.tenantId!==this.user.tenantId||!Number.isSafeInteger(event.sequence)||event.sequence<=sequence||event.sequence>proposal.nextCursor||
+        (event.branchId&&!canAccessBranch(this.accessUser,event.branchId)))throw new Error('Invalid reviewed history');
+      sequence=event.sequence;
+    }
+    if(this.value.state.khodar_pos_cash_shifts_v1?.length)throw new Error('Cash shifts require an audited reviewed checkpoint');
+    const plan=stageReviewedResolution({tenantId:this.user.tenantId,history:proposal.history,queue:proposal.queue,receipts:proposal.receipts,branches:proposal.branches,checkpoint:proposal.checkpoint});
+    if(JSON.stringify(plan.ledger.branches)!==JSON.stringify(proposal.branches))throw new Error('Reviewed branch manifest mismatch');
+    for(const rows of Object.values(plan.ledger).filter(Array.isArray))for(const row of rows)
+      if(row.branchId&&!canAccessBranch(this.accessUser,row.branchId))throw new Error('Reviewed checkpoint contains a foreign branch');
+    const selected=this.value.state.khodar_pos_active_branch_id_v1;
+    const active=proposal.branches.find(branch=>branch.id===selected)?.id||proposal.branches[0].id;
+    const state=reviewedLedgerState(plan.ledger,this.user.tenantId,proposal.nextCursor,active);
+    const applied=Object.fromEntries(proposal.history.map(event=>[event.id,true]));
+    if(!proposal.conflictHeads||typeof proposal.conflictHeads!=='object'||Array.isArray(proposal.conflictHeads)||
+      Object.values(proposal.conflictHeads).some(value=>value!==null&&(typeof value!=='string'||!value)))throw new Error('Invalid reviewed conflict heads');
+    state[SYNC_HEADS_STATE_KEY]=clone(proposal.conflictHeads);state[INBOUND_REVIEW_KEY]=[];
+    if(selected==='all'&&canAccessBranch(this.accessUser,'all'))state.khodar_pos_active_branch_id_v1='all';
+    const original=clone(this.value);
+    // Previous archives are kept once, not recursively duplicated in every
+    // subsequent full snapshot. Original business data and queue remain exact.
+    delete original.state.braka_review_recovery_archive_v1;
+    state.braka_review_recovery_archive_v1=[...(this.value.state.braka_review_recovery_archive_v1||[]),{original,receipts:plan.receipts,installedCursor:proposal.nextCursor}];
+    this.reviewInstallation={state,cursor:proposal.nextCursor,applied};
+    const action=()=>{
+      if(JSON.stringify(this.draft.outbox)!==JSON.stringify(proposal.queue))throw new Error('Pending queue changed');
+      Object.assign(this.draft.state,clone(state));this.draft.outbox=[];this.draft.cursor=proposal.nextCursor;this.draft.applied=applied;
+    };
+    try{return this.durable?await this.transactDurable(action):this.transact(action);}
+    finally{this.reviewInstallation=null;}
   }
 }

@@ -30,7 +30,8 @@ import { adjustBalance, applyPurchaseInventory, applyPurchaseReturnPurchase, app
 import { backupToState, validateBackup } from '../services/backupValidation.js';
 import { SYNC_HEADS_STATE_KEY } from '../services/syncConflictPolicy.js';
 import { scheduleBackup } from '../services/backupScheduler.js';
-import { AtomicStore } from '../services/atomicStore.js';
+import { AtomicStore, INBOUND_REVIEW_KEY } from '../services/atomicStore.js';
+import { MissingDependencyError } from '../services/missingDependency.js';
 import { DurableAggregate } from '../services/durableAggregate.js';
 import { branchCreateEvent } from '../services/branchEvents.js';
 import { applyInvoiceInventory } from '../services/invoiceInventory.js';
@@ -323,6 +324,8 @@ export function useAppStore(options = {}) {
     refreshInboundRecords();
   };
   const atomicAction = action => (...args) => {
+    if (local.read(INBOUND_REVIEW_KEY)?.length && action.name !== 'changeActiveBranch')
+      throw new Error('توجد سجلات مستلمة تحتاج مراجعة؛ لم يُعدّل السجل غير المكتمل');
     if (activeBranchId === 'all' && !new Set([
       'changeActiveBranch', 'addBranch', 'updateBranch', 'deleteBranch', 'setMainBranch',
       'transferStockBetweenBranches', 'importBackupJSON', 'addTrialRequest',
@@ -346,7 +349,11 @@ export function useAppStore(options = {}) {
     } finally { refreshBindings(); }
   };
   const financialAction = action => (...args) => {
-    const commit = () => atomicAction(action)(...args);
+    const commit = () => {
+      if (local.read(INBOUND_REVIEW_KEY)?.length)
+        throw new Error('توجد سجلات مستلمة تحتاج مراجعة؛ الأرصدة غير مكتملة، ولم تُسجّل حركة مالية جديدة');
+      return atomicAction(action)(...args);
+    };
     if (!currentUser || !getSessionToken() || !cloudflareSync.isOnline || !persistence.ready) return commit();
     return cloudflareSync.prepareFinancialMutation(currentUser.tenantId, handleInboundSyncEvents)
       .then(result => {
@@ -699,9 +706,9 @@ export function useAppStore(options = {}) {
           }
           setSalesReturns(prev => prev.some(r => r.id === entityId) ? prev : [payload, ...prev]);
         } else if (action === 'delete') {
-          if (!existing) throw new Error('مردود المبيعات المراد عكسه غير موجود');
+          if (!existing) throw new MissingDependencyError('مردود المبيعات المراد عكسه غير موجود');
           const invoice = inboundRecords.current.invoice.get(existing.invoiceId);
-          if (!invoice) throw new Error('الفاتورة الأصلية للمردود غير موجودة');
+          if (!invoice) throw new MissingDependencyError('الفاتورة الأصلية للمردود غير موجودة');
           setInvoices(prev => applySalesReturnInvoice(prev, existing, -1));
           setProducts(prev => applySalesReturnInventory(prev, invoice, existing, -1));
           if (existing.refundMethod === 'credit_deduction' && existing.customerId && existing.customerId !== 'walk_in') {
@@ -712,15 +719,15 @@ export function useAppStore(options = {}) {
       } else if (entityType === 'purchase_return') {
         if (action === 'create') {
           const purchase=inboundRecords.current.purchase.get(payload.purchaseId);
-          if (!purchase) throw new Error('شحنة المشتريات الأصلية للمردود غير موجودة');
+          if (!purchase) throw new MissingDependencyError('شحنة المشتريات الأصلية للمردود غير موجودة');
           setPurchases(prev=>applyPurchaseReturnPurchase(prev,payload,1));
           setProducts(prev=>applyPurchaseReturnInventory(prev,purchase,payload,1));
           if(payload.refundMethod==='supplier_debt_deduction') setSuppliers(prev=>adjustBalance(prev,purchase.supplierId,-Number(payload.totalRefundAmount)));
           setPurchaseReturns(prev => prev.some(r => r.id === entityId) ? prev : [payload, ...prev]);
         } else if (action === 'delete') {
-          if(!existing) throw new Error('مردود المشتريات المراد عكسه غير موجود');
+          if(!existing) throw new MissingDependencyError('مردود المشتريات المراد عكسه غير موجود');
           const purchase=inboundRecords.current.purchase.get(existing.purchaseId);
-          if(!purchase) throw new Error('شحنة المشتريات الأصلية للمردود غير موجودة');
+          if(!purchase) throw new MissingDependencyError('شحنة المشتريات الأصلية للمردود غير موجودة');
           setPurchases(prev=>applyPurchaseReturnPurchase(prev,existing,-1));
           setProducts(prev=>applyPurchaseReturnInventory(prev,purchase,existing,-1));
           if(existing.refundMethod==='supplier_debt_deduction') setSuppliers(prev=>adjustBalance(prev,purchase.supplierId,Number(existing.totalRefundAmount)));
@@ -728,11 +735,11 @@ export function useAppStore(options = {}) {
         }
       } else if (entityType === 'damaged_item') {
         if (action === 'create') {
-          if(!branches.some(branch=>branch.id===payload.branchId)) throw new Error('فرع قيد الهالك غير موجود');
+          if(!branches.some(branch=>branch.id===payload.branchId)) throw new MissingDependencyError('فرع قيد الهالك غير موجود');
           setProducts(prev=>applyDamageInventory(prev,payload,1));
           setDamagedItems(prev => prev.some(d => d.id === entityId) ? prev : [payload, ...prev]);
         } else if (action === 'delete') {
-          if(!existing) throw new Error('قيد الهالك المراد عكسه غير موجود');
+          if(!existing) throw new MissingDependencyError('قيد الهالك المراد عكسه غير موجود');
           setProducts(prev=>applyDamageInventory(prev,existing,-1));
           setDamagedItems(prev => prev.filter(d => d.id !== entityId));
         }
@@ -797,16 +804,23 @@ export function useAppStore(options = {}) {
 
   const inboundRef = useRef(null);
   inboundRef.current = (events, cursor, serverHeads, partialVisibility = false, proposal = null) => {
+    if(proposal?.protocol==='owner-reviewed-ledger-v1')return local.installReviewedResolution(proposal).finally(refreshBindings);
     const apply = batch => {
       refreshBindings();
       applyInboundSyncEvents(batch);
     };
+    if(proposal?.protocol==='legacy-product-references-v1'){
+      try{
+        const result=local.recoverLegacyProducts(proposal.proofs,apply);
+        return result?.then?result.finally(refreshBindings):result;
+      }finally{refreshBindings();}
+    }
     if (local.durable) return (proposal
       ? local.reconcileSalesDurable(events, cursor, apply, serverHeads, proposal)
-      : local.receiveDurable(events, cursor, apply, serverHeads, partialVisibility)).finally(refreshBindings);
+      : local.receiveResilientDurable(events, cursor, apply, serverHeads, partialVisibility)).finally(refreshBindings);
     try {
       return proposal ? local.reconcileSales(events, cursor, apply, serverHeads, proposal)
-        : local.receive(events, cursor, apply, serverHeads, partialVisibility);
+        : local.receiveResilient(events, cursor, apply, serverHeads, partialVisibility);
     } finally { refreshBindings(); }
   };
   const handleInboundSyncEvents = useCallback((...args) => inboundRef.current(...args), []);
@@ -1049,9 +1063,7 @@ export function useAppStore(options = {}) {
     }
 
     const newInvoiceNumber = settings.nextInvoiceNumber || (invoices.length + 126);
-    const invoiceId = invoiceData.id || (Array.isArray(currentUser?.branchIds)
-      ? `${String(newInvoiceNumber).padStart(6, '0')}-${crypto.randomUUID()}`
-      : String(newInvoiceNumber).padStart(6, '0'));
+    const invoiceId = invoiceData.id || `${String(newInvoiceNumber).padStart(6, '0')}-${crypto.randomUUID()}`;
 
     // Credit / remaining debt calculation for credit or split payments
     let creditDebt = 0;
@@ -2025,6 +2037,8 @@ export function useAppStore(options = {}) {
 
   const getBackupSnapshot = () => {
     refreshBindings();
+    if (local.read(INBOUND_REVIEW_KEY)?.length)
+      throw new Error('السجل المالي غير مكتمل؛ احفظ ملف الاسترداد للسجلات المتعثرة بدل اعتماد نسخة احتياطية ناقصة');
     return {
       version: 4,
       tenantId: currentUser?.tenantId || 'tenant-demo',
@@ -2063,6 +2077,13 @@ export function useAppStore(options = {}) {
     a.download = `khodar-full-backup-${getCurrentDateFormatted()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+  const exportInboundRecoveryJSON = () => {
+    const data = { format: 'braka-inbound-recovery-v1', exportedAt: new Date().toISOString(), aggregate: local.value };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data,null,2)], { type:'application/json' }));
+    const anchor = document.createElement('a');
+    anchor.href = url; anchor.download = `braka-inbound-recovery-${getCurrentDateFormatted()}.json`;
+    anchor.click(); URL.revokeObjectURL(url);
   };
 
   // Partner Actions (مع المزامنة السحابية اللحظية)
@@ -2845,6 +2866,8 @@ export function useAppStore(options = {}) {
     updateSettings: atomicAction(updateSettings),
     resetToSampleData: atomicAction(resetToSampleData),
     syncStatus,
+    inboundReview: local.read(INBOUND_REVIEW_KEY) || [],
+    exportInboundRecoveryJSON,
     backupStatus,
     syncNow,
     syncService: cloudflareSync,

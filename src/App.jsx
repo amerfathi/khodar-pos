@@ -494,6 +494,13 @@ export default function App() {
 
   return (
     <div className="braka-workspace min-h-screen bg-[#f8fafc] text-slate-800 flex flex-row selection:bg-primary-500 selection:text-white relative overflow-x-hidden font-sans">
+      {store.inboundReview?.length > 0 && <aside role="alert" className="fixed bottom-3 left-3 right-3 z-[100] rounded-xl border border-primary-200 bg-white p-4 text-sm text-navy-850 shadow-lg" dir="rtl">
+        <p>وصلت البيانات الجديدة، لكن توجد {store.inboundReview.length} مجموعة سجلات تحتاج مراجعة. حُفظت كاملة دون تطبيق جزئي؛ الأرصدة والتقارير غير مكتملة ولا تُعتمد حتى معالجة السبب.</p>
+        <details><summary>تفاصيل السجلات المتعثرة</summary>
+          {store.inboundReview.map(group => <p key={group.key}>{group.events.map(event => `${event.entityType}: ${event.entityId}`).join('، ')} — {group.error}</p>)}
+        </details>
+        <button className="mt-2 underline" onClick={store.exportInboundRecoveryJSON}>حفظ ملف الاسترداد الكامل على الجهاز</button>
+      </aside>}
       
       {/* 1. Desktop Vertical Sidebar (RTL: right side) */}
       <DesktopSidebar 
@@ -821,6 +828,12 @@ export default function App() {
                       </button>
                     </div>
                   );
+                }
+
+                if (store.inboundReview?.length && ['reports','audit'].includes(currentTab)) {
+                  return <section role="alert" dir="rtl" className="rounded-xl border border-primary-200 bg-white p-6">
+                    لا يمكن اعتماد التقارير المالية قبل معالجة السجلات المتعثرة. السجلات محفوظة؛ يمكنك متابعة عرض الأصناف وحفظ ملف الاسترداد.
+                  </section>;
                 }
 
                 return (

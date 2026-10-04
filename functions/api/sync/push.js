@@ -5,22 +5,31 @@ import { conflictKeysForEvent } from '../../../src/services/syncConflictPolicy.j
 import { canAccessBranch } from '../../../src/services/branchAccess.js';
 import { cashMovementFromRecord } from '../../../src/services/cashMovement.js';
 import { accountingDate } from '../../../src/services/cashShiftEngine.js';
+import { resolutionStatements,readReviewSnapshot } from '../../_lib/reviewResolution.js';
+import { proveLegacyProduct } from '../../../src/services/legacyProductProof.js';
 
 export const onRequestOptions = options;
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env, reviewCommit = null }) {
   const auth = await authenticateRequest(request, env);
   if (auth.error) return auth.error;
   try {
     const { tenantId, branchId, events } = await readJson(request);
     const accessError = requireTenant(auth, tenantId);
     if (accessError) return accessError;
+    if(reviewCommit&&(auth.principal.type!=='tenant'||!['company_owner','super_admin'].includes(auth.principal.role)||
+      reviewCommit.tenantId!==tenantId||reviewCommit.actorId!==auth.principal.id))return json({success:false,error:'Owner resolution denied'},403);
     if (!Array.isArray(events) || events.length < 1 || events.length > 100) return badRequest('events must contain 1-100 mutations');
+    const closed=await env.DB.prepare(`SELECT 1 FROM sync_review_originals
+      WHERE tenant_id=? AND event_id IN(SELECT value FROM json_each(?)) LIMIT 1`)
+      .bind(tenantId,JSON.stringify(events.map(event=>event?.id))).first();
+    if(closed)return json({success:false,error:'Source resolved by company owner; recover reviewed checkpoint'},409);
     if (env.CASH_SHIFTS_ENABLED !== 'true' && events.some(event => event?.entityType === 'cash_shift' || event?.payload?.cashShiftId))
       return json({ success: false, error: 'Cash shifts are not enabled' }, 503);
     const now = Date.now();
     const statements = [];
     const creatingBranches = new Set();
     const entityBranches = new Map();
+    let legacyHistory;
     const pendingCashCreates = new Map();
     const pendingCashReversals = new Set();
     const replayShifts = new Map();
@@ -37,7 +46,13 @@ export async function onRequestPost({ request, env }) {
       if (entityBranches.has(key)) return entityBranches.get(key);
       const row = await env.DB.prepare('SELECT branch_id FROM sync_events_v2 WHERE tenant_id = ? AND entity_type = ? AND entity_id = ? ORDER BY sequence LIMIT 1')
         .bind(tenantId, type, id).first();
-      const result = row ? row.branch_id : undefined;
+      let result = row ? row.branch_id : undefined;
+      if(type==='product'&&result===null){
+        legacyHistory??=(await readReviewSnapshot(env,tenantId)).history;
+        const parent=legacyHistory.find(event=>event.entityType==='invoice'&&event.action==='create'&&event.payload.items?.some(item=>item.productId===id));
+        const proof=parent&&proveLegacyProduct(legacyHistory,parent.id,id);
+        if(proof)result=proof.branchId;
+      }
       entityBranches.set(key, result);
       return result;
     };
@@ -293,9 +308,11 @@ export async function onRequestPost({ request, env }) {
         .bind(tenantId,event.id,cashMovement.shiftId,branch,cashMovement.drawerId,cashMovement.accountingDate,
           cashMovement.amountCents,cashMovement.reversesSourceEventId));
     }
+    if(reviewCommit){const [claim,finish]=resolutionStatements(env,reviewCommit);statements.unshift(claim);statements.push(finish);}
     if (statements.length) await env.DB.batch(statements);
     return json({ success: true, acceptedIds: events.map(event => event.id), syncedCount: events.length });
   } catch (error) {
+    if(String(error?.message).includes('SYNC_REVIEW_STALE'))return json({success:false,error:'Review changed; refresh before deciding'},409);
     if (String(error?.message).includes('SYNC_IDEMPOTENCY_CONFLICT')) return json({ success: false, error: 'Idempotency conflict' }, 409);
     if (String(error?.message).includes('SYNC_CAUSAL_CONFLICT')) return json({ success: false, error: 'Stale multi-device mutation; synchronize and resolve the conflict' }, 409);
     if (String(error?.message).includes('sync_commit_groups')) return json({ success: false, error: 'Commit group conflict' }, 409);

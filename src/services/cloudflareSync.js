@@ -14,6 +14,7 @@
 
 import { getApiBaseUrl } from '../config/appVersion.js';
 import { isIndependentSalesQueue } from './independentSales.js';
+import { INBOUND_REVIEW_KEY } from './atomicStore.js';
 
 const QUEUE_STORAGE_KEY = 'khodar_offline_sync_queue';
 const ACTIVITY_REFRESH_MIN_MS = 5 * 60_000;
@@ -277,6 +278,29 @@ export class CloudflareSyncService {
         return !pendingForTenant;
       } else {
         const details=await response.json().catch(()=>null);
+        if(response.status===409&&details?.error==='Source resolved by company owner; recover reviewed checkpoint'&&
+          this.repository&&typeof this.updateHandler==='function'){
+          const recovery=await fetch(`${baseUrl}/api/sync/resolutions`,{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
+            body:JSON.stringify({tenantId,events:queue})});
+          const proposal=await recovery.json().catch(()=>null);
+          if(token!==getSessionToken()||generation!==this.generation)return false;
+          if(!recovery.ok||!proposal?.success)throw Object.assign(new Error('تعذر استرداد التسوية؛ حُفظت الحركات المحلية دون تغيير'),{nonRetryable:recovery.status===409});
+          if(!proposal.ready){
+            const unresolved=new Set(proposal.unresolvedEventIds||[]),remaining=queue.filter(event=>unresolved.has(event.id));
+            if(remaining.length){
+              await fetch(`${baseUrl}/api/sync/conflicts`,{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
+                body:JSON.stringify({tenantId,events:selectSyncBatch(remaining)})});
+              if(token!==getSessionToken()||generation!==this.generation)return false;
+            }
+            throw Object.assign(new Error('توجد حركات مترابطة لم يعتمدها المالك بعد؛ لم تتغير البيانات المحلية'),{nonRetryable:true});
+          }
+          if(proposal.protocol!=='owner-reviewed-ledger-v1'||proposal.tenantId!==tenantId||JSON.stringify(proposal.queue)!==JSON.stringify(queue))throw new Error('Invalid reviewed recovery receipt');
+          await this.updateHandler(proposal.history,proposal.nextCursor,proposal.conflictHeads,true,proposal);
+          if(token!==getSessionToken()||generation!==this.generation)return false;
+          this.lastError=null;this.retryDelayMs=5_000;
+          this.notifyListeners('review_resolved',{count:queue.length});
+          return this.getQueue().length===0;
+        }
         if (response.status === 409 && this.repository && typeof this.updateHandler === 'function' &&
             isIndependentSalesQueue(queue)) {
           const cursor = this.repository.current.cursor;
@@ -300,7 +324,27 @@ export class CloudflareSyncService {
           if (![400, 403, 409].includes(reconciliation.status))
             throw new Error(`Sales reconciliation unavailable: HTTP ${reconciliation.status}`);
         }
-        const failure = Object.assign(new Error(response.status===409
+        let ownerReviewId=null;
+        if(response.status===409&&details?.error==='Stale multi-device mutation; synchronize and resolve the conflict'){
+          // Evidence receipt is never a financial acknowledgement. Keep the
+          // original optimistic state, event IDs and complete pending group.
+          try{
+            const reviewResponse=await fetch(`${baseUrl}/api/sync/conflicts`,{
+              method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
+              body:JSON.stringify({tenantId,events:batch})
+            });
+            if(token!==getSessionToken()||generation!==this.generation)return false;
+            const review=await reviewResponse.json().catch(()=>null);
+            if(token!==getSessionToken()||generation!==this.generation)return false;
+            if(reviewResponse.ok&&review?.success===true&&review.posted===false&&typeof review.reviewId==='string'&&review.reviewId){
+              ownerReviewId=review.reviewId;
+              this.notifyListeners('review_pending',{reviewId:ownerReviewId,count:batch.length});
+            }
+          }catch{/* Retain the original conflict and queue if evidence upload fails. */}
+        }
+        const failure = Object.assign(new Error(ownerReviewId
+          ? 'حُفظ التعارض لمراجعة مالك الشركة؛ الحركة المحلية لم تُعتمد أو تُحذف'
+          : response.status===409
           ? 'تعارض بين جهازين: لم تُرفع الحركة المحلية. زامن وراجع الحركة قبل إعادة المحاولة'
           : details?.error || `Sync push failed: HTTP ${response.status}`),
           { nonRetryable: [400, 401, 403, 409].includes(response.status) });
@@ -347,6 +391,23 @@ export class CloudflareSyncService {
         if (this.repository?.current.outbox.some(event => event.tenantId === tenantId)) return received;
         if (typeof callback !== 'function') throw new Error('No durable sync receiver');
         await callback(data.events, data.nextCursor, data.conflictHeads, data.fullTenantVisibility === false);
+        const retained=this.repository?.current.state[INBOUND_REVIEW_KEY] || [];
+        if(retained.length){
+          const products=this.repository.current.state.khodar_pos_products_v3 || [];
+          const references=retained.flatMap(group=>group.events).filter(event=>event.entityType==='invoice'&&event.action==='create')
+            .flatMap(event=>(event.payload.items||[]).filter(item=>item.productId&&!products.some(product=>product.id===item.productId))
+              .map(item=>({parentId:event.id,productId:item.productId}))).slice(0,50);
+          if(references.length){
+            const proofResponse=await fetch(`${baseUrl}/api/sync/dependencies`,{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},body:JSON.stringify({tenantId,references})});
+            if(token!==getSessionToken()||generation!==this.generation)return received;
+            if(proofResponse.ok){
+              const proof=await proofResponse.json();
+              if(token!==getSessionToken()||generation!==this.generation)return received;
+              if(proof.success&&proof.tenantId===tenantId&&proof.proofs?.length)
+                await callback([],this.repository.current.cursor,undefined,true,{protocol:'legacy-product-references-v1',proofs:proof.proofs});
+            }
+          }
+        }
         if (token !== getSessionToken() || generation !== this.generation) return 0;
         if (!this.repository) localStorage.setItem(syncKey, String(data.nextCursor));
         cursor = data.nextCursor;

@@ -95,6 +95,114 @@ before(async () => {
 });
 after(async () => { await mf?.dispose(); });
 
+test('conflict inbox preserves both sources, deduplicates retries and is readable only by its tenant owner', async()=>{
+  await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES('REVIEW','REVIEW','Review fixture','review-owner',?,'active','company_owner')").bind(await hashPassword(pass)).run();
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,code,is_main,status) VALUES('review-main','REVIEW','Review main','MAIN',1,'active')").run();
+  await db.prepare("INSERT INTO users(id,tenant_id,name,username,password_hash,role,status,branch_id,branch_ids_json,permissions_json) VALUES('review-staff','REVIEW','Review cashier','review-cashier',?,'cashier','active','review-main','[\"review-main\"]','{}')").bind(await hashPassword(pass)).run();
+  const a=await login('REVIEW','review-owner'),staff=await login('REVIEW','review-cashier');
+  const event=attachConflictPreconditions({id:'review-local',tenantId:'REVIEW',branchId:'review-main',
+    entityType:'product',entityId:'review-product',action:'create',payload:{id:'review-product',branchId:'review-main',name:'Local'}},{});
+  const remote={...event,id:'review-remote',payload:{...event.payload,name:'Server'}};
+  assert.equal((await call('/api/sync/push','POST',{tenantId:'REVIEW',events:[remote]},a)).status,200);
+  const input={tenantId:'REVIEW',events:[event]};
+  const first=await call('/api/sync/conflicts','POST',input,a);
+  assert.equal(first.status,200,await first.clone().text());
+  const saved=await first.json();
+  const retry=await (await call('/api/sync/conflicts','POST',input,a)).json();
+  assert.equal(retry.reviewId,saved.reviewId);
+  const listing=await call('/api/sync/conflicts?tenantId=REVIEW','GET',undefined,a);
+  assert.equal(listing.status,200);
+  const row=(await listing.json()).reviews.find(item=>item.id===saved.reviewId);
+  assert.deepEqual(row.proposedEvents,[event]);
+  assert.equal(row.serverEvents.some(item=>item.id===remote.id&&item.payload.name==='Server'),true);
+  assert.equal((await call('/api/sync/conflicts?tenantId=REVIEW','GET',undefined,staff)).status,403);
+  assert.equal((await call('/api/sync/conflicts?tenantId=REVIEW','GET',undefined,b)).status,403);
+  assert.equal((await call('/api/sync/conflicts','POST',input,b)).status,403);
+  assert.equal((await call('/api/sync/conflicts?tenantId=A')).status,401);
+  const changed=await call('/api/sync/conflicts','POST',{...input,events:[{...event,payload:{...event.payload,name:'Changed'}}]},a);
+  assert.equal(changed.status,409);
+  const accepted=await db.prepare("SELECT COUNT(*) AS n FROM sync_events_v2 WHERE id='review-local'").first();
+  assert.equal(accepted.n,0);
+  const decision={tenantId:'REVIEW',reviewId:saved.reviewId,choice:'server'};
+  assert.equal((await call('/api/sync/conflicts','PATCH',decision,staff)).status,403);
+  assert.equal((await call('/api/sync/conflicts','PATCH',decision,b)).status,403);
+  const chosen=await call('/api/sync/conflicts','PATCH',decision,a);
+  assert.equal(chosen.status,200,await chosen.clone().text());
+  assert.equal((await chosen.json()).posted,false);
+  assert.equal((await call('/api/sync/conflicts','PATCH',decision,a)).status,200);
+  assert.equal((await call('/api/sync/conflicts','PATCH',{...decision,choice:'local'},a)).status,409);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM sync_events_v2 WHERE id='review-local'").first()).n,0);
+  const nextInput={tenantId:'REVIEW',events:[{...event,id:'review-another'}]};
+  const nextSaved=await (await call('/api/sync/conflicts','POST',nextInput,a)).json();
+  assert.ok(nextSaved.reviewId);
+  const advanced={...remote,id:'review-advanced',action:'update',conflictPolicyVersion:undefined,preconditions:undefined,payload:{id:remote.entityId,name:'Latest'}};
+  assert.equal((await call('/api/sync/push','POST',{tenantId:'REVIEW',events:[advanced]},a)).status,200);
+  assert.equal((await call('/api/sync/conflicts','PATCH',{...decision,reviewId:nextSaved.reviewId},a)).status,409);
+  assert.equal(await db.prepare('SELECT review_id FROM sync_review_decisions WHERE review_id=?').bind(nextSaved.reviewId).first(),null);
+});
+
+test('owner executes a reviewed update atomically; fresh heads, authenticated receipts and lost-response retries are enforced',async()=>{
+  const token=await login('REVIEW','review-owner',pass,'review-resolution-owner');
+  const snapshot=await (await call('/api/sync/pull?tenantId=REVIEW','GET',undefined,token)).json();
+  const event=attachConflictPreconditions({id:'resolution-local',tenantId:'REVIEW',branchId:'review-main',entityType:'product',entityId:'review-product',action:'update',payload:{id:'review-product',name:'Owner choice'}},{...snapshot.conflictHeads});
+  const remote=attachConflictPreconditions({...event,id:'resolution-remote',payload:{id:'review-product',name:'Concurrent'}},{...snapshot.conflictHeads});
+  assert.equal((await call('/api/sync/push','POST',{tenantId:'REVIEW',events:[remote]},token)).status,200);
+  const review=await (await call('/api/sync/conflicts','POST',{tenantId:'REVIEW',events:[event]},token)).json();
+  const rows=await (await call('/api/sync/conflicts?tenantId=REVIEW','GET',undefined,token)).json();
+  const item=rows.reviews.find(row=>row.id===review.reviewId);
+  const input={tenantId:'REVIEW',reviewId:review.reviewId,choice:'local',execute:true,expectedHeads:item.heads};
+  const response=await call('/api/sync/conflicts','PATCH',input,token);
+  assert.equal(response.status,200,await response.clone().text());
+  const resolved=await response.json();assert.equal(resolved.posted,true);assert.equal(resolved.status,'resolved');
+  assert.equal(resolved.receipt.acceptedEventIds.length,1);
+  const retry=await (await call('/api/sync/conflicts','PATCH',input,token)).json();
+  assert.deepEqual(retry.receipt,resolved.receipt);
+  assert.equal((await call('/api/sync/conflicts','PATCH',{...input,choice:'server'},token)).status,409);
+  const recovery=await call('/api/sync/resolutions','POST',{tenantId:'REVIEW',events:[event]},token);
+  assert.equal(recovery.status,200,await recovery.clone().text());
+  const data=await recovery.json();assert.equal(data.ready,true);assert.equal(data.protocol,'owner-reviewed-ledger-v1');
+  assert.equal(data.receipts[0].events[0].id,event.id);
+  assert.equal(data.checkpoint.products.find(row=>row.id==='review-product').name,'Owner choice');
+  assert.equal((await call('/api/sync/resolutions','POST',{tenantId:'REVIEW',events:[event]},b)).status,403);
+  assert.equal((await call('/api/sync/push','POST',{tenantId:'REVIEW',events:[event]},token)).status,409);
+  const staffToken=await login('REVIEW','review-cashier',pass,'review-resolution-cashier');
+  const state=await (await call('/api/sync/pull?tenantId=REVIEW','GET',undefined,token)).json();
+  const expense=attachConflictPreconditions({id:'review-expense',tenantId:'REVIEW',branchId:'review-main',entityType:'expense',entityId:'review-expense',action:'create',payload:{id:'review-expense',branchId:'review-main',amount:12,paymentMethod:'cash'}},{...state.conflictHeads});
+  const next=attachConflictPreconditions({...expense,id:'server-expense',entityId:'server-expense',payload:{...expense.payload,id:'server-expense',amount:9}},{...state.conflictHeads});
+  assert.equal((await call('/api/sync/push','POST',{tenantId:'REVIEW',events:[next]},token)).status,200);
+  const captured=await (await call('/api/sync/conflicts','POST',{tenantId:'REVIEW',events:[expense]},token)).json();
+  const beforeListing=await (await call('/api/sync/conflicts?tenantId=REVIEW','GET',undefined,token)).json();
+  const stale={tenantId:'REVIEW',reviewId:captured.reviewId,choice:'server',execute:true,expectedHeads:beforeListing.reviews.find(row=>row.id===captured.reviewId).heads};
+  const extra={...next,id:'newer-expense',entityId:'newer-expense',payload:{...next.payload,id:'newer-expense'},conflictPolicyVersion:undefined,preconditions:undefined};
+  assert.equal((await call('/api/sync/push','POST',{tenantId:'REVIEW',events:[extra]},token)).status,200);
+  assert.equal((await call('/api/sync/conflicts','PATCH',stale,token)).status,409);
+  const fresh=await (await call('/api/sync/conflicts?tenantId=REVIEW','GET',undefined,token)).json();
+  assert.equal((await call('/api/sync/conflicts','PATCH',{...stale,expectedHeads:fresh.reviews.find(row=>row.id===captured.reviewId).heads},token)).status,200);
+  assert.equal((await call('/api/sync/resolutions','POST',{tenantId:'REVIEW',events:[expense]},staffToken)).status,403);
+  const stored=await db.prepare('SELECT receipt_json FROM sync_review_resolutions WHERE review_id=?').bind(captured.reviewId).first();
+  assert.equal(JSON.parse(stored.receipt_json).choice,'server');
+  await assert.rejects(db.prepare(`INSERT INTO sync_review_resolutions(review_id,tenant_id,decided_by,choice,expected_heads_json,receipt_json) VALUES(?,'REVIEW','REVIEW','server','{}','{}')`)
+    .bind('missing-review').run(),/SYNC_REVIEW_STALE/);
+});
+
+test('legacy invoice dependency proof is branch-scoped and permits future sales without rewriting its old source',async()=>{
+  const token=await login('REVIEW','review-owner',pass,'review-legacy-owner'),cashier=await login('REVIEW','review-cashier',pass,'review-legacy-cashier');
+  const tenantId='REVIEW',branchId='review-main',payload={id:'legacy-proof-product',name:'Legacy carrot',currentStockKg:12,costPerKg:3};
+  const oldInvoice={id:'legacy-proof-invoice',branchId,customerId:'walk_in',status:'active',finalTotal:27,paidAmount:27,remainingDebt:0,items:[{productId:payload.id,netWeight:3,pricePerKg:9}]};
+  const sources=[{id:'legacy-proof-source',branch:null,type:'product',row:payload},{id:'legacy-proof-parent',branch:branchId,type:'invoice',row:oldInvoice}];
+  for(const {id,branch,type,row} of sources)
+    await db.prepare('INSERT INTO sync_events_v2(id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp) VALUES(?,?,?,?,?,\'create\',?,1,1)').bind(id,tenantId,branch,type,row.id,JSON.stringify(row)).run();
+  const sourceBefore=await db.prepare('SELECT * FROM sync_events_v2 WHERE tenant_id=? AND id=?').bind(tenantId,'legacy-proof-source').first();
+  const input={tenantId,references:[{parentId:'legacy-proof-parent',productId:payload.id}]};
+  const response=await call('/api/sync/dependencies','POST',input,cashier);assert.equal(response.status,200);
+  const proof=(await response.json()).proofs[0];assert.equal(proof.branchId,branchId);assert.equal(proof.source.payload.currentStockKg,12);
+  assert.equal((await call('/api/sync/dependencies','POST',input,b)).status,403);
+  const fresh=await (await call('/api/sync/pull?tenantId=REVIEW','GET',undefined,token)).json();
+  const sale=attachConflictPreconditions({id:'proof-future-sale',tenantId,branchId,entityType:'invoice',entityId:'proof-future-sale',action:'create',payload:{...oldInvoice,id:'proof-future-sale',items:[{productId:payload.id,netWeight:1,pricePerKg:9}],finalTotal:9,paidAmount:9}},{...fresh.conflictHeads});
+  const accepted=await call('/api/sync/push','POST',{tenantId,events:[sale]},cashier);assert.equal(accepted.status,200,await accepted.clone().text());
+  assert.deepEqual(await db.prepare('SELECT * FROM sync_events_v2 WHERE tenant_id=? AND id=?').bind(tenantId,'legacy-proof-source').first(),sourceBefore);
+});
+
 test('independent offline sales obtain an audited rebase; stale edits and foreign tenants do not', async () => {
   const tenantId = 'REBASE', branchId = 'fixture-rebase-main';
   await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES('REBASE','REBASE','Rebase fixture','rebase-owner',?,'active','company_owner')")

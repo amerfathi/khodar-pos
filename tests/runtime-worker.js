@@ -6,6 +6,9 @@ import * as tenants from '../functions/api/tenants/index.js';
 import * as push from '../functions/api/sync/push.js';
 import * as pull from '../functions/api/sync/pull.js';
 import * as rebase from '../functions/api/sync/rebase.js';
+import * as conflicts from '../functions/api/sync/conflicts.js';
+import * as resolutions from '../functions/api/sync/resolutions.js';
+import * as dependencies from '../functions/api/sync/dependencies.js';
 import * as branches from '../functions/api/branches/index.js';
 import * as backup from '../functions/api/backup.js';
 import * as trials from '../functions/api/trial-requests/index.js';
@@ -23,7 +26,7 @@ import * as cashDevices from '../functions/api/cash/devices.js';
 import * as cashGrants from '../functions/api/cash/grants.js';
 import { onRequest } from '../functions/api/_middleware.js';
 const routes = { '/api/auth/me': me, '/api/auth/reset': reset, '/api/auth/recovery-token': recovery, '/api/tenants/lookup': login, '/api/users': users, '/api/tenants': tenants,
-  '/api/sync/push': push, '/api/sync/pull': pull, '/api/sync/rebase': rebase, '/api/branches': branches, '/api/backup': backup,
+  '/api/sync/push': push, '/api/sync/pull': pull, '/api/sync/rebase': rebase, '/api/sync/conflicts': conflicts, '/api/sync/resolutions':resolutions, '/api/sync/dependencies':dependencies, '/api/branches': branches, '/api/backup': backup,
   '/api/trial-requests': trials, '/api/releases': releases, '/api/auth/logout': logout, '/api/auth/password': password,
   '/api/auth/platform-owner': platformOwner, '/api/cash/drawers': cashDrawers, '/api/cash/shifts': cashShifts,
   '/api/cash/shifts/close': closeCashShift, '/api/cash/devices': cashDevices, '/api/cash/grants': cashGrants };

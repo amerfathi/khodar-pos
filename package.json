@@ -1,7 +1,7 @@
 {
   "name": "khodar-pos",
   "private": true,
-  "version": "2.6.13",
+  "version": "2.6.14",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -22,7 +22,8 @@
     "test:browser-idb-migrate": "node tests/browser-atomic.test.mjs --idb-migrate",
     "test:browser-app-durable": "node tests/browser-app-durable.test.mjs",
     "test:accounting": "node tests/accounting_audit_test.cjs && node tests/comprehensive_qa_suite.cjs",
-    "test": "npm run test:security && npm run test:integration && npm run test:accounting",
+    "test": "npm run test:security && npm run test:integration && npm run test:conflict-review && npm run test:accounting",
+    "test:conflict-review": "node --test tests/conflict-review-ui.test.mjs tests/legacy-product-proof.test.mjs tests/review-ledger-replay.test.mjs tests/review-resolution-atomic.test.mjs",
     "lint": "eslint src functions electron tests",
     "typecheck:core": "tsc --project tsconfig.core.json --pretty false",
     "typecheck": "tsc --project tsconfig.json --pretty false",

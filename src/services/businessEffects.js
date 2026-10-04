@@ -1,3 +1,4 @@
+import { MissingDependencyError } from './missingDependency.js';
 const round = value => Math.round(value * 100) / 100;
 const belongsToBranch = (product, branchId) => !product.branchId || product.branchId === branchId;
 
@@ -16,7 +17,7 @@ export function applyStockTransfer(products, branches, transfer) {
       throw new Error('ربط أصناف المناقلة غير صالح');
     return products;
   }
-  if (products.filter(p => p.id === productId).length !== 1) throw new Error('صنف المناقلة غير موجود أو غير محدد');
+  if (products.filter(p => p.id === productId).length !== 1) throw new MissingDependencyError('صنف المناقلة غير موجود أو غير محدد');
   return products.map(product => {
     if (product.id !== productId) return product;
     const stocks = product.branchStock || {};
@@ -36,7 +37,7 @@ export function applySalesReturnInventory(products, invoice, returned, direction
     const quantity=Number(item.returnedWeight);
     if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('كمية مردود مبيعات غير صالحة');
     const matches=next.filter(product => belongsToBranch(product, branchId) && (item.productId ? product.id === item.productId : product.name?.trim() === item.name?.trim()));
-    if (matches.length !== 1) throw new Error('صنف مردود المبيعات غير موجود أو غير محدد');
+    if (matches.length !== 1) throw new MissingDependencyError('صنف مردود المبيعات غير موجود أو غير محدد');
     next=next.map(product => {
       if (product.id !== matches[0].id) return product;
       const stock=round(Number(product.currentStockKg || 0) + direction*quantity);
@@ -51,7 +52,7 @@ export function applySalesReturnInventory(products, invoice, returned, direction
 
 export function applySalesReturnInvoice(invoices, returned, direction) {
   const invoice=invoices.find(row => row.id === returned.invoiceId);
-  if (!invoice) throw new Error('الفاتورة الأصلية للمردود غير موجودة');
+  if (!invoice) throw new MissingDependencyError('الفاتورة الأصلية للمردود غير موجودة');
   if (!['cash','bank','credit_deduction'].includes(returned.refundMethod) ||
       !['restock','damaged'].includes(returned.inventoryAction) ||
       !Array.isArray(returned.items) || returned.items.length === 0) throw new Error('بيانات مردود المبيعات غير صالحة');
@@ -88,7 +89,7 @@ export function applySalesReturnInvoice(invoices, returned, direction) {
 }
 
 export function adjustBalance(rows, id, amount) {
-  if (!id || !rows.some(row => row.id === id)) throw new Error('الحساب المرتبط بالحركة غير موجود');
+  if (!id || !rows.some(row => row.id === id)) throw new MissingDependencyError('الحساب المرتبط بالحركة غير موجود');
   if (!Number.isFinite(Number(amount))) throw new Error('قيمة مالية غير صالحة');
   return rows.map(row => row.id === id ? { ...row, balance: round(Number(row.balance || 0) + Number(amount)) } : row);
 }
@@ -98,7 +99,7 @@ export function applyPurchaseInventory(products, purchase, direction) {
   const quantity = Number(purchase.quantityKg), cost = Number(purchase.costPerKg);
   if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(cost) || cost < 0) throw new Error('كمية أو تكلفة شراء غير صالحة');
   const matches = products.filter(product => belongsToBranch(product, purchase.branchId || 'branch-main') && (purchase.productId ? product.id === purchase.productId : product.name?.trim() === purchase.productName?.trim()));
-  if (matches.length !== 1) throw new Error('الصنف المرتبط بالشراء غير موجود أو غير محدد');
+  if (matches.length !== 1) throw new MissingDependencyError('الصنف المرتبط بالشراء غير موجود أو غير محدد');
   const id = matches[0].id, branch = purchase.branchId || 'branch-main';
   return products.map(product => {
     if (product.id !== id) return product;
@@ -118,7 +119,7 @@ export function applyPurchaseInventory(products, purchase, direction) {
 
 export function applyPurchaseReturnPurchase(purchases, returned, direction) {
   const purchase=purchases.find(row=>row.id===returned.purchaseId);
-  if (!purchase) throw new Error('شحنة المشتريات الأصلية غير موجودة');
+  if (!purchase) throw new MissingDependencyError('شحنة المشتريات الأصلية غير موجودة');
   const quantity=Number(returned.returnedKg);
   const price=Number(purchase.costPerKg);
   const amount=Number(returned.totalRefundAmount);
@@ -140,7 +141,7 @@ export function applyPurchaseReturnInventory(products, purchase, returned, direc
   const quantity=Number(returned.returnedKg);
   if(!Number.isFinite(quantity) || quantity<=0) throw new Error('كمية مردود المشتريات غير صالحة');
   const matches=products.filter(row=>belongsToBranch(row, purchase.branchId || 'branch-main') && (purchase.productId ? row.id===purchase.productId : row.name?.trim()===purchase.productName?.trim()));
-  if(matches.length!==1) throw new Error('صنف مردود المشتريات غير موجود أو غير محدد');
+  if(matches.length!==1) throw new MissingDependencyError('صنف مردود المشتريات غير موجود أو غير محدد');
   return products.map(product=>{
     if(product.id!==matches[0].id) return product;
     const old=Number(product.currentStockKg||0);
@@ -162,7 +163,7 @@ export function applyDamageInventory(products, damage, direction) {
   if(!Number.isFinite(quantity) || quantity<=0 || round(quantity)!==quantity || !damage.branchId ||
       !Number.isFinite(cost) || cost<0 || round(quantity*cost)!==Number(damage.totalLoss)) throw new Error('قيد هالك غير صالح');
   const matches=products.filter(row=>belongsToBranch(row, damage.branchId) && (damage.productId ? row.id===damage.productId : row.name?.trim()===(damage.productName||damage.name)?.trim()));
-  if(matches.length!==1) throw new Error('صنف الهالك غير موجود أو غير محدد');
+  if(matches.length!==1) throw new MissingDependencyError('صنف الهالك غير موجود أو غير محدد');
   return products.map(product=>{
     if(product.id!==matches[0].id) return product;
     const old=Number(product.currentStockKg||0);
@@ -176,7 +177,7 @@ export function applyDamageInventory(products, damage, direction) {
 }
 
 export function applyWorkerAdvance(workers, transaction, direction) {
-  if (!workers.some(worker => worker.id === transaction.workerId)) throw new Error('الموظف المرتبط بالحركة غير موجود');
+  if (!workers.some(worker => worker.id === transaction.workerId)) throw new MissingDependencyError('الموظف المرتبط بالحركة غير موجود');
   const amount = Number(transaction.amount);
   const deducted = Number(transaction.deductedAdvance || 0);
   if (!['advance', 'salary_payment', 'absence_record'].includes(transaction.type) ||

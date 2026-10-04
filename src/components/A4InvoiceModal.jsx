@@ -161,7 +161,7 @@ export default function A4InvoiceModal({
                 <div className="inline-block bg-slate-900 text-white px-4 py-1.5 rounded-lg text-sm font-black tracking-wider">
                   فاتورة بيع رسمية
                 </div>
-                <div className="font-mono text-base font-black text-slate-900 mt-1">
+                <div dir="ltr" className="max-w-full break-all font-mono text-base font-black text-slate-900 mt-1">
                   NO: #{displayInvoiceNumber(invoice)}
                 </div>
                 <div className="text-[11px] text-slate-600 font-medium">

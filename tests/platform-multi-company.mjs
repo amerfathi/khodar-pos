@@ -92,7 +92,8 @@ async function client(company, username, platform = 'web', port = 9340) {
   } else {
     const context = await chrome.createBrowserContext(); resources.push(() => context.close());
     const webOrigin = process.env.BRAKA_TEST_WEB_ORIGIN || origin;
-    if (webOrigin !== origin && !/^http:\/\/127\.0\.0\.1:\d+$/.test(webOrigin)) throw Error('Candidate UI requires loopback');
+    if (webOrigin !== origin && !/^http:\/\/127\.0\.0\.1:\d+$/.test(webOrigin) &&
+        !(live&&webOrigin==='https://qa-2614.khodar-pos.pages.dev')) throw Error('Candidate UI requires an explicit isolated QA origin');
     page = await context.newPage(); await page.goto(`${webOrigin}/?login=true`, { waitUntil: 'networkidle2' });
   }
   const errors = [], responses = [];
@@ -145,13 +146,14 @@ async function client(company, username, platform = 'web', port = 9340) {
   assert.ok(state.state.khodar_pos_products_v3.every(product => product.tenantId === company));
   assert.ok(state.state.khodar_pos_products_v3.every(product => product.branchId === `${company}-branch-${username === 'branch2-cashier' ? 2 : 1}`));
   assert.ok(!(await page.evaluate(() => document.body.innerText)).includes(`${company === companyId('CA') ? companyId('CB') : companyId('CA')} Tomatoes`));
+  const scopedOrigin=platform==='web'?(process.env.BRAKA_TEST_WEB_ORIGIN||origin):origin;
   const scope = await page.evaluate(async (origin, company, companies) => {
     const headers = { Authorization: `Bearer ${sessionStorage.getItem('khodar_pos_session_token')}` };
     const foreign = await fetch(`${origin}/api/sync/pull?tenantId=${company}`, { headers });
     const other = await fetch(`${origin}/api/sync/pull?tenantId=${company === companies.CA ? companies.CB : companies.CA}&cursor=0`, { headers });
     const own = await fetch(`${origin}/api/sync/pull?tenantId=${company}&cursor=0`, { headers }).then(r => r.json());
     return { foreignTenantStatus: other.status, ownTenantStatus: foreign.status, branches: [...new Set(own.events.map(event => event.branchId))] };
-  }, origin, company, { CA: companyId('CA'), CB: companyId('CB') });
+  }, scopedOrigin, company, { CA: companyId('CA'), CB: companyId('CB') });
   assert.equal(scope.foreignTenantStatus, 403);
   assert.deepEqual(scope.branches, [`${company}-branch-${username === 'branch2-cashier' ? 2 : 1}`]);
   return { page, company, username, platform, errors, responses };
@@ -186,7 +188,14 @@ async function scenario(name, identities, offline) {
   const before = {};
   for (const company of new Set(clients.map(c => c.company))) before[company] = (await cloud(company)).events.filter(e => e.entityType === 'invoice').length;
   checkpoint('prepare-sale');
-  await Promise.all(clients.map((c, i) => prepareSale(c, `${name}-${runId}-${i}`)));
+  await Promise.all(clients.map(async(c,i)=>{
+    try{await prepareSale(c,`${name}-${runId}-${i}`);}
+    catch(error){
+      await c.page.screenshot({path:join(artifacts,`${name}-prepare-failure-${i}.png`),fullPage:true});
+      console.log(JSON.stringify({prepareFailure:{company:c.company,user:c.username,platform:c.platform},errors:c.errors,
+        screen:await c.page.evaluate(()=>document.body.innerText.slice(-1500))}));throw error;
+    }
+  }));
   if (offline) await Promise.all(clients.map(c => c.page.setOfflineMode(true)));
   checkpoint('commit-sale');
   if (name.endsWith('sequential')) {

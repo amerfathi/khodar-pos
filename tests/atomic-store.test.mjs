@@ -16,6 +16,62 @@ const storage = () => ({ values: new Map(), getItem(key) { return this.values.ge
   get length() { return this.values.size; } });
 const user = () => ({ id:crypto.randomUUID(),tenantId:'test-tenant' });
 const initial = { invoices:[], stock:20, debt:0 };
+
+test('resilient receive retains a failed whole group while admitting new reference records and retries once', async () => {
+  const identity = user(), backend = storage();
+  const store = new AtomicStore(identity, { records: [] }, backend);
+  await store.acquire();
+  const evt = (id, type, groupId) => ({ id, tenantId: identity.tenantId, entityId:id,
+    entityType:type, action:'create', payload:{id}, groupId });
+  const batch = [evt('old','invoice','old-group'), evt('linked','expense','old-group'), evt('carrot','product','new-group')];
+  const apply = events => { for (const e of events) {
+    store.set('records', rows => [...rows,e.id]);
+    if (e.id === 'old' && !store.read('records').includes('dependency')) throw Object.assign(Error('missing dependency'),{code:'MISSING_DEPENDENCY'});
+  } };
+  try {
+    store.receiveResilient(batch, 3, apply);
+    assert.deepEqual(store.read('records'), ['carrot']);
+    assert.equal(store.value.cursor, 3);
+    assert.equal(store.value.applied.old, undefined);
+    assert.deepEqual(store.read('braka_inbound_review_v1')[0].events, batch.slice(0,2));
+    const reopened = new AtomicStore(identity, {}, backend);
+    assert.equal(reopened.read('braka_inbound_review_v1').length,1);
+    const before = JSON.stringify(store.value), write = backend.setItem;
+    backend.setItem = () => { throw Error('quota'); };
+    assert.throws(() => store.receiveResilient([evt('dependency','product')],4,apply),/quota/);
+    assert.equal(JSON.stringify(store.value),before);
+    backend.setItem=write;
+    store.receiveResilient([evt('dependency','product')],4,apply);
+    store.receiveResilient([],4,apply);
+    assert.deepEqual(store.read('records'),['carrot','dependency','old','linked']);
+    assert.equal(store.read('braka_inbound_review_v1').length,0);
+    store.receiveResilient([],4,apply);
+    assert.equal(store.read('records').length,4);
+    assert.throws(() => store.receiveResilient([{...evt('foreign','product'),tenantId:'foreign'}],5,apply),/tenant/);
+  } finally { await store.close(); }
+});
+
+test('durable resilient receipt cannot advance past an orphan unless its retention is committed', async () => {
+  const identity=user(),backend=storage(),store=new AtomicStore(identity,{records:[]},backend);
+  await store.acquire();
+  const old={id:'old',tenantId:identity.tenantId,entityId:'old',entityType:'invoice',action:'create',payload:{id:'old'}};
+  const apply=()=>{store.set('records',['partial']);throw Object.assign(Error('missing'),{code:'MISSING_DEPENDENCY'});};
+  const before=JSON.stringify(store.value);
+  try {
+    store.durable={commit:async()=>{throw Error('quota');}};
+    await assert.rejects(store.receiveResilientDurable([old],1,apply),/quota/);
+    assert.equal(JSON.stringify(store.value),before);
+    let acknowledge;
+    store.durable={commit:(_key,value)=>new Promise(resolve=>{acknowledge=()=>resolve(value);})};
+    const pending=store.receiveResilientDurable([old],1,apply);
+    assert.equal(store.value.cursor,0);
+    acknowledge();await pending;
+    assert.equal(store.value.cursor,1);
+    assert.deepEqual(store.read('records'),[]);
+    assert.deepEqual(store.read('braka_inbound_review_v1')[0].events,[old]);
+    assert.equal(store.value.applied.old,undefined);
+  } finally {await store.close();}
+});
 const migrationState = identity => ({...initial,khodar_pos_branches_v1:[{
   id:'main',tenantId:identity.tenantId,name:'Main',code:'M',isMain:true,status:'active'
 }],khodar_pos_active_branch_id_v1:'main'});

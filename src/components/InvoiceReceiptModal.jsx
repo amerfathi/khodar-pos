@@ -86,9 +86,9 @@ export default function InvoiceReceiptModal({ isOpen, onClose, invoice, settings
 
             {/* Invoice Meta */}
             <div className="py-2.5 border-b border-dashed border-slate-300 space-y-1 text-[11px]">
-              <div className="flex justify-between font-bold text-slate-800">
+              <div className="flex flex-wrap justify-between gap-1 font-bold text-slate-800">
                 <span>فاتورة بيع رقم:</span>
-                <span className="font-mono text-xs">#{displayInvoiceNumber(invoice)}</span>
+                <span dir="ltr" className="max-w-full break-all font-mono text-xs">#{displayInvoiceNumber(invoice)}</span>
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>التاريخ والوقت:</span>

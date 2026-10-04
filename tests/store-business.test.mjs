@@ -465,8 +465,13 @@ test('purchase, party payments and employee advances reconcile on sender, receiv
     const orphanEvent=attachConflictPreconditions({
       id:'orphan-sale-event',tenantId:'A',entityType:'invoice',entityId:orphanInvoice.id,action:'create',payload:orphanInvoice
     },structuredClone(cloudflareSync.repository.value.state[SYNC_HEADS_STATE_KEY]));
-    await act(async()=>{assert.throws(()=>cloudflareSync.updateHandler([orphanEvent],cursor+23),/صنف الفاتورة غير موجود/);});
-    assert.equal(receiver.getItem(cloudflareSync.repository.key),receiverBeforeOrphan,'inbound orphan sale must not advance cursor or invoice');
+    await act(async()=>{cloudflareSync.updateHandler([orphanEvent],cursor+23);});
+    const beforeOrphan=JSON.parse(receiverBeforeOrphan),afterOrphan=cloudflareSync.repository.value;
+    assert.equal(afterOrphan.cursor,cursor+23,'receipt cursor advances only with durable retention');
+    assert.deepEqual(afterOrphan.state.khodar_pos_invoices_v3,beforeOrphan.state.khodar_pos_invoices_v3);
+    assert.deepEqual(afterOrphan.state.khodar_pos_products_v3,beforeOrphan.state.khodar_pos_products_v3);
+    assert.equal(afterOrphan.applied[orphanEvent.id],undefined);
+    assert.deepEqual(app.inboundReview[0].events,[orphanEvent]);
     await unmount();await mount(sender);
     const senderBeforeOrphan=sender.getItem(cloudflareSync.repository.key);
     await act(async()=>{assert.throws(()=>app.saveInvoice(orphanInvoice),/صنف الفاتورة غير موجود/);});

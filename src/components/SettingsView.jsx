@@ -14,6 +14,7 @@ import { ROLE_PERMISSIONS_PRESETS, DEFAULT_PERMISSIONS } from '../data/initialDa
 import { APP_VERSION, APP_RELEASE_DATE, getClientPlatform } from '../config/appVersion';
 import { checkLatestRelease } from '../services/releaseService';
 import DesktopUpdateModal from './DesktopUpdateModal';
+import ConflictReviewPanel from './ConflictReviewPanel';
 import { resolveUserPermissions } from '../store/useAppStore';
 import { getStoreDisplayAddress } from '../utils/storeDisplay';
 
@@ -1468,6 +1469,7 @@ export default function SettingsView({
                 animate={{ opacity: 1, y: 0 }}
                 className="space-y-5"
               >
+                <ConflictReviewPanel key={`${currentUser?.tenantId}:${currentUser?.id}`} user={currentUser} branches={branches} />
                 <div className="bg-navy-850 text-white rounded-2xl p-5 shadow-sm space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">

@@ -588,3 +588,57 @@ CREATE TABLE cash_devices (
 );
 
 ALTER TABLE tenants ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'Asia/Riyadh';
+
+CREATE TABLE sync_conflict_reviews (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+  submitted_by TEXT NOT NULL,
+  submission_key TEXT NOT NULL,
+  proposed_json TEXT NOT NULL,
+  server_json TEXT NOT NULL,
+  heads_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','resolved')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(tenant_id, submitted_by, submission_key)
+);
+CREATE INDEX sync_conflict_reviews_owner ON sync_conflict_reviews(tenant_id,status,created_at,id);
+CREATE TABLE sync_review_decisions (
+  review_id TEXT PRIMARY KEY REFERENCES sync_conflict_reviews(id) ON DELETE RESTRICT,
+  decided_by TEXT NOT NULL,
+  choice TEXT NOT NULL CHECK(choice IN ('local','server')),
+  created_at TEXT NOT NULL DEFAULT(datetime('now'))
+);
+CREATE TABLE sync_review_resolutions (
+  review_id TEXT PRIMARY KEY REFERENCES sync_conflict_reviews(id) ON DELETE RESTRICT,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+  decided_by TEXT NOT NULL,
+  choice TEXT NOT NULL CHECK(choice IN ('local','server')),
+  expected_heads_json TEXT NOT NULL,
+  receipt_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT(datetime('now'))
+);
+CREATE INDEX sync_review_resolutions_tenant ON sync_review_resolutions(tenant_id,review_id);
+CREATE TRIGGER sync_review_resolution_guard BEFORE INSERT ON sync_review_resolutions
+BEGIN
+  SELECT RAISE(ABORT,'SYNC_REVIEW_STALE') WHERE NOT EXISTS(SELECT 1 FROM sync_conflict_reviews r
+    WHERE r.id=NEW.review_id AND r.tenant_id=NEW.tenant_id AND r.status='pending')
+    ;
+  SELECT RAISE(ABORT,'SYNC_REVIEW_STALE') WHERE EXISTS(SELECT 1 FROM sync_review_decisions d WHERE d.review_id=NEW.review_id AND d.choice<>NEW.choice);
+  SELECT RAISE(ABORT,'SYNC_REVIEW_STALE') WHERE EXISTS(SELECT 1 FROM json_each(NEW.expected_heads_json) h
+    WHERE h.value IS NOT (SELECT last_event_id FROM sync_conflict_heads WHERE tenant_id=NEW.tenant_id AND conflict_key=h.key))
+    OR EXISTS(SELECT 1 FROM sync_conflict_heads s WHERE s.tenant_id=NEW.tenant_id
+      AND s.last_event_id IS NOT json_extract(NEW.expected_heads_json,'$."'||s.conflict_key||'"'))
+    ;
+END;
+CREATE TABLE sync_review_originals (
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+  event_id TEXT NOT NULL,
+  review_id TEXT NOT NULL REFERENCES sync_review_resolutions(review_id) ON DELETE RESTRICT,
+  PRIMARY KEY(tenant_id,event_id)
+);
+CREATE TRIGGER sync_review_index_originals AFTER INSERT ON sync_review_resolutions
+BEGIN
+  INSERT INTO sync_review_originals(tenant_id,event_id,review_id)
+  SELECT NEW.tenant_id,json_extract(source.value,'$.id'),NEW.review_id
+  FROM json_each(NEW.receipt_json,'$.events') source;
+END;

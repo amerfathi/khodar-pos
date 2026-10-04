@@ -1,4 +1,5 @@
 // Shared by local sale posting/reversal and inbound synchronization.
+import { MissingDependencyError } from './missingDependency.js';
 export function applyInvoiceInventory(products, invoice, direction) {
   const branchId = invoice.branchId || 'branch-main';
   for (const item of invoice.items || []) {
@@ -7,7 +8,7 @@ export function applyInvoiceInventory(products, invoice, direction) {
     const matches = products.filter(product => (!product.branchId || product.branchId === branchId) &&
       (item.productId ? item.productId === product.id :
       String(item.name || '').trim() === String(product.name || '').trim()));
-    if (matches.length !== 1) throw new Error('صنف الفاتورة غير موجود أو غير محدد؛ لم تتغير كمية المخزون');
+    if (matches.length !== 1) throw new MissingDependencyError('صنف الفاتورة غير موجود أو غير محدد؛ لم تتغير كمية المخزون');
   }
   return products.map(product => {
     const quantity = (invoice.items || []).reduce((sum, item) => {

@@ -1,0 +1,54 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { replayReviewedLedger, stageReviewedResolution } from '../src/services/reviewLedgerReplay.js';
+const event=(id,type,payload,action='create')=>({id,tenantId:'A',branchId:'main',entityType:type,entityId:payload.id,action,payload:{tenantId:'A',branchId:'main',...payload}});
+const history=[event('p0','product',{id:'p',name:'جزر',currentStockKg:20,branchStock:{main:20},costPerKg:2}),
+  event('c0','customer',{id:'c',balance:0}),
+  event('i0','invoice',{id:'i',customerId:'c',status:'active',remainingDebt:15,finalTotal:15,items:[{productId:'p',netWeight:3}]}),
+  event('r0','customer_payment',{id:'r',customerId:'c',amount:5,paymentMethod:'cash'}),
+  event('x0','expense',{id:'x',amount:4,paymentMethod:'cash'})];
+test('review replay recomputes actual inventory/debt from accepted sources, preserves inputs and is repeatable',()=>{
+  const original=JSON.stringify(history);
+  const result=replayReviewedLedger(history,'A');
+  assert.equal(result.products[0].currentStockKg,17);
+  assert.equal(result.products[0].branchStock.main,17);
+  assert.equal(result.customers[0].balance,10);
+  assert.equal(result.expenses[0].amount,4);
+  assert.deepEqual(replayReviewedLedger(history,'A'),result);
+  assert.equal(JSON.stringify(history),original);
+});
+test('void replay reverses a sale exactly once and preserves the receipt source',()=>{
+  const result=replayReviewedLedger([...history,event('v0','invoice',{id:'i',status:'voided'},'void')],'A');
+  assert.equal(result.products[0].currentStockKg,20);
+  assert.equal(result.customers[0].balance,-5);
+  assert.equal(result.customerPayments.length,1);
+});
+test('foreign tenant, missing dependency, repeated source and unsupported movement reject the whole replay',()=>{
+  for(const events of [[{...history[0],tenantId:'B'}],[history[2]],[...history,history[0]],
+    [...history,event('bad','cash_shift',{id:'shift'})]])
+    assert.throws(()=>replayReviewedLedger(events,'A'));
+  assert.throws(()=>replayReviewedLedger([...history,event('edit','invoice',{id:'i',finalTotal:99},'update')],'A'),/Unsupported/);
+});
+
+test('server choice archives the complete rejected source without replaying its optimistic debt or inventory',()=>{
+  const local=event('local-sale','invoice',{...history[2].payload,id:'local-invoice',remainingDebt:90,items:[{productId:'p',netWeight:8}]});
+  const receipt={reviewId:'review-1',tenantId:'A',choice:'server',events:[local],acceptedEventIds:[]};
+  const plan=stageReviewedResolution({tenantId:'A',history,queue:[local],receipts:[receipt]});
+  assert.equal(plan.ledger.products[0].currentStockKg,17);
+  assert.equal(plan.ledger.customers[0].balance,10);
+  assert.deepEqual(plan.archivedEvents,[local]);
+});
+test('local choice requires matching accepted replacement sources, rejects missing dependent groups',()=>{
+  const local=event('local-expense','expense',{id:'local-expense-row',amount:8,paymentMethod:'cash'});
+  const replacement={...local,id:'accepted-expense'};
+  const receipt={reviewId:'review-2',tenantId:'A',choice:'local',events:[local],acceptedEventIds:[replacement.id]};
+  const input={tenantId:'A',history:[...history,replacement],queue:[local],receipts:[receipt]};
+  assert.equal(stageReviewedResolution(input).ledger.expenses.length,2);
+  assert.throws(()=>stageReviewedResolution({...input,history}),/accepted/);
+  assert.throws(()=>stageReviewedResolution({...input,history:[...history,{...replacement,payload:{...replacement.payload,amount:80}}]}),/accepted/);
+  assert.throws(()=>stageReviewedResolution({...input,queue:[local,event('dependent','expense',{id:'dependent-row',amount:2})]}),/unreviewed/);
+  const grouped={...local,groupId:'group'},dependent={...event('dependent','expense',{id:'dependent-row',amount:2}),groupId:'group'};
+  assert.throws(()=>stageReviewedResolution({...input,queue:[grouped,dependent],receipts:[{...receipt,events:[grouped]}]}),/Incomplete/);
+  assert.throws(()=>stageReviewedResolution({...input,receipts:[{...receipt,tenantId:'B'}]}),/receipt/);
+  assert.throws(()=>stageReviewedResolution({...input,receipts:[receipt,receipt]}),/receipt/);
+});

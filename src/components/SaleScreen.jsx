@@ -675,7 +675,7 @@ export default function SaleScreen({
               <div>
                 <span className="text-[10px] font-semibold text-slate-400 block">رقم الفاتورة الحالية:</span>
                 <span className="font-mono font-bold text-base text-navy-850">
-                  #{padInvoiceNumber(settings.nextInvoiceNumber || 1)}
+                  #{padInvoiceNumber(settings.nextInvoiceNumber || 1)} <span className="text-xs">تسلسل محلي؛ المرجع الفريد يظهر بعد الحفظ</span>
                 </span>
               </div>
 
