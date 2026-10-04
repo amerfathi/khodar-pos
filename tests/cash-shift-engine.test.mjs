@@ -60,3 +60,13 @@ test('overdue drawer cannot take next-day cash, while another drawer can', () =>
   const second = openShift(first, { ...base, drawerId:'drawer-2', id:'shift-2', actorId:'cashier-2', offlineDeviceId:'pc-2', openingCash:50, at:'2026-10-01T21:01:00.000Z', timeZone:'Asia/Riyadh' });
   assert.equal(postCashEvent(second, { shiftId:'shift-2', id:'other-drawer', actorId:'cashier-2', deviceId:'pc-2', amount:10, at:'2026-10-01T21:02:00.000Z', online:true })[1].events.length, 1);
 });
+
+test('another cashier cannot post or close the first cashier shift before handover', () => {
+  const first=opened();
+  assert.throws(()=>postCashEvent(first,{shiftId:'shift-1',id:'foreign-post',actorId:'cashier-2',deviceId:'pc-1',
+    amount:10,at:'2026-10-01T18:10:00.000Z',online:true}),/المحاسب|تخص/);
+  assert.throws(()=>closeShift(first,{shiftId:'shift-1',actorId:'cashier-2',deviceId:'pc-1',
+    countedCash:100,at:'2026-10-01T19:00:00.000Z',pendingEventCount:0,mode:'local'}),/المحاسب|تخص/);
+  assert.equal(first[0].status,'open');
+  assert.equal(first[0].events.length,0);
+});

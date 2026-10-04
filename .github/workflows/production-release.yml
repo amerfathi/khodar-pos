@@ -42,6 +42,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:production-bundle
 
   android:
     needs: verify
@@ -116,6 +117,7 @@ jobs:
         run: |
           if ($env:STAGING_VERSION -ne '0') {
             node scripts/verify-release-public-key.cjs
+            node scripts/build-update-helper.cjs
             npm run build
             npx electron-builder --win --publish never --config.extraMetadata.version=$env:STAGING_VERSION
           } else {

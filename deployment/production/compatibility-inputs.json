@@ -1,0 +1,8 @@
+{
+  "baselineCommit": "84022ebb008b06c4802998485f165ae7a14e0261",
+  "sourceHashes": {
+    "functions/_lib/syncPolicy.js": "e275667eacdf95eef30f129c37d07e19f940c13e804fed2c2c61b34d71b58310",
+    "functions/api/tenants/lookup.js": "adf613ac45e06da210eb0136577b4ee7812d57e95eb10f139070583dd7838748",
+    "functions/api/sync/push.js": "713e07339357cb6787f32a45048b7671005c038230efd85477ce429c28d62276"
+  }
+}

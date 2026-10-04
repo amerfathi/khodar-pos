@@ -52,3 +52,21 @@ test('local choice requires matching accepted replacement sources, rejects missi
   assert.throws(()=>stageReviewedResolution({...input,receipts:[{...receipt,tenantId:'B'}]}),/receipt/);
   assert.throws(()=>stageReviewedResolution({...input,receipts:[receipt,receipt]}),/receipt/);
 });
+
+test('branch-owned transfer review replays its atomic stock pair once, not as a branchless financial record',()=>{
+  const groupId='transfer-group';
+  const source=event('source-stock','product',{...history[0].payload,currentStockKg:17,branchStock:{main:17}},'update');
+  const destination={...event('destination-stock','product',{id:'q',name:'جزر',currentStockKg:3,costPerKg:2,branchStock:{second:3}}),
+    branchId:'second',payload:{tenantId:'A',branchId:'second',id:'q',name:'جزر',currentStockKg:3,costPerKg:2,branchStock:{second:3}}};
+  const transfer={...event('transfer','stock_transfer',{id:'transfer',scopedProducts:true,sourceProductId:'p',destinationProductId:'q',
+    productId:'p',fromBranchId:'main',toBranchId:'second',quantityKg:3}),branchId:null};
+  delete transfer.payload.branchId;
+  const batch=[source,destination,transfer].map(row=>({...row,groupId}));
+  const input=[history[0],...batch],branches=[{id:'main',isMain:true},{id:'second'}];
+  const result=replayReviewedLedger(input,'A',{branches});
+  assert.equal(result.products.find(row=>row.id==='p').currentStockKg,17);
+  assert.equal(result.products.find(row=>row.id==='q').currentStockKg,3);
+  assert.equal(result.stockTransfers.length,1);
+  assert.throws(()=>replayReviewedLedger([history[0],source,{...destination,groupId:'wrong'},batch[2]],'A',{branches}),/transfer|مناقلة/i);
+  assert.throws(()=>replayReviewedLedger([history[0],batch[0],batch[1],{...batch[2],payload:{...transfer.payload,quantityKg:4}}],'A',{branches}),/transfer|مناقلة/i);
+});

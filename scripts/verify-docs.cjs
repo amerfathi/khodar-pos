@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const assert=require('node:assert/strict');
 const {execFileSync}=require('node:child_process');
-const canonical=['README.md','docs/INDEX.md','docs/releases/2.6.14.md',
+const canonical=['README.md','docs/INDEX.md','docs/releases/2.6.14.md','deployment/production/README.md',
  ...fs.readdirSync('docs/current').filter(name=>name.endsWith('.md')).map(name=>'docs/current/'+name)];
 const secrets=[/-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/,
  /\b(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}/,/\bsk-[A-Za-z0-9_-]{20,}/,

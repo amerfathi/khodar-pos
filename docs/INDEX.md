@@ -13,6 +13,8 @@
 | [SECURITY](current/SECURITY.md) | الهوية والصلاحيات والتوقيع والأسرار |
 | [OPERATIONS](current/OPERATIONS.md) | التطوير والاختبارات والبناء والنشر والتراجع |
 | [CHANGE_HISTORY](current/CHANGE_HISTORY.md) | القرارات والإنجاز والمحدوديات عبر المراحل |
+| [البنود الخمسة](current/FIVE_ITEM_REMEDIATION.md) | تقدم العمل الجديد والاختبارات والمتبقي دون ادعاء نشر |
+| [حزمة الخادم](../deployment/production/README.md) | إعداد حزمة متوافقة دون الاعتماد على staging المهمل |
 | [تقرير 2.6.14](release-2.6.14-verification.md) | أدلة المصدر والحزم والنشر والاختبارات وحدودها |
 | [ملاحظات الإصدار](releases/2.6.14.md) | التغييرات المنشورة |
 | [سجل الموانع](../RELEASE_BLOCKERS.md) | حالة كل مانع وأحدث نطاق تحقق |

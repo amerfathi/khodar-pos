@@ -12,4 +12,5 @@ jobs:
       - run: npm run typecheck:core
       - run: npm run typecheck
       - run: npm run test
+      - run: npm run test:production-bundle
       - run: npm run build

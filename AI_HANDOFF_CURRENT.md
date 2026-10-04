@@ -1,5 +1,31 @@
 # براكه — نقطة التسليم الحالية
 
+## تحديث المتابعة الفعلي — 2026-10-04، غير منشور
+
+هذا القسم يصحح حالة النموذج المزال في القسم التالي. أضيف مساعد Windows أصلي قابل للبناء من electron/native/UpdateHelper.cs، مع جاهزية ذرية قبل إغلاق التطبيق، تحقق checksum وهوية العملية، ونسخة مؤقتة خارج مجلد التثبيت لمنع قفل ملفات NSIS. اختبارات العملية الأصلية نجحت؛ لم تُجرَ ترقية NSIS على نسخة المستخدم، ولم يُنشر إصدار جديد. لا تعطيل للحماية أو تجاوز تحذيراتها.
+
+أُصلح رفض إعادة تشغيل تحويل مخزون بين فرعين: يجب إثبات زوج حركات المخزون في المجموعة نفسها وبالكمية نفسها، دون احتساب الأثر مرتين. أُضيف منع محاسب آخر من تحريك أو إقفال وردية ليست له. هذه إصلاحات محددة، وليست اكتمال ميزة إقفال الدرج؛ البوابة ما زالت معطلة، والتاريخ الأكبر من 2000 حدث والتعارضات المالية غير المدعومة ما زالت مفتوحة.
+
+آخر npm test: 5 فحوص أمن، 244 اختبار تكامل، 13 اختبار مراجعة، 3 اختبارات مساعد أصلي، كلها ناجحة بلا تخطي؛ 17 فحص صيغة موروث منفصل وليست E2E. اختبار حزمة الإنتاج المنفصل نجح. lint وtypecheck نجحا في المتابعة السابقة. يلزم إعادة بناء الحزمة بعد آخر تعديلات ثم اختبار الترقية الفعلية. وصفة deployment/production مقيدة ببصمات المدخلات؛ لم تُختبر بعد من commit جديد ولم تُنشر.
+
+Current Git HEAD: 84022ebb008b06c4802998485f165ae7a14e0261. Current branch: main. git status: تعديلات المهمة غير ملتزمة مع ملفات فحوص حية سابقة غير متتبعة يجب استبعادها. ملفات المهمة: .github/workflows/production-release.yml، .github/workflows/quality-gates.yml، AI_HANDOFF_CURRENT.md، RELEASE_BLOCKERS.md، docs/INDEX.md، docs/current/FIVE_ITEM_REMEDIATION.md، electron/main.cjs، electron/update-installer.cjs، electron/native/UpdateHelper.cs، package.json، scripts/verify-docs.cjs، scripts/build-production-server.cjs، scripts/build-update-helper.cjs، deployment/production، src/services/cashShiftEngine.js، src/services/reviewLedgerReplay.js، tests/cash-shift-engine.test.mjs، tests/review-ledger-replay.test.mjs، tests/update-installer.test.cjs، tests/native-update-helper.test.cjs، tests/production-bundle.test.cjs، tests/fixtures/update-installer-fixture.cs.
+
+آخر مهمة: فحص الإصلاحات الخمسة مع مساعد تثبيت أصلي ووصفة خادم قابلة لإعادة البناء. أول خطوة تالية: فحص التوثيق وtypecheck النهائي، commit مقيد بهذه الملفات، ثم checkout نظيف وبناء وصفة الخادم والتحقق منها قبل النشر؛ لا تطبق migrations 0017–0022 تلقائيًا. تابع التكامل الكامل للدرج وحجم التاريخ؛ لا تعتبر اجتياز الاختبارات إغلاقًا لهذه البنود. الاستخدام المقروء في المتابعة: 10% لخمس ساعات و58% أسبوعيًا؛ لا يمكن تصفير الحدود برمجيًا. لا يحتوي هذا القسم قيم اعتماد سرية.
+
+## أحدث عمل — معالجة البنود الخمسة، 2026-10-04 (غير منشور)
+
+المستخدم طلب إقفال الدرج، تسوية تعارضات الشركات الكبيرة، التعارضات المالية المعقدة، إعادة نشر الخادم من Git، وإصلاح اختفاء المثبت. مرجع التقدم: docs/current/FIVE_ITEM_REMEDIATION.md. لا تعتبر تقرير التوثيق أدناه آخر مهمة فعلية بعد هذا القسم.
+
+اكتُشف سلوك Windows فعلي: detached PowerShell خرج 0 دون تنفيذ الأمر؛ تشغيله العادي نفذ الأمر. نموذج bootstrap مع ملف جاهزية نجح مرة، لكن إعادة الاختبار أعطت 243 نجاحًا و2 فشل من245، مع spawn EPERM. سجل Defender event1116 اكتشاف Trojan:Win32/Commando.A!ml ومسارًا يذكر PowerShell وEncodedCommand في نفس الأوقات؛ لا تجزم بإصابة ولا تعتبره false positive مثبتًا. لم تُعطّل الحماية أو تُستثنَ ملفات. أزيل النموذج التجريبي وfixture الجديد وأعيد electron/update-installer.cjs وtests/update-installer.test.cjs إلى HEAD، ولذلك لا يوجد إصلاح مثبّت مكتمل في الشيفرة الحالية. لا توجد ترقية NSIS فعلية ولا تثبيت فوق نسخة المستخدم. نتيجة245 اختبار تخص النموذج الذي أزيل وليست شهادة النسخة الحالية.
+
+أضيفت ثلاثة overrides متوافقة مع الإنتاج في deployment/production/overrides/functions وscripts/build-production-server.cjs؛ الحزمة 146 ملفًا وWrangler compile نجح. لم يُنشر الخادم؛ اختبار fresh committed checkout لم ينتهِ. لم تتغير cash gate أو مخطط الإنتاج. إقفال الدرج وحجم تاريخ التعارضات والحالات المالية المعقدة ما زالت OPEN.
+
+HEAD الحالي: 84022ebb008b06c4802998485f165ae7a14e0261. الفرع: main. لا commit لهذه المعالجة حتى الآن. الاستخدام المقروء مؤخرًا: 81% لخمس ساعات، 56% أسبوعيًا؛ لا يمكن تصفيره برمجيًا.
+
+ملفات المهمة المعدلة/الجديدة غير الملتزمة: scripts/build-production-server.cjs، scripts/verify-docs.cjs، deployment/production/README.md، deployment/production/overrides/functions/_lib/syncPolicy.js، deployment/production/overrides/functions/api/tenants/lookup.js، deployment/production/overrides/functions/api/sync/push.js، docs/current/FIVE_ITEM_REMEDIATION.md، docs/INDEX.md، RELEASE_BLOCKERS.md، وهذا الملف. بقية untracked live-probe والتقرير السابق خارج المهمة؛ لا تضُمها تلقائيًا. هذا القسم لا يحتوي قيم أسرار أو حسابات تجريبية خاصة.
+
+أول خطوة تالية: صمّم handoff آمنًا لا يعتمد على نموذج PowerShell المشفّر المرفوض، ثم اختبره والحماية مفعّلة، بما في ذلك ترقية NSIS معزولة. تحقّق من حزمة الخادم من Git نظيف قبل النشر. تابع المتبقي دون افتراض أن الأجزاء الموجودة تعني ميزة الدرج مفعلة. لا تطبق migrations 0017–0022 تلقائيًا.
+
 ## أحدث مهمة — توحيد التوثيق، 2026-10-04
 
 المرجع الشامل الحالي هوREADME.md وdocs/INDEX.md و7أدلة فيdocs/current:ARCHITECTURE،USER_GUIDE،ACCOUNTING،SYNC_AND_RECOVERY،SECURITY،OPERATIONS،CHANGE_HISTORY. أضيفت ملاحظاتdocs/releases/2.6.14.md، وأُشير إلى60وثيقة قديمة كسجل تاريخي دون تغيير أدلتها. تقرير2.6.14 المنشور وسجل الموانع يحتفظان بالفرق بين التحقق المحدد والتغطية غير المنجزة.

@@ -160,7 +160,11 @@ ipcMain.handle('install-update', async event=>{
   try {
     await verifyFile(verifiedUpdate.installer,verifiedUpdate.manifest);
     // Wait outside this process so NSIS cannot race our graceful Electron shutdown.
-    await launchInstallerAfterAppExit(verifiedUpdate.installer, process.pid);
+    await launchInstallerAfterAppExit(verifiedUpdate.installer, process.pid, {
+      helperPath: path.join(process.resourcesPath, 'Braka.UpdateHelper.exe'),
+      expectedHash: verifiedUpdate.manifest.sha256,
+      journalDirectory: path.join(app.getPath('userData'), 'update-logs'),
+    });
     return {success:true};
   } catch(error) {return {success:false,error:error.message};}
 });

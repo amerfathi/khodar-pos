@@ -51,6 +51,7 @@ export function postCashEvent(shifts, input) {
   const shift = findShift(shifts, required(input.shiftId, 'shiftId'));
   if (shift.status !== 'open') throw new Error('الوردية مقفلة');
   for (const field of ['id','actorId','deviceId']) required(input[field], field);
+  if (input.actorId !== shift.actorId) throw new Error('الوردية لا تخص هذا المحاسب؛ يلزم إقفالها قبل تسليم الدرج');
   const at = timestamp(input.at);
   if (at < shift.openedAt) throw new Error('الحركة النقدية قبل فتح الوردية');
   if (accountingDate(at,shift.timeZone) !== shift.accountingDate)
@@ -70,6 +71,7 @@ export function closeShift(shifts, input) {
   const shift = findShift(shifts, required(input.shiftId, 'shiftId'));
   if (shift.status !== 'open') throw new Error('الوردية مقفلة بالفعل');
   required(input.actorId, 'actorId');
+  if (input.actorId !== shift.actorId) throw new Error('إقفال الوردية يخص المحاسب الذي فتحها');
   const closedAt = timestamp(input.at);
   if (closedAt < shift.openedAt) throw new Error('الإقفال يسبق فتح الوردية');
   if (!Number.isSafeInteger(input.pendingEventCount) || input.pendingEventCount < 0)

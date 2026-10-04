@@ -62,6 +62,7 @@ export function replayReviewedLedger(events,tenantId,{branches=[]}={}){
     branches:[],salesReturns:[],purchaseReturns:[],damagedItems:[],workers:[],workerTransactions:[],partners:[],partnerDrawings:[],
     profitDistributions:[],stockTransfers:[],expenseCategories:[],settings:structuredClone(INITIAL_SETTINGS)},seen=new Set();
   result.branches=structuredClone(branches);
+  const productChanges=new Map();
   const inspect=(value,depth=0)=>{
     if(depth>30)throw new Error('Invalid replay depth');
     if(!value||typeof value!=='object')return;
@@ -103,7 +104,9 @@ export function replayReviewedLedger(events,tenantId,{branches=[]}={}){
     if(!id||seen.has(id)||event.tenantId!==tenantId||!entityId||!table||!payload||Array.isArray(payload)||
       !['create','update','delete','void'].includes(action))throw new Error('Unsupported or repeated replay source');
     seen.add(id);
-    if(entityType!=='branch'&&(!branchId||branchId==='all'||payload.branchId&&payload.branchId!==branchId))throw new Error('Invalid replay branch');
+    if(entityType==='stock_transfer') {
+      if(branchId || payload.branchId)throw new Error('Invalid transfer branch scope');
+    } else if(entityType!=='branch'&&(!branchId||branchId==='all'||payload.branchId&&payload.branchId!==branchId))throw new Error('Invalid replay branch');
     if(payload.id!==entityId)throw new Error('Replay record identity mismatch');
     const existing=result[table].find(row=>row.id===entityId);
     if(action==='create'&&existing&&entityType==='branch'){result.branches=result.branches.map(row=>row.id===entityId?payload:row);continue;}
@@ -112,6 +115,11 @@ export function replayReviewedLedger(events,tenantId,{branches=[]}={}){
     if(action==='update'&&!['product','customer','supplier','branch','invoice','worker','partner'].includes(entityType))throw new Error('Unsupported financial record update');
     if(entityType==='invoice'&&action==='update'&&Object.keys(payload).some(key=>!['id','tenantId','branchId','notes'].includes(key)))throw new Error('Unsupported invoice financial update');
     if(action==='void'&&entityType!=='invoice')throw new Error('Unsupported reversal');
+    if(entityType==='product'&&event.groupId&&['create','update'].includes(action)&&Number.isFinite(Number(payload.currentStockKg))) {
+      const key=`${event.groupId}:${entityId}`;
+      if(productChanges.has(key))throw new Error('Repeated transfer stock source');
+      productChanges.set(key,{branchId,delta:round(Number(payload.currentStockKg)-Number(existing?.currentStockKg||0)),action});
+    }
     if(entityType==='invoice'){
       if(['delete','void'].includes(action)&&result.salesReturns.some(row=>row.invoiceId===entityId))throw new Error('Invoice has existing returns');
       const invoice=action==='create'?payload:existing;
@@ -156,6 +164,14 @@ export function replayReviewedLedger(events,tenantId,{branches=[]}={}){
       if(action==='delete')result.expenses=result.expenses.filter(row=>row.workerTransactionId!==entityId);
     }else if(entityType==='stock_transfer'){
       if(action!=='create')throw new Error('Unsupported stock transfer reversal');
+      if(payload.scopedProducts===true) {
+        const source=productChanges.get(`${event.groupId}:${payload.sourceProductId}`);
+        const destination=productChanges.get(`${event.groupId}:${payload.destinationProductId}`);
+        const quantity=Number(payload.quantityKg);
+        if(!event.groupId||source?.action!=='update'||source?.branchId!==payload.fromBranchId||
+           destination?.branchId!==payload.toBranchId||source.delta!==-quantity||destination.delta!==quantity)
+          throw new Error('Transfer stock pair does not match its atomic source group');
+      }
       result.products=applyStockTransfer(result.products,result.branches,payload);
     }else if(entityType==='partner'&&action==='delete'){
       if(result.partnerDrawings.some(row=>row.partnerId===entityId)||result.profitDistributions.some(row=>(row.shares||[]).some(share=>share.partnerId===entityId)))throw new Error('Partner has existing drawings');
