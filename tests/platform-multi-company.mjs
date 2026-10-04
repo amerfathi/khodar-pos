@@ -188,14 +188,15 @@ async function scenario(name, identities, offline) {
   const before = {};
   for (const company of new Set(clients.map(c => c.company))) before[company] = (await cloud(company)).events.filter(e => e.entityType === 'invoice').length;
   checkpoint('prepare-sale');
-  await Promise.all(clients.map(async(c,i)=>{
+  // Native keyboard focus is shared across Windows. Prepare serially; saves below remain concurrent.
+  for (const [i,c] of clients.entries()) {
     try{await prepareSale(c,`${name}-${runId}-${i}`);}
     catch(error){
       await c.page.screenshot({path:join(artifacts,`${name}-prepare-failure-${i}.png`),fullPage:true});
       console.log(JSON.stringify({prepareFailure:{company:c.company,user:c.username,platform:c.platform},errors:c.errors,
         screen:await c.page.evaluate(()=>document.body.innerText.slice(-1500))}));throw error;
     }
-  }));
+  }
   if (offline) await Promise.all(clients.map(c => c.page.setOfflineMode(true)));
   checkpoint('commit-sale');
   if (name.endsWith('sequential')) {
@@ -227,6 +228,7 @@ async function scenario(name, identities, offline) {
         if (row && row.cursor >= snapshot.nextCursor && !row.outbox.length) break;
         await delay(200);
       }
+      if(!(row?.cursor>=snapshot.nextCursor)) console.log(JSON.stringify({restartFailure:{name,platform:c.platform,cursor:row?.cursor,expected:snapshot.nextCursor,pending:row?.outbox?.length,responses:c.responses,errors:c.errors,screen:(await c.page.evaluate(()=>document.body.innerText)).slice(0,1500)}}));
       assert.ok(row?.cursor >= snapshot.nextCursor, 'Restart did not refresh the accepted server prefix');
       for (const product of row.state.khodar_pos_products_v3) {
         const source = snapshot.events.find(event => event.entityType === 'product' && event.action === 'create' && event.entityId === product.id);

@@ -1,5 +1,18 @@
 # Authoritative release blocker register
 
+## Authoritative scoped checkpoint — published2.6.14, 2026-10-04
+
+This section supersedes older numbering/review/publication statuses below, not unrelated OPEN blockers. Report:docs/release-2.6.14-verification.md. Web deploymentd6d5e52a; immutable GitHubv2.6.14; public update metadata and downloads verified for Web/Windows/Android.259 automated tests and17 separate inherited formula checks pass; hosted build37192819553 succeeds. Eight final production Web/extracted-Windows financial scenarios pass, plus Android-debug/Web offline/reconnect. Signed Android APK certificate/install/launch verified separately; full signed-APK financial journey, installed Windows upgrade and physical printing are not certified.
+
+| ID | Severity | State | Verified scope / remaining limit |
+|---|---|---|---|
+| INVOICE-NUMBERING | High | VERIFIED | New IDs alwaysUUID; full lossless UUID-derived visible reference shared across display/search/thermal/A4 with wrapping. Legacy numeric references preserved, not retrospectively renumbered. No physical-printer certification. |
+| SYNC-OWNER-REVIEW | Critical | VERIFIED | Fresh-head owner authorization, immutable originals/receipts, transactional accepted replacements and branch-filtered durable client checkpoint. Actual owner UI and recovery pass on production. Bounded2000-event supported history only; unsupported relations fail closed. |
+| SYNC-LEGACY-DEPENDENCY | High | VERIFIED | Authenticated branch-specific historical product proof, no source rewriting; atomic missing-dependency recovery and later sale tests pass. This does not assert personal BRK-000 cashier UI was manually rechecked after publication. |
+| SYNC-MULTI-DEVICE | Critical | IN_PROGRESS | Independent sales and supported reviewed settlements verified. Unsupported histories, cash-shift events and all mixed business-operation combinations are not universally certified. |
+| LIVE-PLATFORM-MATRIX | High | IN_PROGRESS | Final8 Web/extracted-Windows live scenarios pass; Android debug financial reconnect and signed APK launch pass separately. Full signed-APK financial/device/installation matrix remains open. |
+| WINDOWS-PUBLISHER-TRUST | High | BLOCKED_EXTERNAL | Pinned updater Ed25519 signature/hash verified; no Authenticode publisher certificate. OS warnings may remain. No paid subscription/certificate purchased. |
+
 Publication checkpoint2026-10-04:2.6.13 binaries/Web/update metadata published; source bb27b7403dec2565ad7a4a1b12c7edab0a8c9b78, CI233 integration tests pass. Extracted published Windows binary/production Web same-account offline/reconnect and renderer reload stock check passed. Updater signature and Android certificate compatibility verified. Installed Windows upgrade, signed Android UI, physical printing and full matrix remain unverified. This supersedes the distribution-pending wording below, not the broader OPEN blockers. Invoice numbering remains OPEN; no full release certification.
 
 ## Independent sales reconciliation checkpoint — 2026-10-03

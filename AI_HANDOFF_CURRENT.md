@@ -1,5 +1,15 @@
 # براكه — نقطة التسليم الحالية
 
+## المرجع الأحدث — نُشر2.6.14 بالفعل، 2026-10-04
+
+هذا القسم يتقدم على جميع عبارات «قيد العمل/غير منشور/اختيار فقط/ترقيمOPEN» التاريخية أدناه. الإصدار2.6.14 منشور: https://github.com/amerfathi/khodar-pos/releases/tag/v2.6.14، والويب https://khodar-pos.pages.dev عبر deployment https://d6d5e52a.khodar-pos.pages.dev. خدمات latest للويب وWindows وAndroid تعرض2.6.14؛ روابطها200 وmanifestWindows صحيح بالمفتاح المثبّت. تقرير الدليل والحدود:docs/release-2.6.14-verification.md، والسجل المحدّثRELEASE_BLOCKERS.md.
+
+نُفّذت تسوية المالك بسجل مصادر محفوظ وreceipt ذري غير قابل للاستبدال، واسترداد الجهاز منcheckpointمصَفّى بالصلاحيات مع أرشفة الأصل قبلclearqueue؛ لا حذف عند الفشل. تحقّق legacyproduct بتاريخ موثوقفرعي دون تغييرDBsource، وأرقام جديدةUUID كاملة مع مرجع ظاهرlossless موحد للطباعة/البحث.259اختبارًا آليًا نجحت و17فحصصيغة موروث ليستE2E؛ APIindexed45،lint/typecheck/build ناجحة. مصفوفة الإنتاج النهائية8سيناريوهاتWebوحزمةWindowsالمستخرجة نجحت؛ Androiddebug/Weboffline/reconnect نجح مستقلًا. signedAPK2.6.14/26140 بنفس شهادة الإنتاج ثُبّت وفُتح علىAVDمنفصل. لا تزعم رحلة مالية كاملة للـsignedAPK أو ترقيةWindowsالمثبت أو طابعة فعلية.
+
+بناء الحزم الناجح37192819553 منsource f850a7679e7bdc1b57ebfb6ebc39268be1b0c778. الرفع المحلي الكبير تأخر فأُوقف وحده؛ uploaderGitHubلم يُعد بناء الحزمة، ونجح37193814889 بعد التحقق من منشأ البناء/الإصدار/المفتاح/hash. اختبار إصدار خاطئ37193798716 فشل ومنعupload. بصمات الأصول العامة3طابقتCI قبل إعلانrelease ونشرmetadata. لا تغيير فينسخةWindowsالمثبتة أو شهادةAndroid أو الاشتراكات المدفوعة.
+
+قاعدةالإنتاج:exportخاصignored سبق إضافة0023–0026 فقط؛ لم تُطبّق0017–0022 أو تغيّر المصادر المالية المقبولة. النشرمنscratch/sync-hotfix-20261003 المتوافق، لا mainfunctionsكاملة. cashshiftsتبقىمعطلة. التسوية≤2000مصدر وتفشل مغلقًا عندhistory/relationsغير مدعومة؛ صلاحيات تحجب علاقة لازمة قد تمنعcheckpoint ولا تُوسَّع تلقائيًا. لاAuthentiCode ولا شهادةسعة1000مستخدم.
+
 ## الأحدث — تنفيذ التسوية وتجهيز نشر2.6.14، 2026-10-04
 
 يتقدم هذا القسم على وصف «تسجيل اختيار فقط/تسوية غير منفذة» أدناه. نُفّذ قرار المالك المركزي فعليًا مع snapshot حديث، إعادة تشغيل مالية كاملة، سجل receipt غير قابل للاستبدال، وguard SQL في نفس D1batch مع المصادر البديلة وإقفال المراجعة. طلب الاختيار القديم دونexecute يبقى intent فقط للتوافق. الجهاز يستلم checkpoint مصفّى بصلاحياته بعد حساب أرصدته من التاريخ الكامل على الخادم، ويحفظ الأصل والأرشيف والحالة والطابور والمؤشر ذريًا؛ فشل الحفظ يحتفظ بالأصل كاملًا. جميع أحداث الطابور يجب أن تكون مغطاة بقرارات معتمدة؛ البقية تُرفع للمراجعة ولا تُسقط.
@@ -284,3 +294,13 @@ Windows updater manifest signature/file hash verified; installer still has no Au
 Production functions remain compatibility-packaged fromc10f4e5 plus the deployed free authentication fix and new rebase route. Main's timezone/cash-shift migrations were NOT implicitly deployed; cash shifts remain disabled. Do not blindly deploy all main functions against the old production schema. No paid subscription was purchased.
 
 Git snapshot before this evidence-only commit: HEAD bb27b7403dec2565ad7a4a1b12c7edab0a8c9b78; branch main. Modified: AI_HANDOFF_CURRENT.md, RELEASE_BLOCKERS.md, tests/platform-multi-company.mjs; additional intended evidence edits docs/sales-reconciliation-2026-10-03.md and docs/releases/2.6.13.md. Untracked historical diagnostics: docs/multi-company-live-ui-audit-2026-10-03.md, tests/live-account-plan-probe.mjs, tests/live-android-auth-probe.mjs, tests/live-auth-resource-probe.mjs, tests/live-auth-validation.mjs, tests/live-test-provision.mjs. These unrelated diagnostic files are left uncommitted. Last task: published and verified scoped independent-sale synchronization repair. First next step: design/test offline-safe printed invoice series before broadening mixed-operation reconciliation; inspect current git status first. No credentials belong in this handoff; private QA configuration stays ignored.
+
+## لقطة Git الختامية ومهمة النموذج التالي — 2026-10-04
+
+- Current Git HEAD عند فحص ما قبلcommitالتوثيق:57ec5543aa64cf4dccd79b4ec1fe6a9075ea27ac. مصدر حزم2.6.14:f850a7679e7bdc1b57ebfb6ebc39268be1b0c778. يمكن أن يتقدمHEADبـcommitالتقرير نفسه؛ افحصgitrev-parseHEADولا تعتبر هذا hashذاتيًا للوثيقة.
+- Current branch:main؛ آخرpushللكود/مسارالرفع نجح.
+- git status في هذه اللقطة:Modified AI_HANDOFF_CURRENT.md،RELEASE_BLOCKERS.md،tests/platform-multi-company.mjs؛ Untracked docs/release-2.6.14-verification.md مع الملفات التاريخية المذكورة أدناه. هذه الأربعة مقصودة لـcommitالتوثيق/تشخيص الاختبار بعد النشر، لا تغيّر ثنائيات الإصدار.
+- الملفات التاريخيةuntrackedالمحفوظة دونcommit:docs/multi-company-live-ui-audit-2026-10-03.md؛tests/live-account-plan-probe.mjs؛tests/live-android-auth-probe.mjs؛tests/live-auth-resource-probe.mjs؛tests/live-auth-validation.mjs؛tests/live-test-provision.mjs. لا تضفها آليًا بـgitadd-A.
+- آخر مهمة:إكمال إصلاح تسوية تعارضات المالك واسترداد المصادر القديمة وترقيم الفواتير، ثم اختبارات مالية حية ونشر2.6.14 والتحقق من معلومات التحديثات والأصول العامة.
+- أول خطوة للنموذج التالي:اقرأ القسم الأحدث وهذا التقرير وافحصHEAD/branch/status؛ لا تعِد النشر ولا تشغّل ترحيلات0017–0022. أي توسعة لاحقة لتاريخ>2000أو cashshiftsأو رحلةsignedAPKالمالية تحتاج اختبارات مستقلة قبل إعلانها مكتملة.
+- فحص أنماط الاعتماد الفعلية بالوثيقة لم يجدPassword/Secret/Token/PrivateKeyأوbcryptliteral؛ أسماء الحقول ومفاتيح التوقيع العامة/hashالأدلة ليست أسرارًا. الاعتمادات لا تُنقل منscratchإلىgitأوالمحادثة.
