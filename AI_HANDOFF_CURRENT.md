@@ -1,5 +1,13 @@
 # براكه — نقطة التسليم الحالية
 
+## نقطة الحفظ البعيدة الأخيرة — 2026-10-04
+
+Current Git HEAD عند التقاط هذه النقطة (آخر commit شيفرة): d8165c0e8c8667633d7fa0a1f2a46f407e3cec88. Current branch: main، مطابق origin/main،19 ملفًا مقصودًا محفوظة ومرفوعة. commit هذا التوثيق اللاحق لا يغير الشيفرة. Hosted Quality gates37225873239 ما زال in_progress عند الفحص، لا تعتبره ناجحًا حتى تقرأ conclusion. نتائج279 اختبارًا والبناء/lint/typecheck/docs محلية ناجحة لهذا المصدر؛17formula منفصلة، تحذير bundle كبير قائم.
+
+git status قبل هذا التحديث: لا ملفات tracked غير ملتزمة؛ untracked المحفوظة وخارج المهمة هي docs/multi-company-live-ui-audit-2026-10-03.md وtests/live-account-plan-probe.mjs وtests/live-android-auth-probe.mjs وtests/live-auth-resource-probe.mjs وtests/live-auth-validation.mjs وtests/live-test-provision.mjs. بعد تعديل هذا القسم أصبح AI_HANDOFF_CURRENT.md وحده modified حتى commit التوثيق. لا أسرار في هذا الملف بحسب فحصdocs؛ ملفات private fixtures/exports خارجGit.
+
+آخر مهمة: signed source server replay + device writer authorization + paired journal/current-user outbox acknowledgements. أول خطوة تالية: تحقق hosted CI المذكور ثم اربط replayDrawerJournal بالـCloudflareSyncService فعليًا بمصادر الحسابات الأصلية، مع رفض اكتمال شبكة قديمة بعد تغيير الحساب/الفرع، واختبار API-to-real-hook، لا إعادة primitive المنجزة. بعدها offline login24h رغم انتهاء جلسة8h، owner drawer UI، backup/restore/lost-device، ومنع unsigned legacy cash bypass. إقفال الدرج يبقى IN_PROGRESS وغير مفعّل؛ تاريخ>2000 والتعارضات المعقدة واختبار التحديث الداخلي الكامل OPEN. نشر الخادم منcleanGitd5b31bc سبق التحقق ضمن نطاقه الضيق. لا schema remote أو إصدار عملاء جديد في هذه المتابعة؛ النسخة العامة2.6.14 لم تتغير. قراءة الاستخدام82%/69% حفزت حفظ هذه النقطة قبل استنزاف الرصيد، لا شهادة اكتمال الخمسة.
+
 ## تفويض جهاز الدرج وإعادة المصادر الموقّعة — 2026-10-04، محلي غير منشور
 
 التحقق النهائي يتقدم على «جارية» أدناه: npm test خرج0 بعد إصلاح fixture clock؛ 5security+258integration+13review+3native=279 اختبارات ناجحة،0failed/0skipped، و17 formula checks الموروثة منفصلة وليستE2E. lint/full typecheck/docs نجحت؛ docs scanner لم يجد credential patterns. src/services/atomicStore.js ملف معدّل مقصود إضافي (durable acknowledgement wrapper)، لا تتركه خارجcommit. لا تفعيل cash أو schema remote أو release جديد. نقطة التوقف لحماية الاستخدام لا تعني اكتمال البنود الخمسة. تعليمات المتابعة المحددة أعلاه دون إعادة الفحص من الصفر.
