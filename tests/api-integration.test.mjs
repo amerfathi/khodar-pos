@@ -54,7 +54,9 @@ async function call(path, method = 'GET', body, token, ip = 'local', scopeEvents
     headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}) });
 }
-async function login(code, username, password = pass, ip = 'local') {
+// Independent fixture logins must not share one rate bucket: faster CI runs
+// legitimately exhaust it. Explicit IPs still exercise shared-client limits.
+async function login(code, username, password = pass, ip = `fixture-login-${crypto.randomUUID()}`) {
   const response = await call('/api/tenants/lookup', 'POST', { storeCode: code, username, password }, undefined, ip);
   const body = await response.json();
   assert.equal(response.status, 200, JSON.stringify(body));
@@ -62,6 +64,23 @@ async function login(code, username, password = pass, ip = 'local') {
   assert.equal(JSON.stringify(body).includes(password), false);
   return body.session.token;
 }
+
+test('login rate protection remains enforced for one shared client',async()=>{
+  // If the real minute bucket rolls over, start a new isolated client rather
+  // than interpreting the deliberate reset as a missing rate limit.
+  for(let attempt=0;attempt<2;attempt++) {
+    const ip=`rate-check-${crypto.randomUUID()}`,statuses=[],bucket=Math.floor(Date.now()/60000);
+    let retryAfter;
+    for(let index=0;index<16;index++) {
+      const response=await call('/api/tenants/lookup','POST',{storeCode:'A',username:'unknown-rate-fixture',password:'invalid-fixture'},undefined,ip);
+      statuses.push(response.status);retryAfter=response.headers.get('Retry-After');
+    }
+    if(Math.floor(Date.now()/60000)!==bucket)continue;
+    assert.equal(statuses.slice(0,15).includes(429),false);
+    assert.equal(statuses[15],429);assert.equal(retryAfter,'60');return;
+  }
+  assert.fail('Could not observe a stable rate-limit minute bucket');
+});
 before(async () => {
   const bundle = await build({ entryPoints: ['tests/runtime-worker.js'], bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022' });
   const grantKeys = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
