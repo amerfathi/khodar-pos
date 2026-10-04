@@ -15,6 +15,8 @@
 import { getApiBaseUrl } from '../config/appVersion.js';
 import { isIndependentSalesQueue } from './independentSales.js';
 import { INBOUND_REVIEW_KEY } from './atomicStore.js';
+import {replayDrawerJournal} from './cashDrawerJournal.js';
+import {canAccessBranch} from './branchAccess.js';
 
 const QUEUE_STORAGE_KEY = 'khodar_offline_sync_queue';
 const ACTIVITY_REFRESH_MIN_MS = 5 * 60_000;
@@ -47,6 +49,7 @@ export class CloudflareSyncService {
     this.isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
     this.listeners = new Set();
     this.repository = null;
+    this.drawerReplay = null; // Explicit staged opt-in, never enabled by default.
     this.updateHandler = null;
     this.currentTenantId = null;
     this.focusListenerAttached = false;
@@ -74,7 +77,7 @@ export class CloudflareSyncService {
 
   schedulePendingRetry() {
     if (this.retryTimerId || !this.isOnline || !this.currentTenantId || !getSessionToken()) return;
-    if (!this.getQueue().some(event => event.tenantId === this.currentTenantId)) return;
+    if (!this.drawerReplay && !this.getQueue().some(event => event.tenantId === this.currentTenantId)) return;
     const delay = this.retryDelayMs;
     this.retryDelayMs = Math.min(this.retryDelayMs * 2, 5 * 60_000);
     this.retryTimerId = setTimeout(() => {
@@ -105,7 +108,7 @@ export class CloudflareSyncService {
     if (!this.isOnline || !this.currentTenantId || !getSessionToken()) return Promise.resolve(false);
     if (this.activitySyncPromise) return this.activitySyncPromise;
     try {
-      if (!force && this.getQueueLength() === 0 && Date.now() - this.lastPullAt < ACTIVITY_REFRESH_MIN_MS)
+      if (!force && !this.drawerReplay && this.getQueueLength() === 0 && Date.now() - this.lastPullAt < ACTIVITY_REFRESH_MIN_MS)
         return Promise.resolve(true);
     } catch (error) {
       this.lastError = error.message;
@@ -217,6 +220,7 @@ export class CloudflareSyncService {
   // Flush queued mutations to Cloudflare
   async flushQueue({ pullAfterFlush = true } = {}) {
     if (this.isSyncing || !this.isOnline || !getSessionToken() || !this.currentTenantId) return false;
+    if(this.drawerReplay)return this.flushDrawerJournal();
 
     const queue = this.getQueue().filter(event => event.tenantId === this.currentTenantId);
     if (queue.length === 0) return true;
@@ -360,6 +364,52 @@ export class CloudflareSyncService {
       this.isSyncing = false;
       if (!this.lastError) this.notifyListeners('idle');
     }
+  }
+
+  async flushDrawerJournal() {
+    const configuration=this.drawerReplay,repository=this.repository;
+    const token=getSessionToken(),user=getSessionUser(),generation=this.generation;
+    this.isSyncing=true;
+    const assertCurrent=()=>{
+      const current=getSessionUser(),scope=configuration?.scope;
+      if(!token || token!==getSessionToken() || generation!==this.generation ||
+          configuration!==this.drawerReplay || repository!==this.repository ||
+          !scope || this.currentTenantId!==scope.tenantId || current?.id!==user?.id ||
+          current?.tenantId!==scope.tenantId || repository?.user?.id!==current?.id ||
+          repository.user.tenantId!==scope.tenantId || !canAccessBranch(current,scope.branchId) ||
+          repository.read('khodar_pos_active_branch_id_v1')!==scope.branchId)
+        throw Object.assign(Error('تغير الحساب أو الفرع أثناء مزامنة الدرج؛ حُفظت المصادر دون تأكيد محلي'),{nonRetryable:true});
+    };
+    try {
+      assertCurrent();this.notifyListeners('syncing');
+      const clear=await replayDrawerJournal(repository.durable,configuration.locks,configuration.scope,async proofs=>{
+        assertCurrent();
+        const response=await fetch(`${getApiBaseUrl()}/api/cash/replay`,{method:'POST',
+          headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},
+          body:JSON.stringify({tenantId:configuration.scope.tenantId,deviceId:configuration.scope.deviceId,
+            deviceProof:configuration.deviceProof,proofs})});
+        assertCurrent();
+        if(!response.ok)throw Object.assign(Error('لم يقبل الخادم سجل الدرج؛ المصادر المحلية محفوظة'),
+          {nonRetryable:[400,401,403,409].includes(response.status)});
+        return response.json();
+      },{repository,assertCurrent});
+      assertCurrent();
+      // Unjournaled sources must not silently fall back to unsigned push.
+      const ownPending=repository.current.outbox.length>0;
+      this.lastError=ownPending&&clear?'توجد مصادر غير مرتبطة بسجل الدرج؛ يلزم فحصها قبل المزامنة':null;
+      if(clear&&!ownPending)this.notifyListeners('synced_batch');
+      if(!clear&&!this.batchTimerId)this.batchTimerId=setTimeout(()=>{
+        this.batchTimerId=null;
+        if(generation===this.generation)void this.flushQueue();
+      },100);
+      return clear&&!ownPending;
+    } catch(error) {
+      if(generation===this.generation && token===getSessionToken() && getSessionUser()?.id===user?.id) {
+        this.lastError=error.message;this.notifyListeners('error',{error:error.message});
+        if(!error.nonRetryable)this.schedulePendingRetry();
+      }
+      return false;
+    } finally {if(generation===this.generation)this.isSyncing=false;}
   }
 
   // Pull latest updates from Cloudflare edge
@@ -537,6 +587,8 @@ export class CloudflareSyncService {
 
   stopAutoSync() {
     this.generation++;
+    this.drawerReplay=null;
+    this.isSyncing=false;
     this.currentTenantId = null;
     if (this.syncIntervalId) {
       clearTimeout(this.syncIntervalId);

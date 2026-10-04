@@ -1,8 +1,10 @@
 {
   "baselineCommit": "84022ebb008b06c4802998485f165ae7a14e0261",
+  "cashReplayReviewCommit": "d8165c0e8c8667633d7fa0a1f2a46f407e3cec88",
+  "cashReplayReview": "The new opaque replay actor and proof writes apply only to staged cash replay; ordinary push retains authenticated principal. Production override rejects all cash sources and remains unchanged. No cash schema is deployed.",
   "sourceHashes": {
     "functions/_lib/syncPolicy.js": "e275667eacdf95eef30f129c37d07e19f940c13e804fed2c2c61b34d71b58310",
     "functions/api/tenants/lookup.js": "adf613ac45e06da210eb0136577b4ee7812d57e95eb10f139070583dd7838748",
-    "functions/api/sync/push.js": "713e07339357cb6787f32a45048b7671005c038230efd85477ce429c28d62276"
+    "functions/api/sync/push.js": "3baf010d1fc6b035d3cb34e4c8f658b3cc96d8e7ca3cc5f1cc42984c80fc32e3"
   }
 }

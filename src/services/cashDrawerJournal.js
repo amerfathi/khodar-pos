@@ -11,13 +11,14 @@ const keyFor = ({ tenantId, branchId, drawerId, deviceId }) =>
 // Staged transport boundary: send authenticates the current uploader/device.
 // Preserve every original proof; acknowledgements never migrate another
 // cashier's sources into this user's financial aggregate.
-export async function replayDrawerJournal(durable,locks,scope,send,{repository=null}={}) {
+export async function replayDrawerJournal(durable,locks,scope,send,{repository=null,assertCurrent=()=>{}}={}) {
   if (!durable?.read || !durable?.commitBatch || !locks?.request || typeof send!=='function' ||
       ['tenantId','branchId','drawerId','deviceId'].some(name=>typeof scope?.[name]!=='string'||!scope[name]))
     throw Error('Invalid drawer replay scope');
   if(repository && (repository.durable!==durable || repository.user?.tenantId!==scope.tenantId))
     throw Error('Drawer acknowledgement repository scope mismatch');
   const key=keyFor(scope);
+  assertCurrent();
   const validate=saved=>{
     if(!saved || !Number.isSafeInteger(saved.revision) || !Array.isArray(saved.sources) ||
         Object.entries(scope).some(([name,value])=>saved[name]!==value) ||
@@ -50,6 +51,7 @@ export async function replayDrawerJournal(durable,locks,scope,send,{repository=n
   return locks.request(key,{ifAvailable:true},async lock=>{
     if(!lock)throw Error('Drawer acknowledgement lock unavailable');
     const current=validate(await durable.read(key));
+    assertCurrent();
     if(batch.some(proof=>JSON.stringify(current.sources.find(row=>row.source.id===proof.source.id))!==JSON.stringify(proof)))
       throw Error('Drawer sources changed during replay');
     const allAccepted=new Set([...(current.acceptedIds||[]),...ids]);
@@ -59,6 +61,7 @@ export async function replayDrawerJournal(durable,locks,scope,send,{repository=n
       throw Error('Own queue differs from signed drawer source');
     if(own.length) {
       const wrapper={commit:async(userKey,value,expectedRevision)=>{
+        assertCurrent();
         const [committed]=await durable.commitBatch([
           {key:userKey,snapshot:value,expectedRevision},
           {key,snapshot,expectedRevision:current.revision}
@@ -66,7 +69,10 @@ export async function replayDrawerJournal(durable,locks,scope,send,{repository=n
         return committed;
       }};
       await repository.acknowledgeDurable(new Set(own.map(event=>event.id)),wrapper);
-    } else if(batch.length) await durable.commitBatch([{key,snapshot,expectedRevision:current.revision}]);
+    } else if(batch.length) {
+      assertCurrent();
+      await durable.commitBatch([{key,snapshot,expectedRevision:current.revision}]);
+    }
     return current.sources.every(proof=>allAccepted.has(proof.source.id));
   });
 }

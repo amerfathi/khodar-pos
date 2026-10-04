@@ -1,5 +1,19 @@
 # براكه — نقطة التسليم الحالية
 
+## ربط النقل الموقّع بخدمة المزامنة — 2026-10-04، محلي غير منشور
+
+النتيجة النهائية لهذه المتابعة تتقدم علىpending أدناه: npm test خرج0 (5security+259integration+13review+3native=280،0failed/0skipped)،17formula منفصلة،production-bundleguard1مرّمنفصلًا،lint/typecheck/docs/Webbuild وFunctions compilation نجحت؛ تحذيرchunkكبيرقائم. ستُحفظالملفاتالسبعةالمذكورةمعtests/api-integration.test.mjs فيGit،ولاrelease/deploy. لا تنسب hosted CI للمصدرالتالي قبلقراءةنتيجته. أولخطوةالتاليةAPI-to-real-hookintegration ثمprovisioning/UI/recovery كمافُصل،لاإعادةتنفيذtransport. لا أسرار بهذاالقسم.
+
+متابعة الفحص: Wrangler compiled Worker successfully لحزمة147 ملفًا scratch/production-bundle-4IktAD بلاdeploy. npm test الأول258/259 أخفق فيassert drawer grant عند tests/api-integration.test.mjs:600 لأن default Node now سبق onlineVerifiedAt؛ تشخيص stack أثبت شرط الوقت نفسه. تم تمرير onlineVerifiedAt الموقّع لاختبارتفويضالدرج بدل وقتfixture مستقل، دون تعديل سياسةالإنتاج؛ full rerun قيدالإنهاء. tests/api-integration.test.mjs modified مقصود إضافي. lint/typecheck/production-bundle نجحت بعده. الاستخدام91% نافذة5h و71% أسبوعي؛ احفظالنتيجة ونقطةالمتابعة قبلنفادالرصيد. لا قيم اعتماد.
+
+HEAD عند بدء المتابعة a340fef0cd45b22eb4fd7312d03e9bdf5fc8667b،branch main. CI37225873239 انتهى failure، لا success: test:production-bundle رفض تغير sync/push مقابل pin القديم. روجع diff099986b→d8165c0: opaque replay actor/proof SQL تخص staged cash فقط، default principal يبقى authenticated؛ production override يرفض جميع cash sources ولا يتغير. حُدث compatibility-inputs.json بالـhash المراجع وتعليل/commit المراجعة، دون إزالة حارس drift. الاختبار الأحمر تكرر قبل الإصلاح ونجح بعده. حزمة147 ملفًا تولدت بلاmigrations، build نجح مع تحذيرchunk كبير؛ compilation وnpm test الكامل جاريان عند كتابة هذا القسم.
+
+CloudflareSyncService يدعم drawerReplay opt-in:null افتراضيًا. flushQueue يستخدم cash/replay بدل unsigned push مع token/deviceProof والمصادر الأصلية، ويقرن journal/own aggregate عبر primitive السابقة. يُرفض تأكيد شبكة قديمة عند تغيرtoken/account/generation/repository/config/branch، مع إعادة التحقق بعد قراءة durable وتحت lock وقبلcommit. stopAutoSync يمسح config ولا يسمحfinally قديمة بتغيير busy لحساب جديد. pending shared sources تُرسل في batches كاملة متتابعة؛ retry يعمل حتى لوطابور المستخدم فارغ، وactivity لا يتجاوز سجلًا مشتركًا بسببempty own queue. المصادر غير المرتبطة لا تُرفع unsigned ولا يُعلن اكتمالها. لا provisioning فيApp/hook بعد.
+
+اختبارservice الفعلي + AtomicStore وmemoryCAS وHTTPfixture (لاlive server) أثبت فشل المسار القديم قبل الربط، ثم رفض اكتمال بعدتغيرaccount/branch وتركjournal/outbox دونack، وبعد العودة نجحsigned upload/pairedack. 30 اختبارًا مركزًا و5security وlint/typecheck مرت؛ ثم أضيف تحققbranch ونُفذ الاختبارالمحدد مجددًا بنجاح. full npm test قيد التشغيل، لا تنسب عدده السابق للمصدرالحالي حتىينتهي.
+
+آخر مهمة: staged sync transport/async scope safety + compatibility guard repair. أول خطوة تالية: API-to-real-hook integration signed sources، ثم provisioning/UI وoffline login24h وbackup/restore/lost-device وunsigned cash bypass قبل التفعيل. gate غير مفعلة،لاschemaremote أوrelease. التاريخ>2000 والتعارضات المعقدة وتحديثWindowsالداخلي مازالتOPEN. ملفاتmodified المقصودة: هذاالملف،docs/current/FIVE_ITEM_REMEDIATION.md،deployment/production/compatibility-inputs.json،src/services/cashDrawerJournal.js،src/services/cloudflareSync.js،tests/cash-drawer-journal.test.mjs. live-probe القديمةuntracked خارجالمهمة ومحفوظة. لا أسرار بهذاالقسم.
+
 ## نقطة الحفظ البعيدة الأخيرة — 2026-10-04
 
 Current Git HEAD عند التقاط هذه النقطة (آخر commit شيفرة): d8165c0e8c8667633d7fa0a1f2a46f407e3cec88. Current branch: main، مطابق origin/main،19 ملفًا مقصودًا محفوظة ومرفوعة. commit هذا التوثيق اللاحق لا يغير الشيفرة. Hosted Quality gates37225873239 ما زال in_progress عند الفحص، لا تعتبره ناجحًا حتى تقرأ conclusion. نتائج279 اختبارًا والبناء/lint/typecheck/docs محلية ناجحة لهذا المصدر؛17formula منفصلة، تحذير bundle كبير قائم.

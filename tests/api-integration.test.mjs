@@ -597,7 +597,8 @@ test('offline cashier grant is login-bound, device-bound, and server-signed', as
   assert.equal(assertVerifiedOfflineGrant(handle, { tenantId: 'GRANT', cashierId: 'grant-cashier', deviceId, branchId: 'grant-main' },
     new Date(Date.now() + 60_000).toISOString()), true);
   assert.throws(() => assertVerifiedOfflineGrant(handle, { tenantId: 'GRANT', cashierId: 'grant-cashier', deviceId, branchId: 'grant-second' }), /تصريح/);
-  assert.equal(assertVerifiedOfflineGrant(handle,{tenantId:'GRANT',cashierId:'grant-cashier',deviceId,branchId:'grant-main',drawerId:'grant-drawer'}),true);
+  assert.equal(assertVerifiedOfflineGrant(handle,{tenantId:'GRANT',cashierId:'grant-cashier',deviceId,branchId:'grant-main',drawerId:'grant-drawer'},
+    grant.claims.onlineVerifiedAt),true);
   assert.throws(()=>assertVerifiedOfflineGrant(handle,{tenantId:'GRANT',cashierId:'grant-cashier',deviceId,branchId:'grant-main',drawerId:'other-drawer'}),/درج|تصريح/);
   await assert.rejects(() => verifySignedOfflineGrant({ ...grant, claims: { ...grant.claims, cashierId: 'attacker' } }, grantPublicJwk), /توقيع/);
 });

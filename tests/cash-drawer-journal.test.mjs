@@ -5,9 +5,12 @@ import * as journal from '../src/services/cashDrawerJournal.js';
 import { verifySignedOfflineGrant } from '../src/services/verifiedOfflineGrant.js';
 import {enrollOfflineGrant,unlockOfflineGrant} from '../src/services/offlineUnlock.js';
 import {issueSignedOfflineGrant} from '../functions/_lib/offlineGrantSignature.js';
+import {CloudflareSyncService} from '../src/services/cloudflareSync.js';
+import {setSessionToken,setSessionUser} from '../src/services/authSession.js';
 
 const cache = () => ({ rows:new Map(), getItem(key){return this.rows.get(key)??null;},
-  setItem(key,value){this.rows.set(key,String(value));}, removeItem(key){this.rows.delete(key);} });
+  setItem(key,value){this.rows.set(key,String(value));}, removeItem(key){this.rows.delete(key);},
+  clear(){this.rows.clear();},key(index){return [...this.rows.keys()][index]??null;},get length(){return this.rows.size;} });
 const locks = { async request(_key,_options,fn){return fn({});}, async query(){return {held:[],pending:[]};} };
 const durable = () => ({ rows:new Map(), fail:false,
   async read(key){return structuredClone(this.rows.get(key)??null);},
@@ -38,6 +41,45 @@ const signedGrant = async (cashierId,drawerIds=['drawer-1']) => {
 const open = (id,actorId,at) => ({id,tenantId:'tenant-a',branchId:'branch-1',drawerId:'drawer-1',actorId,
   offlineDeviceId:'device-1',openingCash:100,at,timeZone:'Asia/Riyadh'});
 const close = (id,actorId,at) => ({shiftId:id,actorId,deviceId:'device-1',countedCash:100,at});
+
+test('actual sync sends shared proofs through signed replay and rejects stale account completion',async()=>{
+  const previousSession=globalThis.sessionStorage,previousFetch=globalThis.fetch;
+  globalThis.sessionStorage=cache();
+  const disk=durable(),storage=cache(),repository=await storeFor('cashier-b',disk,storage,{
+    khodar_pos_active_branch_id_v1:'branch-1'
+  });
+  await repository.transactDurable(()=>repository.enqueue({id:'sync-source',tenantId:'tenant-a',
+    branchId:'branch-1',entityType:'expense',entityId:'e',action:'create',payload:{id:'e',branchId:'branch-1',amount:1}}));
+  const scope={tenantId:'tenant-a',branchId:'branch-1',drawerId:'drawer-1',deviceId:'device-1'};
+  const key='braka:tenant-a:branch-1:drawer-1:device-1:cash_drawer_journal_v1';
+  const proofs=repository.value.outbox.map(source=>({source,grant:{},signature:'fixture'}));
+  disk.rows.set(key,{revision:0,...scope,shifts:[],sources:proofs});
+  const identity={id:'cashier-b',tenantId:'tenant-a',branchIds:['branch-1'],sessionExpiresAt:new Date(Date.now()+60000).toISOString()};
+  setSessionToken('fixture-token');setSessionUser(identity);
+  const service=new CloudflareSyncService();service.isOnline=true;service.repository=repository;service.currentTenantId=scope.tenantId;
+  service.drawerReplay={scope,locks,deviceProof:'fixture-device-proof'};
+  let change='account',requests=0;
+  globalThis.fetch=async(url,options)=>{
+    requests++;assert.ok(url.endsWith('/api/cash/replay'));
+    const body=JSON.parse(options.body);assert.deepEqual(body.proofs,proofs);
+    assert.equal(body.deviceId,scope.deviceId);assert.equal(options.headers.Authorization,'Bearer fixture-token');
+    if(change==='account')setSessionUser({...identity,id:'other-account'});
+    if(change==='branch')await repository.transactDurable(()=>repository.set('khodar_pos_active_branch_id_v1','other-branch'));
+    return Response.json({success:true,acceptedIds:['sync-source']});
+  };
+  try {
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),false);
+    assert.equal(repository.value.outbox.length,1);assert.equal(disk.rows.get(key).revision,0);
+    setSessionUser(identity);change='branch';
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),false);
+    assert.equal(repository.value.outbox.length,1);assert.equal(disk.rows.get(key).revision,0);
+    await repository.transactDurable(()=>repository.set('khodar_pos_active_branch_id_v1','branch-1'));
+    change='none';
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),true);
+    assert.equal(repository.value.outbox.length,0);assert.deepEqual(disk.rows.get(key).acceptedIds,['sync-source']);
+    assert.equal(requests,3);
+  } finally {service.stopAutoSync();await repository.close();globalThis.fetch=previousFetch;globalThis.sessionStorage=previousSession;}
+});
 
 test('shared replay preserves proofs on lost response or failed acknowledgement and never mixes user queues',async()=>{
   const disk=durable(),scope={tenantId:'tenant-a',branchId:'branch-1',drawerId:'drawer-1',deviceId:'device-1'};

@@ -1,5 +1,15 @@
 # Five-item remediation checkpoint — 2026-10-04
 
+## Signed transport follow-up
+
+Final local verification supersedes pending statements below: npm test exit0 with280 tests (5security,259integration,13review,3native), no failures/skips;17 inherited formula checks remain separate. Independent compatibility guard1, lint, typecheck, docs, Web build and Functions compilation pass. The staged transport is not App-level enablement or a five-item release certification. No live deployment.
+
+Functions compilation succeeded for the generated147-file compatibility bundle; no deploy/schema mutation. The first full rerun258/259 failed at the older drawer-grant assertion because its independent Node time preceded the Workerd-issued onlineVerifiedAt. The assertion now uses its signed grant issue time; production time policy is unchanged. Final full rerun pending; lint/typecheck/production drift guard pass. Usage91% primary/71% weekly at check time; checkpoint before exhaustion.
+
+Hosted run37225873239 failed the independent production-bundle drift guard, not financial tests. Reviewed d8165c0 changes add staged replay proof/original-actor behavior only; ordinary auth remains unchanged. The cash-disabled override is retained and the source pin updated with its explicit review rationale. The drift test failed before repair and passes after it. No production deploy or migration.
+
+CloudflareSyncService now accepts an explicit staged drawerReplay configuration, disabled by default. Shared sources use authenticated cash/replay and paired local acknowledgement, never an unsigned fallback; unknown own sources remain visible. Current token/user/tenant/branch/config/repository/generation is checked across network and durable commit boundaries. A real service/AtomicStore fixture with fake HTTP proves stale account/branch responses retain original sources, then successful replay clears only exact own sources. Thirty focused checks and lint/full typecheck/security pass; Web build passes with its large-chunk warning. Full final suite and Functions compilation are pending at this checkpoint. App provisioning, real API-to-hook integration and remaining rollout prerequisites are still open.
+
 ## Latest local progress: assigned drawer writer and signed source replay
 
 Final rerun supersedes pending statuses below: npm test exits0 with279 automated tests (5security,258integration,13review,3native), zero failures/skips. Seventeen inherited formula checks pass separately, not E2E. Lint/full typecheck/documentation checks pass; no credential pattern is found in canonical docs. This is a verified staged-code checkpoint, not five-item completion or a production release.
