@@ -29,7 +29,12 @@ try{
   await page.locator('input[placeholder*="أدخل اسم المستخدم"]').fill('owner-'+tenantId);await page.locator('input[type="password"]').fill(config.password);
   await page.locator('form button[type="submit"]').click();
   await page.waitForFunction(()=>!document.querySelector('input[type="password"]'),{timeout:30000});
-  await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(row=>row.textContent.includes('السحابة والنسخ الاحتياطي')));
+  try {
+    await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(row=>row.textContent.includes('السحابة والنسخ الاحتياطي')));
+  } catch(error) {
+    await page.screenshot({path:'scratch/artifacts/release-2.6.14/owner-review-navigation-failure.png',fullPage:true});
+    throw error;
+  }
   await page.evaluate(()=>[...document.querySelectorAll('button')].find(row=>row.textContent.includes('السحابة والنسخ الاحتياطي')).click());
   await click('تحميل المراجعات');await page.waitForSelector('section[aria-label="مراجعة تعارضات البيانات"] article');
   await page.screenshot({path:'scratch/artifacts/release-2.6.14/owner-review-before.png',fullPage:true});

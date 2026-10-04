@@ -2,14 +2,14 @@
 
 ## Five-item implementation checkpoint — 2026-10-04
 
-This section supersedes optimistic interpretations of earlier implementation evidence, not the scope of historical tests. No new runtime release or server deployment occurred.
+This section supersedes optimistic interpretations of earlier implementation evidence, not the scope of historical tests. Compatible server/Web deployment 5b8efbd8 occurred from clean source d5b31bc; no new public binary release or cash enablement occurred.
 
 | Scope | State | Closing requirement |
 |---|---|---|
 | Cash-drawer closing | OPEN | Complete end-to-end signed authorization, source journal/replay/restore and actual platform verification before enabling. |
 | Large-company conflict settlement | OPEN | Audited bounded checkpoint recovery beyond the 2,000-event limit. |
 | Complex financial conflicts | OPEN | Actual supported operation reconciliation and reversals; originals retained and owner review. |
-| DEPLOY-REPRODUCIBLE | IN_PROGRESS | Added compatible tracked bundle inputs and generator; 146-file bundle compiled. Clean committed checkout and live redeployment remain unverified. |
+| DEPLOY-REPRODUCIBLE | VERIFIED | Clean independent clone d5b31bc, npm ci/build, 146-file tracked generator and Wrangler compile/deployment 5b8efbd8 pass. Live owner review/receipt and public health/unauthenticated denial pass. Scope is current cash-disabled production schema; no migrations applied. |
 | Windows update installation | FIXED_NOT_VERIFIED | Replaced rejected shell prototype with source-built native helper, readiness before shutdown, exact-parent/hash validation and temporary helper copy outside installed resources. Native success/refusal tests pass. Actual NSIS upgrade remains unverified; no user installation changed or security bypass attempted. |
 
 Evidence and exact remaining work: docs/current/FIVE_ITEM_REMEDIATION.md. The removed experimental suite was 243/245 passed, not a release gate. Current regression passes 5 security, 244 integration, 13 review and 3 native-helper tests; 17 inherited formula checks are separate. These do not close the remaining feature and installation blockers.
