@@ -34,10 +34,14 @@ export async function enrollOnline(input) {
   if (!branchId) throw new Error('المحاسب غير مخصص لأي فرع');
   const { deviceId, deviceProof } = await ensureOfflineDeviceIdentity(store);
   const scope = { tenantId: user.tenantId, cashierId: user.id, deviceId, branchId };
+  const pair=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const eventPublicJwk=await crypto.subtle.exportKey('jwk',pair.publicKey);
+  const eventPrivateJwk=await crypto.subtle.exportKey('jwk',pair.privateKey);
   await postJson(fetchFn, `${apiBaseUrl}/api/cash/devices`, token, { tenantId: user.tenantId, deviceId, deviceProof });
-  const issued = await postJson(fetchFn, `${apiBaseUrl}/api/cash/grants`, token, { tenantId: user.tenantId, deviceId, deviceProof });
+  const issued = await postJson(fetchFn, `${apiBaseUrl}/api/cash/grants`, token, { tenantId: user.tenantId, deviceId, deviceProof,eventPublicJwk });
+  if (!issued.grant?.claims?.eventPublicJwk) throw new Error('الخادم لا يدعم إثبات مصدر الحركات؛ لم يُحفظ التصريح');
   const record = await enrollOfflineGrant({
-    envelope: issued.grant, password, ...scope, pinnedPublicJwk
+    envelope: issued.grant, password, ...scope, pinnedPublicJwk,eventPrivateJwk
   });
   await store.saveRecord({ tenantId: scope.tenantId, cashierId: scope.cashierId, deviceId }, record);
   return { deviceId, record };

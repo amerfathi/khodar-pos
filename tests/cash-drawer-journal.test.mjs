@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { AtomicStore } from '../src/services/atomicStore.js';
 import * as journal from '../src/services/cashDrawerJournal.js';
 import { verifySignedOfflineGrant } from '../src/services/verifiedOfflineGrant.js';
+import {enrollOfflineGrant,unlockOfflineGrant} from '../src/services/offlineUnlock.js';
+import {issueSignedOfflineGrant} from '../functions/_lib/offlineGrantSignature.js';
 
 const cache = () => ({ rows:new Map(), getItem(key){return this.rows.get(key)??null;},
   setItem(key,value){this.rows.set(key,String(value));}, removeItem(key){this.rows.delete(key);} });
@@ -20,8 +22,8 @@ const durable = () => ({ rows:new Map(), fail:false,
     return entries.map(entry=>structuredClone(entry.snapshot));
   }
 });
-const storeFor = async (id,disk,storage) => {
-  const store=new AtomicStore({id,tenantId:'tenant-a'},{},storage,{durableFirst:true});
+const storeFor = async (id,disk,storage,initial={}) => {
+  const store=new AtomicStore({id,tenantId:'tenant-a'},initial,storage,{durableFirst:true});
   assert.equal(await store.acquire(locks,disk),true);return store;
 };
 const grant = cashierId => ({tenantId:'tenant-a',cashierId,deviceId:'device-1',branchIds:['branch-1'],onlineVerifiedAt:'2026-10-01T17:00:00Z'});
@@ -80,4 +82,40 @@ test('altering signed cashier or branch claims invalidates the offline grant',as
   const envelope={claims,signature:Buffer.from(signature).toString('base64url')};
   await assert.rejects(verifySignedOfflineGrant({...envelope,claims:{...claims,cashierId:'cashier-2'}},publicJwk),/توقيع/);
   await assert.rejects(verifySignedOfflineGrant({...envelope,claims:{...claims,branchIds:['branch-2']}},publicJwk),/توقيع/);
+});
+
+test('financial source and signed drawer journal commit together or neither commits',async()=>{
+  const disk=durable(),storage=cache(),first=await storeFor('cashier-1',disk,storage,{khodar_pos_expenses_v3:[]});
+  const eventKeys=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const envelope=await issueSignedOfflineGrant(await crypto.subtle.exportKey('jwk',keys.privateKey),
+    {...grant('cashier-1'),eventPublicJwk:await crypto.subtle.exportKey('jwk',eventKeys.publicKey)});
+  const context={tenantId:'tenant-a',cashierId:'cashier-1',deviceId:'device-1',branchId:'branch-1',
+    password:'fixture-pass',pinnedPublicJwk:publicJwk,at:'2026-10-01T18:00:00Z'};
+  const record=await enrollOfflineGrant({...context,envelope,eventPrivateJwk:await crypto.subtle.exportKey('jwk',eventKeys.privateKey)});
+  const unlocked=await unlockOfflineGrant(record,context);
+  await journal.commitDrawerShiftDurable(first,disk,locks,'open',open('shift-finance','cashier-1',context.at),unlocked,{signSources:true});
+  const financial=()=>{
+    const expense={id:'expense-finance',tenantId:'tenant-a',branchId:'branch-1',amount:12,paymentMethod:'cash',cashShiftId:'shift-finance'};
+    first.set('khodar_pos_expenses_v3',[expense]);
+    first.enqueue({id:'source-finance',tenantId:'tenant-a',branchId:'branch-1',entityType:'expense',entityId:expense.id,
+      action:'create',payload:expense,timestamp:Date.parse('2026-10-01T18:05:00Z')});
+  };
+  const input={shiftId:'shift-finance',id:'cash:expense-finance',actorId:'cashier-1',deviceId:'device-1',amount:-12,at:'2026-10-01T18:05:00Z'};
+  const before=structuredClone(first.value);
+  disk.fail=true;
+  await assert.rejects(journal.commitDrawerShiftDurable(first,disk,locks,'cash',input,unlocked,{financialAction:financial}),/Injected/);
+  assert.deepEqual(first.value,before);
+  disk.fail=false;
+  await assert.rejects(journal.commitDrawerShiftDurable(first,disk,locks,'cash',{...input,amount:-13},unlocked,{financialAction:financial}),/مصدر الحركة/);
+  assert.deepEqual(first.value,before);
+  await journal.commitDrawerShiftDurable(first,disk,locks,'cash',input,unlocked,{financialAction:financial});
+  assert.equal(first.value.state.khodar_pos_expenses_v3?.[0]?.amount,12);
+  const shared=[...disk.rows.values()].find(row=>row.drawerId==='drawer-1');
+  assert.equal(shared.sources?.some(proof=>proof.source.id==='source-finance'),true);
+  assert.equal(shared.sources?.some(proof=>proof.source.entityType==='cash_shift'),true);
+  await journal.commitDrawerShiftDurable(first,disk,locks,'close',{...close('shift-finance','cashier-1','2026-10-01T19:00:00Z'),countedCash:88},unlocked,{signSources:true});
+  const closed=[...disk.rows.values()].find(row=>row.drawerId==='drawer-1');
+  assert.equal(closed.sources.length,shared.sources.length+1);
+  assert.equal(closed.shifts[0].expectedCash,88);
+  await first.close();
 });

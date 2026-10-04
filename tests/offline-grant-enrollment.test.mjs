@@ -19,7 +19,7 @@ const fakeFetch = async (url, init) => {
   if (url.endsWith('/api/cash/grants')) {
     const grant = await signer.issueSignedOfflineGrant(privateJwk, {
       tenantId: body.tenantId, cashierId: 'cashier-a', deviceId: body.deviceId,
-      branchIds: ['branch-1', 'branch-2'], onlineVerifiedAt: new Date().toISOString()
+      branchIds: ['branch-1', 'branch-2'], onlineVerifiedAt: new Date().toISOString(),eventPublicJwk:body.eventPublicJwk
     });
     return ok({ success: true, grant });
   }
@@ -55,6 +55,8 @@ test('online enrollment registers the device, obtains a grant, and persists it',
   });
   assert.equal(typeof deviceId, 'string');
   assert.equal(record.envelope.claims.cashierId, 'cashier-a');
+  assert.equal(record.signingKeyVault?.version,1);
+  assert.equal(record.envelope.claims.eventPublicJwk?.kty,'EC');
   const saved = await store.loadRecord({ tenantId: 'tenant-a', cashierId: 'cashier-a', deviceId });
   assert.deepEqual(saved.envelope.claims, record.envelope.claims);
 });

@@ -39,6 +39,16 @@ export async function onRequestPost({ request, env }) {
     if (!canSync(auth.principal, 'invoice', 'create')) return forbidden('Offline cashier access denied');
     if (!text(input.deviceId, 128) || !deviceProofPattern.test(input.deviceProof || ''))
       return badRequest('Invalid device identity');
+    let eventPublicJwk;
+    if (input.eventPublicJwk) {
+      const proposed=input.eventPublicJwk;
+      if (proposed.kty!=='EC'||proposed.crv!=='P-256'||proposed.d||
+          !/^[A-Za-z0-9_-]{43}$/.test(proposed.x||'')||!/^[A-Za-z0-9_-]{43}$/.test(proposed.y||''))
+        return badRequest('Invalid event signing public key');
+      eventPublicJwk={kty:'EC',crv:'P-256',x:proposed.x,y:proposed.y};
+      try { await crypto.subtle.importKey('jwk',eventPublicJwk,{name:'ECDSA',namedCurve:'P-256'},false,['verify']); }
+      catch { return badRequest('Invalid event signing public key'); }
+    }
     const device = await env.DB.prepare('SELECT device_proof_hash, revoked_at FROM cash_devices WHERE tenant_id = ? AND id = ?')
       .bind(auth.principal.tenantId, input.deviceId).first();
     if (!device || device.revoked_at) return forbidden('Device is not registered');
@@ -53,6 +63,7 @@ export async function onRequestPost({ request, env }) {
       cashierId: auth.principal.id,
       deviceId: input.deviceId,
       branchIds,
+      ...(eventPublicJwk?{eventPublicJwk}:{}),
       onlineVerifiedAt: new Date().toISOString()
     };
     const grant = await issueSignedOfflineGrant(privateJwk, claims);

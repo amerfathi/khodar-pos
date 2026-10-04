@@ -548,13 +548,19 @@ test('offline cashier grant is login-bound, device-bound, and server-signed', as
   assert.equal((await call('/api/cash/grants', 'POST', { tenantId: 'GRANT', deviceId, deviceProof: deviceProof() }, cashier)).status, 403);
   assert.equal((await call('/api/cash/grants', 'POST', { tenantId: 'GRANT', deviceId: 'unknown-device', deviceProof: proof }, cashier)).status, 403);
 
-  const issued = await call('/api/cash/grants', 'POST', { tenantId: 'GRANT', deviceId, deviceProof: proof,
+  const eventKeys=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const eventPublicJwk=await crypto.subtle.exportKey('jwk',eventKeys.publicKey);
+  const eventPrivateJwk=await crypto.subtle.exportKey('jwk',eventKeys.privateKey);
+  assert.equal((await call('/api/cash/grants','POST',{tenantId:'GRANT',deviceId,deviceProof:proof,eventPublicJwk:eventPrivateJwk},cashier)).status,400);
+  assert.equal((await call('/api/cash/grants','POST',{tenantId:'GRANT',deviceId,deviceProof:proof,eventPublicJwk:{...eventPublicJwk,x:'invalid'}},cashier)).status,400);
+  const issued = await call('/api/cash/grants', 'POST', { tenantId: 'GRANT', deviceId, deviceProof: proof,eventPublicJwk,
     cashierId: 'attacker', branchIds: ['grant-second'], onlineVerifiedAt: '2000-01-01T00:00:00Z' }, cashier);
   assert.equal(issued.status, 200);
   const grant = (await issued.json()).grant;
   assert.equal(grant.claims.tenantId, 'GRANT');
   assert.equal(grant.claims.cashierId, 'grant-cashier');
   assert.equal(grant.claims.deviceId, deviceId);
+  assert.deepEqual(grant.claims.eventPublicJwk,{kty:'EC',crv:'P-256',x:eventPublicJwk.x,y:eventPublicJwk.y});
   assert.deepEqual(grant.claims.branchIds, ['grant-main']);
   assert.equal(Date.parse(grant.claims.onlineVerifiedAt) > Date.now() - 60_000, true);
 

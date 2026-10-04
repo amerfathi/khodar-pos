@@ -1,5 +1,17 @@
 # براكه — نقطة التسليم الحالية
 
+## متابعة إقفال الدرج — 2026-10-04، محلي فقط
+
+HEAD عند بدء المتابعة: 138b1327f8719f86f6f6d1276f6ccdccafb69c19، branch main. أضيف ربط public key للحركات بالتصريح الموقّع من الخادم. المفتاح الخاص يُحفظ داخل vault AES-GCM بمفتاح مشتق من كلمة المرور عبر PBKDF2، لا plaintext أو bearer token. فكّ القفل يعيد CryptoKey غير قابل للتصدير داخل WeakMap، ولا يتيح التوقيع بمقبض زائف. إثبات مصدر الحركة يحمل المصدر الكامل بما فيه ID/time/preconditions مع التوقيع والتصريح؛ تحقق الخادم المشترك يثبت المحاسب الأصلي والجهاز والفرع وصلاحية التصريح وقت إنشاء المصدر، لا وقت رفعه المتأخر. هذا إثبات إنشاء وليس قبولًا محاسبيًا أو تحققًا من إلغاء صلاحية الجهاز بالخادم.
+
+commitDrawerShiftDurable يدعم financialAction متزامنة داخل المعاملة، ويشترط مصدرًا ماليًا واحدًا يطابق قيمة الحركة ومعرّفها ووردية الدرج. توقيع كل أحداث المجموعة يتم قبل commitBatch الذي يحفظ aggregate المستخدم وسجل الدرج المشترك معًا. فشل التوقيع أو عدم تطابق المبلغ أو فشل التخزين يبقي السجل السابق؛ open/close يدعمان signSources، والمصادر السابقة لا تُسقط عند الإقفال. اختبار المصروف يستخدم مفتاح expenses_v3 الحقيقي وحماية provenance، لا مخزنًا بديلًا. لم يُربط هذا بعد بالمسار الفعلي useAppStore/login/UI/push؛ لا تفعّل cash gate، ولا تزعم اكتمال الفواتير أو تسليم درج بين حسابين في الإنتاج.
+
+الفحوص: 21 اختبارًا مركزًا و6 API محلية حقيقية نجحت، lint/full typecheck ناجحان. npm test كامل: 5 أمن +247 تكامل +13 مراجعة +3 مساعد Windows، بلا فشل أو تخطي؛ 17 فحص صيغة موروث منفصل. الاختبارات الجديدة فشلت قبل الإصلاح للتشفير والتسجيل الإلكتروني وحفظ المصروف مع journal. فحوص API public-key أضيفت بعد التنفيذ كتغطية تكامل، لا ادعاء TDD لها.
+
+Windows: النسخة المثبتة فعلًا2.6.12، فُتحت عبر أداة Windows الأصلية؛ المستخدم دخل بنفسه. أُغلقت طبيعيًا بعد التأكد من فاتورة فارغة، وحُفظ installation+user-data في scratch/artifacts/windows-native-upgrade-e1de02cab89841e4afa54964d4b7b27b (خاص ignored، لا تنشره). الحزمة المحلية2.6.14 SHA256 02701ffdbbc5a6d44d27562070fab87b2f7547288bde0cacebc0859ee542f67a، مبنية من d5b31bc وليست نفس ثنائي الإصدار العام؛ لا تستبدل public immutable assets. فُتح المثبّت ووصل إلى زر تنصيب في المجلد نفسه. التأكيد النهائي عبر الأداة مطلوب قبل النقر؛ لا تتجاوز التحذيرات الأمنية. ما زالت الترقية غير مثبتة في هذه اللحظة.
+
+ملفات هذه المتابعة غير الملتزمة: functions/api/cash/grants.js، src/services/cashDrawerJournal.js، src/services/offlineGrantEnrollment.js، src/services/offlineUnlock.js، src/services/verifiedOfflineGrant.js، tests/api-integration.test.mjs، tests/cash-drawer-journal.test.mjs، tests/offline-grant-enrollment.test.mjs، tests/offline-unlock.test.mjs، AI_HANDOFF_CURRENT.md، docs/current/FIVE_ITEM_REMEDIATION.md. untracked live-probe السابقة خارج المهمة. أول خطوة تالية: إتمام اختبار المثبّت بعد التأكيد، ثم ربط الحفظ الموقّع ببيع فعلي وlogin/server replay مع تفويض drawer writer وbackup/restore قبل تفعيل الدرج. حجم التاريخ والتعارضات المعقدة لم يكتملَا. آخر قراءة استخدام28% لخمس ساعات،61% أسبوعيًا؛ لا يمكن إعادة ضبطها برمجيًا. هذا القسم خالٍ من قيم الأسرار.
+
 ## نشر متوافق من Git — آخر نتيجة 2026-10-04
 
 Source HEAD: d5b31bcdf325b5832b81d1e3cd1783bd3f8c3396؛ branch main، مرفوع إلى origin/main، Quality gates 37219367640 ناجحة. أُنشئ clone محلي مستقل --no-hardlinks لهذا الـcommit، npm ci/build نجحا وgit status --porcelain فارغ. أنتجت الوصفة 146 ملفًا، وتجميع Wrangler 4.147.0 نجح، ونُشرت الحزمة إلى https://5b8efbd8.khodar-pos.pages.dev وإنتاج khodar-pos.pages.dev دون migrations أو تفعيل cash.

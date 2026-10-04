@@ -15,6 +15,7 @@ import { verifySignedOfflineGrant, assertVerifiedOfflineGrant } from './verified
 import { OFFLINE_GRANT_PUBLIC_JWK } from '../config/offlineGrantPublicKey.js';
 
 const encoder = new TextEncoder();
+const signingKeys = new WeakMap();
 const b64u = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unb64u = value => {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('بيانات قفل العمل دون اتصال تالفة');
@@ -28,6 +29,23 @@ async function deriveVerifier(password, saltBytes) {
   const bits = await crypto.subtle.deriveBits(
     { name: 'PBKDF2', salt: saltBytes, iterations: 100000, hash: 'SHA-256' }, keyMaterial, 256);
   return new Uint8Array(bits);
+}
+
+async function vaultKey(password,salt) {
+  return crypto.subtle.importKey('raw',await deriveVerifier(password,unb64u(salt)),{name:'AES-GCM'},false,['encrypt','decrypt']);
+}
+async function importBoundSigningKey(privateJwk,publicJwk) {
+  try {
+    if (privateJwk?.kty!=='EC'||privateJwk.crv!=='P-256'||!privateJwk.d||
+        publicJwk?.kty!=='EC'||publicJwk.crv!=='P-256'||publicJwk.d||
+        privateJwk.x!==publicJwk.x||privateJwk.y!==publicJwk.y) throw Error('mismatch');
+    const key=await crypto.subtle.importKey('jwk',privateJwk,{name:'ECDSA',namedCurve:'P-256'},false,['sign']);
+    const publicKey=await crypto.subtle.importKey('jwk',publicJwk,{name:'ECDSA',namedCurve:'P-256'},false,['verify']);
+    const challenge=crypto.getRandomValues(new Uint8Array(32));
+    const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},key,challenge);
+    if (!await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},publicKey,signature,challenge)) throw Error('mismatch');
+    return key;
+  } catch { throw new Error('مفتاح توقيع الحركات لا يطابق التصريح'); }
 }
 
 export async function derivePasswordVerifier(password) {
@@ -50,7 +68,15 @@ export async function enrollOfflineGrant(input) {
   const handle = await verifySignedOfflineGrant(envelope, pinnedPublicJwk);
   assertVerifiedOfflineGrant(handle, { tenantId, cashierId, deviceId, branchId }, at);
   const verifier = await derivePasswordVerifier(password);
-  return { envelope: structuredClone(envelope), salt: verifier.salt, hash: verifier.hash };
+  const record = { envelope: structuredClone(envelope), salt: verifier.salt, hash: verifier.hash };
+  if (envelope.claims.eventPublicJwk) {
+    await importBoundSigningKey(input.eventPrivateJwk,envelope.claims.eventPublicJwk);
+    const salt=b64u(crypto.getRandomValues(new Uint8Array(16))),iv=crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:encoder.encode(JSON.stringify(envelope))},
+      await vaultKey(password,salt),encoder.encode(JSON.stringify(input.eventPrivateJwk)));
+    Object.assign(record,{signingKeyVault:{version:1,salt,iv:b64u(iv),ciphertext:b64u(new Uint8Array(ciphertext))}});
+  }
+  return record;
 }
 
 export async function unlockOfflineGrant(record, input) {
@@ -62,5 +88,29 @@ export async function unlockOfflineGrant(record, input) {
     throw new Error('كلمة المرور غير صحيحة للعمل دون اتصال');
   const handle = await verifySignedOfflineGrant(record.envelope, pinnedPublicJwk);
   assertVerifiedOfflineGrant(handle, { tenantId, cashierId, deviceId, branchId }, at);
+  if (record.envelope.claims.eventPublicJwk) {
+    try {
+      const vault=record.signingKeyVault;
+      if (vault?.version!==1||unb64u(vault.iv).length!==12) throw Error('Invalid vault');
+      const bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64u(vault.iv),additionalData:encoder.encode(JSON.stringify(record.envelope))},
+        await vaultKey(password,vault.salt),unb64u(vault.ciphertext));
+      const key=await importBoundSigningKey(JSON.parse(new TextDecoder().decode(bytes)),record.envelope.claims.eventPublicJwk);
+      signingKeys.set(handle,{key,envelope:structuredClone(record.envelope)});
+    } catch { throw new Error('تعذر فتح مفتاح توقيع الحركات؛ لم تُعتمد أي حركة'); }
+  }
   return handle;
+}
+
+// Only handles released by password-verified unlock own a signing key.
+export async function signOfflineCashEvent(handle,event) {
+  const unlocked=signingKeys.get(handle);
+  if (!unlocked) throw new Error('مفتاح توقيع الحركات غير مفتوح');
+  if (!event||typeof event.id!=='string'||!event.id||!Number.isSafeInteger(event.timestamp))
+    throw new Error('الحركة غير صالحة للتوقيع');
+  const claims=unlocked.envelope.claims;
+  assertVerifiedOfflineGrant(handle,{tenantId:event.tenantId,cashierId:claims.cashierId,
+    deviceId:claims.deviceId,branchId:event.branchId},new Date(event.timestamp).toISOString());
+  const source=JSON.parse(JSON.stringify(event));
+  const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},unlocked.key,encoder.encode(JSON.stringify(source)));
+  return {source,grant:structuredClone(unlocked.envelope),signature:b64u(new Uint8Array(signature))};
 }

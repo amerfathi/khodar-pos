@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import * as signer from '../functions/_lib/offlineGrantSignature.js';
 import { enrollOfflineGrant, unlockOfflineGrant, verifyPasswordVerifier } from '../src/services/offlineUnlock.js';
 import { assertVerifiedOfflineGrant } from '../src/services/verifiedOfflineGrant.js';
+import * as grantVerification from '../src/services/verifiedOfflineGrant.js';
+import {signOfflineCashEvent} from '../src/services/offlineUnlock.js';
 
 const keys = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
 const privateJwk = await crypto.subtle.exportKey('jwk', keys.privateKey);
@@ -55,4 +57,45 @@ test('an already-expired grant cannot be enrolled', async () => {
 
 test('enrollment rejects a grant whose claims do not match the device scope', async () => {
   await assert.rejects(enrollOfflineGrant({ envelope: await grant({ deviceId: 'other-device' }), password: 'secret-pass', ...context(), at: '2026-10-01T09:00:00Z', pinnedPublicJwk: publicJwk }), /تصريح/);
+});
+
+test('event signing key is encrypted and bound to the server signed grant', async () => {
+  const eventKeys = await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const eventPrivateJwk = await crypto.subtle.exportKey('jwk',eventKeys.privateKey);
+  const eventPublicJwk = await crypto.subtle.exportKey('jwk',eventKeys.publicKey);
+  const envelope = await grant({eventPublicJwk});
+  const input = {envelope,password:'vault-pass',...context(),at:'2026-10-01T09:00:00Z',pinnedPublicJwk:publicJwk,eventPrivateJwk};
+  const record = await enrollOfflineGrant(input);
+  assert.equal(record.signingKeyVault?.version,1);
+  assert.equal(JSON.stringify(record).includes(eventPrivateJwk.d),false);
+  await assert.rejects(enrollOfflineGrant({...input,eventPrivateJwk:privateJwk}),/مفتاح/);
+  const corrupted=structuredClone(record);
+  corrupted.signingKeyVault.ciphertext=corrupted.signingKeyVault.ciphertext.replace(/^./,char=>char==='A'?'B':'A');
+  await assert.rejects(unlockOfflineGrant(corrupted,{password:'vault-pass',...context(),at:'2026-10-01T10:00:00Z',pinnedPublicJwk:publicJwk}),/مفتاح/);
+});
+
+test('original cashier event proof survives handover but cannot be altered or forged',async()=>{
+  assert.equal(typeof grantVerification.verifyOfflineCashEvent,'function');
+  const pair=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const envelope=await grant({eventPublicJwk:await crypto.subtle.exportKey('jwk',pair.publicKey)});
+  const input={password:'proof-pass',...context(),at:'2026-10-01T09:00:00Z',pinnedPublicJwk:publicJwk};
+  const record=await enrollOfflineGrant({...input,envelope,eventPrivateJwk:await crypto.subtle.exportKey('jwk',pair.privateKey)});
+  const handle=await unlockOfflineGrant(record,input);
+  const event={id:'invoice-a',tenantId:'tenant-a',branchId:'branch-1',entityType:'invoice',entityId:'invoice-a',
+    action:'create',timestamp:Date.parse('2026-10-01T09:01:00Z'),payload:{amount:27},preconditions:{'stock:branch-1':null}};
+  const proof=await signOfflineCashEvent(handle,event);
+  const verified=await grantVerification.verifyOfflineCashEvent(JSON.parse(JSON.stringify(proof)),publicJwk,
+    {tenantId:'tenant-a',deviceId:'device-1'});
+  assert.equal(verified.cashierId,'cashier-a');
+  assert.deepEqual(verified.source,event);
+  for (const change of [source=>source.payload.amount=99,source=>source.id='other',
+    source=>source.preconditions['stock:branch-1']='other',source=>source.timestamp+=24*60*60*1000]) {
+    const altered=structuredClone(proof);change(altered.source);
+    await assert.rejects(grantVerification.verifyOfflineCashEvent(altered,publicJwk,{tenantId:'tenant-a',deviceId:'device-1'}));
+  }
+  await assert.rejects(grantVerification.verifyOfflineCashEvent(proof,publicJwk,{tenantId:'tenant-a',deviceId:'other'}));
+  await assert.rejects(signOfflineCashEvent({},event),/مفتاح/);
+  await assert.rejects(signOfflineCashEvent(handle,{...event,timestamp:event.timestamp+24*60*60*1000}),/صلاحية/);
+  const swapped=structuredClone(proof);swapped.grant.claims.cashierId='cashier-b';
+  await assert.rejects(grantVerification.verifyOfflineCashEvent(swapped,publicJwk,{tenantId:'tenant-a',deviceId:'device-1'}));
 });
