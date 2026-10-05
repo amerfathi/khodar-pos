@@ -3,6 +3,7 @@ import { badRequest, forbidden, json, options, readJson } from '../../_lib/http.
 import { canSync } from '../../_lib/syncPolicy.js';
 import { hashCashDeviceProof } from '../../_lib/cashDeviceProof.js';
 import { issueSignedOfflineGrant } from '../../_lib/offlineGrantSignature.js';
+import { DEFAULT_PERMISSIONS, ROLE_PERMISSIONS_PRESETS } from '../../../src/data/initialData.js';
 
 export const onRequestOptions = options;
 const text = (value, limit) => typeof value === 'string' && value.trim() && value.length <= limit;
@@ -63,11 +64,17 @@ export async function onRequestPost({ request, env }) {
     let privateJwk = null;
     try { privateJwk = JSON.parse(env.OFFLINE_GRANT_PRIVATE_JWK || ''); } catch { privateJwk = null; }
     if (!privateJwk) return json({ success: false, error: 'Offline grants are not configured' }, 503);
+    const effective=['company_owner','super_admin','admin'].includes(auth.principal.role)
+      ? ROLE_PERMISSIONS_PRESETS.admin.permissions
+      : auth.principal.role==='custom'?auth.principal.permissions:ROLE_PERMISSIONS_PRESETS[auth.principal.role]?.permissions||{};
     const claims = {
       tenantId: auth.principal.tenantId,
       cashierId: auth.principal.id,
       principalType:auth.principal.type,
       credentialVersion:auth.principal.credentialVersion,
+      offlineIdentity:{role:auth.principal.role,
+        permissions:Object.fromEntries(Object.keys(DEFAULT_PERMISSIONS).map(key=>[key,effective[key]===true])),
+        syncScopeVersion:auth.principal.type==='user'?auth.principal.credentialVersion:0},
       deviceId: input.deviceId,
       branchIds,
       drawerIds:assigned.results.map(row=>row.id),

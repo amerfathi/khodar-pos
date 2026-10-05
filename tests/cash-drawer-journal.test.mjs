@@ -15,6 +15,7 @@ const locks = { async request(_key,_options,fn){return fn({});}, async query(){r
 const durable = () => ({ rows:new Map(), fail:false,
   async read(key){return structuredClone(this.rows.get(key)??null);},
   async commit(key,value,expectedRevision){
+    if(this.fail)throw Error('Injected paired commit failure');
     if ((this.rows.get(key)?.revision??null)!==expectedRevision) throw Error('Revision conflict');
     this.rows.set(key,structuredClone(value));return structuredClone(value);
   },
@@ -24,6 +25,22 @@ const durable = () => ({ rows:new Map(), fail:false,
     for(const entry of entries)this.rows.set(entry.key,structuredClone(entry.snapshot));
     return entries.map(entry=>structuredClone(entry.snapshot));
   }
+});
+
+test('journal-only acknowledgement uses the real durable single-record contract',async()=>{
+  const disk=durable(),storage=cache(),uploader=await storeFor('cashier-b',disk,storage);
+  const paired=disk.commitBatch.bind(disk);
+  disk.commitBatch=async entries=>{if(entries.length<2)throw Error('مراجعات السجلات الدائمة المشتركة غير صالحة');return paired(entries);};
+  const scope={tenantId:'tenant-a',branchId:'branch-1',drawerId:'drawer-1',deviceId:'device-1'};
+  const key='braka:tenant-a:branch-1:drawer-1:device-1:cash_drawer_journal_v1';
+  const sources=[{source:{id:'other-cashier-source',tenantId:'tenant-a',branchId:'branch-1'},grant:{},signature:'fixture'}];
+  disk.rows.set(key,{revision:0,...scope,shifts:[],sources});
+  const before=structuredClone(uploader.value);
+  const send=async()=>({success:true,acceptedIds:['other-cashier-source']});
+  assert.equal(await journal.replayDrawerJournal(disk,locks,scope,send,{repository:uploader}),true);
+  assert.deepEqual(uploader.value,before);
+  assert.deepEqual(disk.rows.get(key).acceptedIds,['other-cashier-source']);
+  await uploader.close();
 });
 const storeFor = async (id,disk,storage,initial={}) => {
   const store=new AtomicStore({id,tenantId:'tenant-a'},initial,storage,{durableFirst:true});

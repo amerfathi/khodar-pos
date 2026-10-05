@@ -39,3 +39,9 @@ test('company owner can choose one branch or a clearly separate all-branch view'
   assert.deepEqual(visibleBranchRecords(owner, 'two', invoices).map(row => row.id), ['i2']);
   assert.deepEqual(visibleBranchRecords(owner, 'all', invoices).map(row => row.id), ['i1', 'i2', 'i3']);
 });
+test('offline owner is restricted to signed active branch IDs, never implied global scope',()=>{
+  const user={role:'company_owner',type:'tenant',tenantId:'A',isOfflineSession:true,branchIds:['b1']};
+  assert.equal(canAccessBranch(user,'b1'),true);
+  assert.equal(canAccessBranch(user,'b2'),false);
+  assert.equal(canAccessBranch(user,'all'),false);
+});

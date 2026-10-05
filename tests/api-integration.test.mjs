@@ -28,7 +28,7 @@ const memoryStorage = () => ({ items: new Map(),
 let mf, db, a, b, staff, platform, grantPublicJwk;
 const pass = crypto.randomUUID() + 'Aa!'; // ephemeral fixture, never production credentials
 const deviceProof = () => crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
-async function call(path, method = 'GET', body, token, ip = 'local', scopeEvents = true) {
+async function call(path, method = 'GET', body, token, ip = 'local', scopeEvents = true, replayInput = null) {
   if (path === '/api/sync/push' && method === 'POST' && Array.isArray(body?.events) && db) {
     const heads=new Map();
     for (const event of body.events) {
@@ -54,9 +54,36 @@ async function call(path, method = 'GET', body, token, ip = 'local', scopeEvents
       event.conflictPolicyVersion=1; event.preconditions=preconditions;
     }
   }
+  if(replayInput) {
+    const proofs=[];
+    for(const event of body.events) {
+      event.tenantId??=body.tenantId;
+      const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},replayInput.keys.privateKey,
+        new TextEncoder().encode(JSON.stringify(event)));
+      proofs.push({source:structuredClone(event),grant:replayInput.grant,signature:Buffer.from(signature).toString('base64url')});
+    }
+    path='/api/cash/replay';body={tenantId:body.tenantId,deviceId:replayInput.deviceId,deviceProof:replayInput.proof,proofs};
+  }
   return mf.dispatchFetch('https://test.invalid' + path, { method,
     headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}) });
+}
+// Explicit signed fixture for real API/D1 scenarios; no authentication bypass.
+async function signedCashFixture(tenantId,token,drawers,deviceId=`fixture-${tenantId}`) {
+  const proof=deviceProof();
+  assert.ok([200,201].includes((await call('/api/cash/devices','POST',{tenantId,deviceId,deviceProof:proof},token)).status));
+  for(const drawer of drawers) {
+    const result=await call('/api/cash/drawers','PATCH',{tenantId,deviceId,drawerId:drawer.id,branchId:drawer.branchId},token);
+    assert.ok([200,201].includes(result.status),await result.text());
+  }
+  const keys=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const result=await call('/api/cash/grants','POST',{tenantId,deviceId,deviceProof:proof,eventPublicJwk:await crypto.subtle.exportKey('jwk',keys.publicKey)},token);
+  assert.equal(result.status,200,await result.clone().text());
+  const grant=(await result.json()).grant;
+  const signed={keys,grant,deviceId,proof};
+  return {deviceId,grant,push:body=>call('/api/sync/push','POST',body,token,'local',true,signed),
+    source:(id,type,payload,action='create')=>({id,entityType:type,entityId:payload.id,action,payload,
+      tenantId,branchId:payload.branchId,timestamp:Math.max(Date.now(),Date.parse(grant.claims.onlineVerifiedAt))})};
 }
 // Independent fixture logins must not share one rate bucket: faster CI runs
 // legitimately exhaust it. Explicit IPs still exercise shared-client limits.
@@ -162,6 +189,30 @@ test('conflict inbox preserves both sources, deduplicates retries and is readabl
   assert.equal((await call('/api/sync/push','POST',{tenantId:'REVIEW',events:[advanced]},a)).status,200);
   assert.equal((await call('/api/sync/conflicts','PATCH',{...decision,reviewId:nextSaved.reviewId},a)).status,409);
   assert.equal(await db.prepare('SELECT review_id FROM sync_review_decisions WHERE review_id=?').bind(nextSaved.reviewId).first(),null);
+});
+
+test('large-company conflict inbox reads only current competing sources, without replaying its entire history',async()=>{
+  await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES('LARGE','LARGE','Large review fixture','large-owner',?,'active','company_owner')").bind(await hashPassword(pass)).run();
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,code,is_main,status) VALUES('large-main','LARGE','Large main','MAIN',1,'active')").run();
+  const token=await login('LARGE','large-owner');
+  const original=attachConflictPreconditions({id:'large-local',tenantId:'LARGE',branchId:'large-main',entityType:'product',entityId:'large-product',action:'create',payload:{id:'large-product',branchId:'large-main',name:'Local'}},{});
+  const remote={...original,id:'large-remote',payload:{...original.payload,name:'Server'}};
+  assert.equal((await call('/api/sync/push','POST',{tenantId:'LARGE',events:[remote]},token)).status,200);
+  // Independent accepted-history fixture. Inbox listing is evidence lookup,
+  // not permission to replay/install any of these older financial records.
+  await db.prepare(`WITH RECURSIVE n(value) AS(SELECT 1 UNION ALL SELECT value+1 FROM n WHERE value<2200)
+    INSERT INTO sync_events_v2(id,tenant_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp)
+    SELECT 'large-history-'||value,'LARGE','settings','settings','update','{}',0,0 FROM n`).run();
+  const saved=await (await call('/api/sync/conflicts','POST',{tenantId:'LARGE',events:[original]},token)).json();
+  const response=await call('/api/sync/conflicts?tenantId=LARGE','GET',undefined,token);
+  assert.equal(response.status,200,await response.clone().text());
+  const rows=(await response.json()).reviews;
+  assert.equal(rows.length,1);assert.equal(rows[0].id,saved.reviewId);
+  assert.deepEqual(rows[0].proposedEvents,[original]);
+  assert.deepEqual(rows[0].serverEvents.map(row=>row.id),[remote.id]);
+  assert.equal(rows[0].serverEvents[0].payload.name,'Server');
+  assert.equal((await call('/api/sync/conflicts?tenantId=LARGE','GET',undefined,b)).status,403);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM sync_events_v2 WHERE tenant_id='LARGE'").first()).n,2201);
 });
 
 test('owner executes a reviewed update atomically; fresh heads, authenticated receipts and lost-response retries are enforced',async()=>{
@@ -293,28 +344,66 @@ test('schema bootstrap and numbered migrations produce identical database struct
   const normalize=result=>result.results.map(row=>({...row,sql:row.sql?.replace(/\s+/g,' ').trim()}));
   assert.deepEqual(normalize(await bootstrap.prepare(schema).all()),normalize(await db.prepare(schema).all()));
 });
+test('unsigned legacy drawer writes cannot bypass signed replay', async () => {
+  const payload={id:'unsigned-shift',tenantId:'A',branchId:'fixture-a-main',drawerId:'unsigned-drawer',actorId:'A',
+    offlineDeviceId:'unsigned-device',openingCash:100,timeZone:'Asia/Riyadh',
+    openedAt:new Date().toISOString(),accountingDate:accountingDate(new Date().toISOString(),'Asia/Riyadh'),status:'open'};
+  await db.prepare("INSERT INTO cash_drawers(id,tenant_id,branch_id,name) VALUES('unsigned-drawer','A','fixture-a-main','Unsigned fixture')").run();
+  for (const path of ['/api/cash/shifts','/api/cash/shifts/close']) {
+    const result=await call(path,'POST',{...payload,deviceProof:deviceProof(),shiftId:payload.id,deviceId:payload.offlineDeviceId,
+      pendingEventCount:0,confirmedMovementCount:0,countedCash:100},a);
+    assert.equal(result.status,403,await result.text());
+  }
+  const event={id:'unsigned-source',entityType:'cash_shift',entityId:payload.id,action:'create',payload,
+    branchId:payload.branchId,timestamp:Date.now()};
+  const result=await call('/api/sync/push','POST',{tenantId:'A',events:[event]},a);
+  assert.equal(result.status,403,await result.text());
+  assert.equal(await db.prepare("SELECT id FROM cash_shifts WHERE id='unsigned-shift'").first(),null);
+});
+
 test('cash drawers isolate branches and reject competing open shifts', async () => {
-  const drawerResponse=await call('/api/cash/drawers','POST',{tenantId:'A',branchId:'fixture-a-main',id:'drawer-a-1',name:'درج أول'},a);
+  await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES('DRAWERS','DRAWERS','Drawer fixture','drawerowner',?,'active','company_owner')").bind(await hashPassword(pass)).run();
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,is_main,status) VALUES('drawers-main','DRAWERS','Main',1,'active')").run();
+  const owner=await login('DRAWERS','drawerowner');
+  const drawerResponse=await call('/api/cash/drawers','POST',{tenantId:'DRAWERS',branchId:'drawers-main',id:'drawer-a-1',name:'درج أول'},owner);
   assert.equal(drawerResponse.status,201,await drawerResponse.text());
-  const otherResponse=await call('/api/cash/drawers','POST',{tenantId:'A',branchId:'fixture-a-main',id:'drawer-a-2',name:'درج ثان'},a);
+  const otherResponse=await call('/api/cash/drawers','POST',{tenantId:'DRAWERS',branchId:'drawers-main',id:'drawer-a-2',name:'درج ثان'},owner);
   assert.equal(otherResponse.status,201,await otherResponse.text());
-  const open={tenantId:'A',branchId:'fixture-a-main',drawerId:'drawer-a-1',id:'cash-shift-a-1',offlineDeviceId:'device-a-1',deviceProof:deviceProof(),openingCash:100,timeZone:'Asia/Riyadh'};
-  const first=await call('/api/cash/shifts','POST',open,a);
-  assert.equal(first.status,201,await first.text());
-  const duplicate=await call('/api/cash/shifts','POST',{...open,id:'cash-shift-a-2',offlineDeviceId:'device-a-2'},a);
-  assert.equal(duplicate.status,409,await duplicate.text());
-  const second=await call('/api/cash/shifts','POST',{...open,id:'cash-shift-a-3',drawerId:'drawer-a-2'},a);
-  assert.equal(second.status,201,await second.text());
-  const thirdDrawer=await call('/api/cash/drawers','POST',{tenantId:'A',branchId:'fixture-a-main',id:'drawer-a-3',name:'درج ثالث'},a);
+  const thirdDrawer=await call('/api/cash/drawers','POST',{tenantId:'DRAWERS',branchId:'drawers-main',id:'drawer-a-3',name:'درج ثالث'},owner);
   assert.equal(thirdDrawer.status,201,await thirdDrawer.text());
+  const fixture=await signedCashFixture('DRAWERS',owner,[1,2,3].map(i=>({id:`drawer-a-${i}`,branchId:'drawers-main'})));
+  const unlinked={id:'unlinked-cash-source',entityType:'expense',entityId:'unlinked-cash-row',action:'create',
+    branchId:'drawers-main',payload:{id:'unlinked-cash-row',branchId:'drawers-main',amount:10,paymentMethod:'cash'}};
+  const bypass=await call('/api/sync/push','POST',{tenantId:'DRAWERS',events:[unlinked]},owner);
+  assert.equal(bypass.status,403,await bypass.text());
+  assert.equal(await db.prepare("SELECT id FROM sync_events_v2 WHERE tenant_id='DRAWERS' AND id='unlinked-cash-source'").first(),null);
+  const bank={...unlinked,id:'managed-bank-source',entityId:'managed-bank-row',conflictPolicyVersion:undefined,preconditions:undefined,
+    payload:{...unlinked.payload,id:'managed-bank-row',paymentMethod:'bank'}};
+  assert.equal((await call('/api/sync/push','POST',{tenantId:'DRAWERS',events:[bank]},owner)).status,200);
+  const changed={...bank,id:'managed-cash-edit',action:'update',conflictPolicyVersion:undefined,preconditions:undefined,
+    payload:{id:bank.entityId,branchId:'drawers-main',amount:15,paymentMethod:'cash'}};
+  const unsafeUpdate=await call('/api/sync/push','POST',{tenantId:'DRAWERS',events:[changed]},owner);
+  assert.equal(unsafeUpdate.status,403,await unsafeUpdate.text());
+  assert.equal(await db.prepare("SELECT id FROM sync_events_v2 WHERE tenant_id='DRAWERS' AND id='managed-cash-edit'").first(),null);
+  const at=new Date(Math.max(Date.now(),Date.parse(fixture.grant.claims.onlineVerifiedAt))).toISOString();
+  const open={tenantId:'DRAWERS',branchId:'drawers-main',drawerId:'drawer-a-1',id:'cash-shift-a-1',actorId:'DRAWERS',
+    offlineDeviceId:fixture.deviceId,openingCash:100,timeZone:'Asia/Riyadh',openedAt:at,accountingDate:accountingDate(at,'Asia/Riyadh'),status:'open'};
+  const pushOpen=payload=>fixture.push({tenantId:'DRAWERS',events:[fixture.source(`source-${payload.id}`,'cash_shift',payload)]});
+  const first=await pushOpen(open);
+  assert.equal(first.status,200,await first.text());
+  const duplicate=await pushOpen({...open,id:'cash-shift-a-2'});
+  assert.equal(duplicate.status,409,await duplicate.text());
+  const second=await pushOpen({...open,id:'cash-shift-a-3',drawerId:'drawer-a-2'});
+  assert.equal(second.status,200,await second.text());
   const racing=await Promise.all([
-    call('/api/cash/shifts','POST',{...open,id:'cash-shift-race-1',drawerId:'drawer-a-3'},a),
-    call('/api/cash/shifts','POST',{...open,id:'cash-shift-race-2',drawerId:'drawer-a-3'},a)
+    pushOpen({...open,id:'cash-shift-race-1',drawerId:'drawer-a-3'}),
+    pushOpen({...open,id:'cash-shift-race-2',drawerId:'drawer-a-3'})
   ]);
-  assert.deepEqual(racing.map(response=>response.status).sort(),[201,409]);
-  const foreign=await call('/api/cash/shifts','POST',{...open,tenantId:'B',branchId:'fixture-b-main',id:'cash-shift-b-1'},a);
+  assert.deepEqual(racing.map(response=>response.status).sort(),[200,409]);
+  const foreign=await fixture.push({tenantId:'B',events:[fixture.source('foreign-open-source','cash_shift',{
+    ...open,tenantId:'B',branchId:'fixture-b-main',id:'cash-shift-b-1'})]});
   assert.equal(foreign.status,403,await foreign.text());
-  const rows=await call('/api/cash/shifts?tenantId=A&branchId=fixture-a-main','GET',undefined,a);
+  const rows=await call('/api/cash/shifts?tenantId=DRAWERS&branchId=drawers-main','GET',undefined,owner);
   assert.equal(rows.status,200,await rows.clone().text());
   assert.equal((await rows.json()).shifts.length,3);
 });
@@ -324,34 +413,34 @@ test('synced cash sale is attributed once to its open shift from the financial s
   await db.prepare("INSERT INTO branches(id,tenant_id,name,code,is_main,status) VALUES('cash-branch','CASH','Cash branch','CASH',1,'active')").run();
   await db.prepare("INSERT INTO cash_drawers(id,tenant_id,branch_id,name) VALUES('cash-drawer','CASH','cash-branch','Cash drawer')").run();
   const cashOwner=await login('CASH','cashowner',pass,'cash-owner-fixture');
-  const cashDeviceProof=deviceProof();
-  const openInput={tenantId:'CASH',branchId:'cash-branch',drawerId:'cash-drawer',id:'cash-shift',offlineDeviceId:'cash-device',deviceProof:cashDeviceProof,openingCash:100,timeZone:'Asia/Riyadh'};
-  const opened=await call('/api/cash/shifts','POST',openInput,cashOwner);
-  assert.equal(opened.status,201,await opened.clone().text());
-  const openedData=await opened.json();
-  assert.equal('deviceProof' in openedData,false);
+  const fixture=await signedCashFixture('CASH',cashOwner,[{id:'cash-drawer',branchId:'cash-branch'}]);
+  const at=new Date(Math.max(Date.now(),Date.parse(fixture.grant.claims.onlineVerifiedAt))).toISOString();
+  const openInput={tenantId:'CASH',branchId:'cash-branch',drawerId:'cash-drawer',id:'cash-shift',actorId:'CASH',
+    offlineDeviceId:fixture.deviceId,openingCash:100,timeZone:'Asia/Riyadh',openedAt:at,accountingDate:accountingDate(at,'Asia/Riyadh'),status:'open'};
+  const openBody={tenantId:'CASH',events:[fixture.source('cash-open-source','cash_shift',openInput)]};
+  const opened=await fixture.push(openBody);
+  assert.equal(opened.status,200,await opened.clone().text());
   const listed=await call('/api/cash/shifts?tenantId=CASH&branchId=cash-branch','GET',undefined,cashOwner);
   assert.equal(listed.status,200);
   assert.equal(JSON.stringify(await listed.json()).includes('device_proof_hash'),false);
-  assert.equal((await call('/api/cash/shifts','POST',openInput,cashOwner)).status,200);
-  assert.equal((await call('/api/cash/shifts','POST',{...openInput,deviceProof:deviceProof()},cashOwner)).status,409);
-  const event={id:'cash-sale-event-1',entityType:'invoice',entityId:'cash-sale-1',action:'create',branchId:'cash-branch',timestamp:new Date(openedData.openedAt).getTime()+1,
+  assert.equal((await fixture.push(openBody)).status,200);
+  const event={id:'cash-sale-event-1',entityType:'invoice',entityId:'cash-sale-1',action:'create',branchId:'cash-branch',timestamp:Date.parse(at)+1,
     payload:{id:'cash-sale-1',tenantId:'CASH',branchId:'cash-branch',cashShiftId:'cash-shift',saleType:'cash',
       paidAmount:20,finalTotal:20,status:'active',customerId:'walk_in',items:[]}};
   const body={tenantId:'CASH',branchId:'cash-branch',events:[event]};
-  const pushed=await call('/api/sync/push','POST',body,cashOwner);
+  const pushed=await fixture.push(body);
   assert.equal(pushed.status,200,await pushed.text());
   const movement=await db.prepare('SELECT amount_cents,shift_id FROM cash_shift_movements WHERE tenant_id=? AND source_event_id=?')
     .bind('CASH',event.id).first();
   assert.deepEqual(movement,{amount_cents:2000,shift_id:'cash-shift'});
-  assert.equal((await call('/api/sync/push','POST',body,cashOwner)).status,200);
+  assert.equal((await fixture.push(body)).status,200);
   assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM cash_shift_movements WHERE tenant_id=? AND source_event_id=?')
     .bind('CASH',event.id).first()).n,1);
   const wrong={...event,id:'cash-sale-event-wrong',entityId:'cash-sale-wrong',payload:{...event.payload,id:'cash-sale-wrong',cashShiftId:'missing-shift'}};
   Reflect.deleteProperty(wrong,'conflictPolicyVersion');
   Reflect.deleteProperty(wrong,'preconditions');
-  const denied=await call('/api/sync/push','POST',{tenantId:'CASH',branchId:'cash-branch',events:[wrong]},cashOwner);
-  assert.equal(denied.status,400,await denied.text());
+  const denied=await fixture.push({tenantId:'CASH',branchId:'cash-branch',events:[wrong]});
+  assert.equal(denied.status,403,await denied.text());
   const otherCashier={...event,id:'cash-sale-event-staff',entityId:'cash-sale-staff',payload:{...event.payload,id:'cash-sale-staff'}};
   Reflect.deleteProperty(otherCashier,'conflictPolicyVersion');
   Reflect.deleteProperty(otherCashier,'preconditions');
@@ -371,47 +460,39 @@ test('synced cash sale is attributed once to its open shift from the financial s
   assert.equal(missingShift.status,400,await missingShift.text());
   const voidEvent={...voidBase,id:'cash-void-event-1',payload:{...voidBase.payload,cashShiftId:'cash-shift'}};
   const voidBody={tenantId:'CASH',branchId:'cash-branch',events:[voidEvent]};
-  const voided=await call('/api/sync/push','POST',voidBody,cashOwner);
+  const voided=await fixture.push(voidBody);
   assert.equal(voided.status,200,await voided.text());
   assert.deepEqual(await db.prepare('SELECT amount_cents,reverses_source_event_id FROM cash_shift_movements WHERE tenant_id=? AND source_event_id=?')
     .bind('CASH',voidEvent.id).first(),{amount_cents:-2000,reverses_source_event_id:event.id});
-  assert.equal((await call('/api/sync/push','POST',voidBody,cashOwner)).status,200);
+  assert.equal((await fixture.push(voidBody)).status,200);
   assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM cash_shift_movements WHERE tenant_id=? AND source_event_id=?')
     .bind('CASH',voidEvent.id).first()).n,1);
   const repeatedVoid={...voidBase,id:'cash-void-event-2',payload:{...voidBase.payload,cashShiftId:'cash-shift'}};
-  const doubleReverse=await call('/api/sync/push','POST',{tenantId:'CASH',branchId:'cash-branch',events:[repeatedVoid]},cashOwner);
+  const doubleReverse=await fixture.push({tenantId:'CASH',branchId:'cash-branch',events:[repeatedVoid]});
   assert.equal(doubleReverse.status,409,await doubleReverse.text());
   const newSale={...event,id:'cash-sale-event-batch',entityId:'cash-sale-batch',payload:{...event.payload,id:'cash-sale-batch'}};
   Reflect.deleteProperty(newSale,'conflictPolicyVersion');
   Reflect.deleteProperty(newSale,'preconditions');
   const sameBatchVoid={...voidBase,id:'cash-void-batch',entityId:'cash-sale-batch',payload:{id:'cash-sale-batch',status:'voided'}};
-  const batchWithoutShift=await call('/api/sync/push','POST',{tenantId:'CASH',branchId:'cash-branch',events:[newSale,sameBatchVoid]},cashOwner);
+  const batchWithoutShift=await fixture.push({tenantId:'CASH',branchId:'cash-branch',events:[newSale,sameBatchVoid]});
   assert.equal(batchWithoutShift.status,400,await batchWithoutShift.text());
-  const close={tenantId:'CASH',branchId:'cash-branch',shiftId:'cash-shift',deviceId:'cash-device',
-    deviceProof:cashDeviceProof,pendingEventCount:0,confirmedMovementCount:2,countedCash:98};
-  const missingProof=await call('/api/cash/shifts/close','POST',{...close,deviceProof:null},cashOwner);
-  assert.equal(missingProof.status,403,await missingProof.text());
-  const pending=await call('/api/cash/shifts/close','POST',{...close,pendingEventCount:1},cashOwner);
-  assert.equal(pending.status,409,await pending.text());
-  const incomplete=await call('/api/cash/shifts/close','POST',{...close,confirmedMovementCount:1},cashOwner);
-  assert.equal(incomplete.status,409,await incomplete.text());
-  const wrongDevice=await call('/api/cash/shifts/close','POST',{...close,deviceId:'other-device'},cashOwner);
-  assert.equal(wrongDevice.status,403,await wrongDevice.text());
-  const closing=await call('/api/cash/shifts/close','POST',close,cashOwner);
+  const close=fixture.source('cash-close-source','cash_shift',{...openInput,status:'closed_local',
+    closedAt:new Date().toISOString(),closedBy:'CASH',countedCash:98,expectedCash:100,variance:-2},'update');
+  const closing=await fixture.push({tenantId:'CASH',events:[close]});
   assert.equal(closing.status,200,await closing.clone().text());
-  assert.deepEqual((({expectedCash,variance})=>({expectedCash,variance}))(await closing.json()),
-    {expectedCash:100,variance:-2});
-  assert.equal((await call('/api/cash/shifts/close','POST',close,cashOwner)).status,409);
-  assert.equal((await call('/api/sync/push','POST',body,cashOwner)).status,200);
-  assert.equal((await call('/api/sync/push','POST',voidBody,cashOwner)).status,200);
+  assert.deepEqual(await db.prepare("SELECT expected_cash_cents,variance_cents FROM cash_shifts WHERE id='cash-shift'").first(),
+    {expected_cash_cents:10000,variance_cents:-200});
+  assert.equal((await fixture.push({tenantId:'CASH',events:[close]})).status,200);
+  assert.equal((await fixture.push(body)).status,200);
+  assert.equal((await fixture.push(voidBody)).status,200);
   const lateSale={...event,id:'cash-sale-after-close',entityId:'cash-sale-after-close',payload:{...event.payload,id:'cash-sale-after-close'}};
   Reflect.deleteProperty(lateSale,'conflictPolicyVersion');
   Reflect.deleteProperty(lateSale,'preconditions');
-  const late=await call('/api/sync/push','POST',{tenantId:'CASH',branchId:'cash-branch',events:[lateSale]},cashOwner);
+  const late=await fixture.push({tenantId:'CASH',branchId:'cash-branch',events:[lateSale]});
   assert.equal(late.status,400,await late.text());
-  const next=await call('/api/cash/shifts','POST',{tenantId:'CASH',branchId:'cash-branch',drawerId:'cash-drawer',
-    id:'cash-shift-next',offlineDeviceId:'next-device',deviceProof:deviceProof(),openingCash:98,timeZone:'Asia/Riyadh'},cashOwner);
-  assert.equal(next.status,201,await next.text());
+  const next=await fixture.push({tenantId:'CASH',events:[fixture.source('cash-next-source','cash_shift',{
+    ...openInput,id:'cash-shift-next',openingCash:98,openedAt:new Date().toISOString()})]});
+  assert.equal(next.status,200,await next.text());
 });
 test('cash shift replay rejects a drawer owned by another tenant without writing state', async () => {
   await db.prepare("INSERT INTO cash_drawers(id,tenant_id,branch_id,name) VALUES('foreign-replay-drawer','B','fixture-b-main','Foreign drawer')").run();
@@ -421,7 +502,7 @@ test('cash shift replay rejects a drawer owned by another tenant without writing
       branchId: 'fixture-a-main', drawerId: 'foreign-replay-drawer', actorId: 'A', offlineDeviceId: 'unverified-device',
       timeZone: 'Asia/Riyadh', accountingDate: accountingDate(at, 'Asia/Riyadh'), openedAt: at, openingCash: 100, events: [], status: 'open' } };
   const response = await call('/api/sync/push', 'POST', { tenantId: 'A', events: [event] }, a);
-  assert.equal(response.status, 400, await response.text());
+  assert.equal(response.status, 403, await response.text());
   assert.equal(await db.prepare("SELECT id FROM cash_shifts WHERE id='foreign-drawer-shift'").first(), null);
   assert.equal(await db.prepare("SELECT id FROM sync_events_v2 WHERE tenant_id='A' AND id='foreign-drawer-replay'").first(), null);
 });
@@ -432,24 +513,26 @@ test('offline cash shift events replay through sync preserving actor and order',
   await db.prepare("INSERT INTO branches(id,tenant_id,name,code,is_main,status) VALUES('shift-main','SHIFT','Shift main','SHIFT',1,'active')").run();
   await db.prepare("INSERT INTO cash_drawers(id,tenant_id,branch_id,name) VALUES('drawer-1','SHIFT','shift-main','Drawer')").run();
   const owner = await login('SHIFT', 'shiftowner', pass, 'shift-owner-fixture');
+  const fixture=await signedCashFixture('SHIFT',owner,[{id:'drawer-1',branchId:'shift-main'}],'device-1');
+  const at=new Date(Math.max(Date.now(),Date.parse(fixture.grant.claims.onlineVerifiedAt))).toISOString();
   const shiftBase = {
     tenantId: 'SHIFT', branchId: 'shift-main', drawerId: 'drawer-1', actorId: 'SHIFT',
-    offlineDeviceId: 'device-1', timeZone: 'Asia/Riyadh', accountingDate: accountingDate(new Date().toISOString(), 'Asia/Riyadh'),
-    openedAt: new Date().toISOString(), openingCash: 100
+    offlineDeviceId: 'device-1', timeZone: 'Asia/Riyadh', accountingDate: accountingDate(at, 'Asia/Riyadh'),
+    openedAt: at, openingCash: 100
   };
   const openEvent = { id: 'cash-shift-open-1', entityType: 'cash_shift', entityId: 'shift-1', action: 'create',
-    branchId: 'shift-main', timestamp: Date.now(), payload: { ...shiftBase, id: 'shift-1', events: [], status: 'open' } };
+    branchId: 'shift-main', timestamp: Date.parse(at), payload: { ...shiftBase, id: 'shift-1', events: [], status: 'open' } };
   const body = { tenantId: 'SHIFT', branchId: 'shift-main', events: [openEvent] };
-  const pushed = await call('/api/sync/push', 'POST', body, owner);
+  const pushed = await fixture.push(body);
   assert.equal(pushed.status, 200, await pushed.text());
   assert.ok(await db.prepare("SELECT id FROM sync_events_v2 WHERE tenant_id='SHIFT' AND id='cash-shift-open-1'").first());
-  assert.equal((await call('/api/sync/push', 'POST', body, owner)).status, 200);
+  assert.equal((await fixture.push(body)).status, 200);
   assert.deepEqual(await db.prepare("SELECT opening_cash_cents, status FROM cash_shifts WHERE id='shift-1'").first(),
     { opening_cash_cents: 10000, status: 'open' });
   const closeEvent = { id: 'cash-shift-close-1', entityType: 'cash_shift', entityId: 'shift-1', action: 'update',
-    branchId: 'shift-main', timestamp: Date.now(), payload: { ...shiftBase, id: 'shift-1', events: [], status: 'closed_local',
+    branchId: 'shift-main', timestamp: Math.max(Date.now(),Date.parse(at)), payload: { ...shiftBase, id: 'shift-1', events: [], status: 'closed_local',
       closedAt: new Date().toISOString(), closedBy: 'SHIFT', countedCash: 100, expectedCash: 100, variance: 0 } };
-  assert.equal((await call('/api/sync/push', 'POST', { tenantId: 'SHIFT', branchId: 'shift-main', events: [closeEvent] }, owner)).status, 200);
+  assert.equal((await fixture.push({ tenantId: 'SHIFT', branchId: 'shift-main', events: [closeEvent] })).status, 200);
   assert.deepEqual(await db.prepare("SELECT status, counted_cash_cents, expected_cash_cents, variance_cents FROM cash_shifts WHERE id='shift-1'").first(),
     { status: 'closed', counted_cash_cents: 10000, expected_cash_cents: 10000, variance_cents: 0 });
   const wrongActor = { ...openEvent, id: 'cash-shift-open-2', payload: { ...openEvent.payload, actorId: 'someone-else' } };
@@ -467,40 +550,42 @@ test('server reconciles replayed cash movements when closing a shift', async () 
   await db.prepare("INSERT INTO branches(id,tenant_id,name,code,is_main,status) VALUES('recon-main','RECON','Recon main','RECON',1,'active')").run();
   await db.prepare("INSERT INTO cash_drawers(id,tenant_id,branch_id,name) VALUES('drawer-recon','RECON','recon-main','Drawer')").run();
   const owner = await login('RECON', 'reconowner', pass, 'recon-owner-fixture');
+  const fixture=await signedCashFixture('RECON',owner,[{id:'drawer-recon',branchId:'recon-main'}],'device-1');
+  const at=new Date(Math.max(Date.now(),Date.parse(fixture.grant.claims.onlineVerifiedAt))).toISOString();
   const shiftBase = { tenantId: 'RECON', branchId: 'recon-main', drawerId: 'drawer-recon', actorId: 'RECON',
-    offlineDeviceId: 'device-1', timeZone: 'Asia/Riyadh', accountingDate: accountingDate(new Date().toISOString(), 'Asia/Riyadh'),
-    openedAt: new Date().toISOString(), openingCash: 100 };
+    offlineDeviceId: 'device-1', timeZone: 'Asia/Riyadh', accountingDate: accountingDate(at, 'Asia/Riyadh'),
+    openedAt: at, openingCash: 100 };
   const openEvent = { id: 'recon-open', entityType: 'cash_shift', entityId: 'recon-shift', action: 'create',
-    branchId: 'recon-main', timestamp: Date.now(), payload: { ...shiftBase, id: 'recon-shift', events: [], status: 'open' } };
-  assert.equal((await call('/api/sync/push', 'POST', { tenantId: 'RECON', branchId: 'recon-main', events: [openEvent] }, owner)).status, 200);
+    branchId: 'recon-main', timestamp: Date.parse(at), payload: { ...shiftBase, id: 'recon-shift', events: [], status: 'open' } };
+  assert.equal((await fixture.push({ tenantId: 'RECON', branchId: 'recon-main', events: [openEvent] })).status, 200);
 
   const invoice = { id: 'recon-sale', entityType: 'invoice', entityId: 'recon-sale', action: 'create',
-    branchId: 'recon-main', timestamp: Date.now() + 1,
+    branchId: 'recon-main', timestamp: Math.max(Date.now(),Date.parse(at)) + 1,
     payload: { id: 'recon-sale', tenantId: 'RECON', branchId: 'recon-main', cashShiftId: 'recon-shift',
       saleType: 'cash', paidAmount: 20, finalTotal: 20, status: 'active', customerId: 'walk_in', items: [] } };
-  assert.equal((await call('/api/sync/push', 'POST', { tenantId: 'RECON', branchId: 'recon-main', events: [invoice] }, owner)).status, 200);
+  assert.equal((await fixture.push({ tenantId: 'RECON', branchId: 'recon-main', events: [invoice] })).status, 200);
   assert.deepEqual(await db.prepare("SELECT amount_cents FROM cash_shift_movements WHERE tenant_id='RECON' AND source_event_id='recon-sale'").first(),
     { amount_cents: 2000 });
 
   const closeGood = { id: 'recon-close', entityType: 'cash_shift', entityId: 'recon-shift', action: 'update',
-    branchId: 'recon-main', timestamp: Date.now() + 2,
+    branchId: 'recon-main', timestamp: Math.max(Date.now(),Date.parse(at)) + 2,
     payload: { ...shiftBase, id: 'recon-shift', events: [], status: 'closed_local', closedAt: new Date().toISOString(),
       closedBy: 'RECON', countedCash: 118, expectedCash: 120, variance: -2 } };
-  assert.equal((await call('/api/sync/push', 'POST', { tenantId: 'RECON', branchId: 'recon-main', events: [closeGood] }, owner)).status, 200);
+  assert.equal((await fixture.push({ tenantId: 'RECON', branchId: 'recon-main', events: [closeGood] })).status, 200);
   assert.deepEqual(await db.prepare("SELECT status, counted_cash_cents, expected_cash_cents, variance_cents FROM cash_shifts WHERE id='recon-shift'").first(),
     { status: 'closed', counted_cash_cents: 11800, expected_cash_cents: 12000, variance_cents: -200 });
 
   const openB = { ...openEvent, id: 'recon-open-b', entityId: 'recon-shift-b', payload: { ...shiftBase, id: 'recon-shift-b', events: [], status: 'open' } };
   Reflect.deleteProperty(openB, 'conflictPolicyVersion');
   Reflect.deleteProperty(openB, 'preconditions');
-  const openBResponse = await call('/api/sync/push', 'POST', { tenantId: 'RECON', branchId: 'recon-main', events: [openB] }, owner);
+  const openBResponse = await fixture.push({ tenantId: 'RECON', branchId: 'recon-main', events: [openB] });
   assert.equal(openBResponse.status, 200, await openBResponse.clone().text());
   const closeWrong = { ...closeGood, id: 'recon-close-b', entityId: 'recon-shift-b',
     payload: { ...shiftBase, id: 'recon-shift-b', events: [], status: 'closed_local', closedAt: new Date().toISOString(),
       closedBy: 'RECON', countedCash: 100, expectedCash: 150, variance: -50 } };
   Reflect.deleteProperty(closeWrong, 'conflictPolicyVersion');
   Reflect.deleteProperty(closeWrong, 'preconditions');
-  assert.equal((await call('/api/sync/push', 'POST', { tenantId: 'RECON', branchId: 'recon-main', events: [closeWrong] }, owner)).status, 409);
+  assert.equal((await fixture.push({ tenantId: 'RECON', branchId: 'recon-main', events: [closeWrong] })).status, 409);
 });
 
 test('one offline commit group replays open sale close next-open and retries without duplicating cash', async () => {
@@ -509,7 +594,8 @@ test('one offline commit group replays open sale close next-open and retries wit
   await db.prepare("INSERT INTO branches(id,tenant_id,name,code,is_main,status) VALUES('chain-main','CHAIN','Chain main','CHAIN',1,'active')").run();
   await db.prepare("INSERT INTO cash_drawers(id,tenant_id,branch_id,name) VALUES('chain-drawer','CHAIN','chain-main','Chain drawer')").run();
   const owner = await login('CHAIN', 'chainowner', pass, 'chain-owner-fixture');
-  const at = new Date().toISOString(), groupId = crypto.randomUUID();
+  const fixture=await signedCashFixture('CHAIN',owner,[{id:'chain-drawer',branchId:'chain-main'}],'chain-device');
+  const at = new Date(Math.max(Date.now(),Date.parse(fixture.grant.claims.onlineVerifiedAt))).toISOString(), groupId = crypto.randomUUID();
   const shift = { id: 'chain-shift-1', tenantId: 'CHAIN', branchId: 'chain-main', drawerId: 'chain-drawer', actorId: 'CHAIN',
     offlineDeviceId: 'chain-device', timeZone: 'Asia/Riyadh', accountingDate: accountingDate(at, 'Asia/Riyadh'),
     openedAt: at, openingCash: 100, events: [], status: 'open' };
@@ -527,14 +613,14 @@ test('one offline commit group replays open sale close next-open and retries wit
   const body = { tenantId: 'CHAIN', events };
   const incomplete = structuredClone(body);
   incomplete.events[2].payload.expectedCash = 100;
-  const rejected = await call('/api/sync/push', 'POST', incomplete, owner);
+  const rejected = await fixture.push(incomplete);
   assert.equal(rejected.status, 409, await rejected.text());
   assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM cash_shifts WHERE tenant_id='CHAIN'").first()).n, 0);
   assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM sync_events_v2 WHERE tenant_id='CHAIN'").first()).n, 0);
   assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM cash_shift_movements WHERE tenant_id='CHAIN'").first()).n, 0);
-  const first = await call('/api/sync/push', 'POST', body, owner);
+  const first = await fixture.push(body);
   assert.equal(first.status, 200, await first.text());
-  const replay = await call('/api/sync/push', 'POST', body, owner);
+  const replay = await fixture.push(body);
   assert.equal(replay.status, 200, await replay.text());
   assert.deepEqual(await db.prepare("SELECT status,expected_cash_cents,counted_cash_cents FROM cash_shifts WHERE id='chain-shift-1'").first(),
     { status: 'closed', expected_cash_cents: 12700, counted_cash_cents: 12700 });
@@ -586,11 +672,15 @@ test('offline cashier grant is login-bound, device-bound, and server-signed', as
   assert.equal((await call('/api/cash/grants','POST',{tenantId:'GRANT',deviceId,deviceProof:proof,eventPublicJwk:eventPrivateJwk},cashier)).status,400);
   assert.equal((await call('/api/cash/grants','POST',{tenantId:'GRANT',deviceId,deviceProof:proof,eventPublicJwk:{...eventPublicJwk,x:'invalid'}},cashier)).status,400);
   const issued = await call('/api/cash/grants', 'POST', { tenantId: 'GRANT', deviceId, deviceProof: proof,eventPublicJwk,
-    cashierId: 'attacker', branchIds: ['grant-second'], onlineVerifiedAt: '2000-01-01T00:00:00Z' }, cashier);
+    cashierId: 'attacker', branchIds: ['grant-second'], onlineVerifiedAt: '2000-01-01T00:00:00Z',
+    offlineIdentity:{role:'super_admin',permissions:{canAccessSettings:true},syncScopeVersion:999} }, cashier);
   assert.equal(issued.status, 200);
   const grant = (await issued.json()).grant;
   assert.equal(grant.claims.tenantId, 'GRANT');
   assert.equal(grant.claims.cashierId, 'grant-cashier');
+  assert.equal(grant.claims.offlineIdentity?.role,'cashier');
+  assert.equal(grant.claims.offlineIdentity?.permissions?.canAccessSettings,false);
+  assert.equal(grant.claims.offlineIdentity?.syncScopeVersion,0);
   assert.equal(grant.claims.deviceId, deviceId);
   assert.deepEqual(grant.claims.eventPublicJwk,{kty:'EC',crv:'P-256',x:eventPublicJwk.x,y:eventPublicJwk.y});
   assert.deepEqual(grant.claims.branchIds, ['grant-main']);

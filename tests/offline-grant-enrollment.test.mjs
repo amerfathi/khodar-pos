@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import * as signer from '../functions/_lib/offlineGrantSignature.js';
 import { OfflineGrantStore, memoryBackend, offlineGrantRecordKey } from '../src/services/offlineGrantStore.js';
 import { ensureOfflineDeviceIdentity } from '../src/services/offlineDeviceIdentity.js';
-import { enrollOnline, unlockOffline } from '../src/services/offlineGrantEnrollment.js';
+import { enrollOnline, unlockOffline, openOfflineSession } from '../src/services/offlineGrantEnrollment.js';
 import { assertVerifiedOfflineGrant } from '../src/services/verifiedOfflineGrant.js';
+import {setSessionToken,setSessionUser,getSessionUser,getSessionToken} from '../src/services/authSession.js';
 
 const keys = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
 const privateJwk = await crypto.subtle.exportKey('jwk', keys.privateKey);
@@ -82,4 +83,37 @@ test('enrollment propagates server errors instead of persisting a half-finished 
   await assert.rejects(enrollOnline({ store, fetchFn: failing, apiBaseUrl: 'https://test.invalid', token: 'tok', user, password: 'secret-pass', pinnedPublicJwk: publicJwk }), /Device proof mismatch/);
   const device = await ensureOfflineDeviceIdentity(store);
   assert.equal(await store.loadRecord({ tenantId: 'tenant-a', cashierId: 'cashier-a', deviceId: device.deviceId }), null);
+});
+
+test('public offline session wiring uses the password-unlocked signed identity after eight-hour server expiry',async()=>{
+  const store=new OfflineGrantStore(memoryBackend()),now=Date.now();
+  const fetchFn=async(url,init)=>{
+    const response=await fakeFetch(url,init);
+    if(!url.endsWith('/api/cash/grants'))return response;
+    const {grant}=await response.json();
+    return ok({success:true,grant:await signer.issueSignedOfflineGrant(privateJwk,{...grant.claims,
+      onlineVerifiedAt:new Date(now-9*60*60*1000).toISOString(),principalType:'user',credentialVersion:2,
+      offlineIdentity:{role:'cashier',permissions:{canSell:true,canAccessSettings:false},syncScopeVersion:2}})});
+  };
+  await enrollOnline({store,fetchFn,apiBaseUrl:'https://test.invalid',token:'fixture-session',user,
+    password:'fixture-local-only',pinnedPublicJwk:publicJwk});
+  const previous=globalThis.sessionStorage,items=new Map();
+  globalThis.sessionStorage={getItem:key=>items.get(key)??null,
+    setItem(key,value){items.set(key,String(value));},removeItem(key){items.delete(key);},
+    clear(){items.clear();},key:index=>[...items.keys()][index]??null,get length(){return items.size;}};
+  try {
+    setSessionToken('expired-fixture');
+    setSessionUser({...user,role:'super_admin',sessionExpiresAt:new Date(now-1).toISOString()});
+    assert.equal(getSessionUser(),null);
+    const input={store,user:{...user,role:'super_admin'},password:'fixture-local-only',branchId:'branch-2',pinnedPublicJwk:publicJwk};
+    await assert.rejects(openOfflineSession({...input,password:'wrong'}),/كلمة المرور/);
+    assert.equal(getSessionUser(),null);
+    const result=await openOfflineSession(input);
+    assert.equal(result.user.role,'cashier');assert.equal(getSessionToken(),'');
+    assert.equal(getSessionUser().permissions.canAccessSettings,false);
+    assert.equal(getSessionUser().branchId,'branch-2');
+    assert.equal(getSessionUser().syncScopeVersion,2);
+    await assert.rejects(openOfflineSession({...input,branchId:'foreign'}),/تصريح/);
+    setSessionToken(null);assert.equal(getSessionUser(),null);
+  } finally {setSessionToken(null);globalThis.sessionStorage=previous;}
 });

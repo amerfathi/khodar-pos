@@ -12,6 +12,21 @@ export function sourceEvent(row){
     conflictPolicyVersion:row.conflict_policy_version,preconditions:row.preconditions_json?JSON.parse(row.preconditions_json):null};
 }
 
+// Listing evidence does not need a financial replay. Fetch only the current
+// competitors of the bounded pending inbox, in the same transaction as heads.
+// Execution/recovery still require the independently validated complete ledger.
+export async function readReviewEvidence(env,tenantId,keys){
+  const [heads,events]=await env.DB.batch([
+    env.DB.prepare('SELECT conflict_key,last_event_id FROM sync_conflict_heads WHERE tenant_id=? ORDER BY conflict_key').bind(tenantId),
+    env.DB.prepare(`SELECT event.* FROM sync_events_v2 event WHERE event.tenant_id=?
+      AND event.id IN(SELECT head.last_event_id FROM sync_conflict_heads head
+        WHERE head.tenant_id=? AND head.conflict_key IN(SELECT value FROM json_each(?)))
+      ORDER BY event.sequence`).bind(tenantId,tenantId,JSON.stringify([...new Set(keys)]))
+  ]);
+  return {heads:Object.fromEntries(heads.results.map(row=>[row.conflict_key,row.last_event_id])),
+    history:events.results.map(sourceEvent)};
+}
+
 // A bounded, consistent snapshot, used only for manual review/recovery, never
 // normal background polling. Larger histories fail closed, not partially replay.
 export async function readReviewSnapshot(env,tenantId){

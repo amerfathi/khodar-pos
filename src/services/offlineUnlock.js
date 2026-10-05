@@ -114,3 +114,25 @@ export async function signOfflineCashEvent(handle,event) {
   const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},unlocked.key,encoder.encode(JSON.stringify(source)));
   return {source,grant:structuredClone(unlocked.envelope),signature:b64u(new Uint8Array(signature))};
 }
+
+// Local identity is derived only from a password-opened signing vault and the
+// server-signed permission snapshot. Never promote cached editable user data.
+export function offlineIdentityFromUnlockedGrant(handle,branchId,at=new Date().toISOString()) {
+  const unlocked=signingKeys.get(handle);
+  if(!unlocked)throw Error('مفتاح تصريح الدخول المحلي غير مفتوح');
+  const claims=unlocked.envelope.claims,identity=claims.offlineIdentity;
+  assertVerifiedOfflineGrant(handle,{tenantId:claims.tenantId,cashierId:claims.cashierId,
+    deviceId:claims.deviceId,branchId},at);
+  if(!['tenant','user'].includes(claims.principalType)||!Number.isSafeInteger(claims.credentialVersion)||
+      typeof identity?.role!=='string'||!identity.role||!identity.permissions||Array.isArray(identity.permissions)||
+      !Number.isSafeInteger(identity.syncScopeVersion)||identity.syncScopeVersion<0||
+      (claims.principalType==='user'&&identity.syncScopeVersion!==claims.credentialVersion)||
+      (claims.principalType==='tenant'&&identity.syncScopeVersion!==0)||
+      Object.values(identity.permissions).some(value=>typeof value!=='boolean'))
+    throw Error('تصريح الدخول المحلي لا يتضمن هوية وصلاحيات موقّعة؛ تحقق عبر الإنترنت');
+  return {id:claims.cashierId,tenantId:claims.tenantId,role:identity.role,
+    isStaff:claims.principalType==='user',status:'active',branchId,branchIds:[...claims.branchIds],
+    permissions:structuredClone(identity.permissions),syncScopeVersion:identity.syncScopeVersion,
+    sessionExpiresAt:new Date(Date.parse(claims.onlineVerifiedAt)+24*60*60*1000).toISOString(),
+    isOfflineSession:true};
+}

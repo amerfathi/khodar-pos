@@ -4,6 +4,8 @@ import * as signer from '../functions/_lib/offlineGrantSignature.js';
 import { enrollOfflineGrant, unlockOfflineGrant, verifyPasswordVerifier } from '../src/services/offlineUnlock.js';
 import { assertVerifiedOfflineGrant } from '../src/services/verifiedOfflineGrant.js';
 import * as grantVerification from '../src/services/verifiedOfflineGrant.js';
+import * as unlockService from '../src/services/offlineUnlock.js';
+import * as sessions from '../src/services/authSession.js';
 import {signOfflineCashEvent} from '../src/services/offlineUnlock.js';
 
 const keys = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
@@ -98,4 +100,36 @@ test('original cashier event proof survives handover but cannot be altered or fo
   await assert.rejects(signOfflineCashEvent(handle,{...event,timestamp:event.timestamp+24*60*60*1000}),/صلاحية/);
   const swapped=structuredClone(proof);swapped.grant.claims.cashierId='cashier-b';
   await assert.rejects(grantVerification.verifyOfflineCashEvent(swapped,publicJwk,{tenantId:'tenant-a',deviceId:'device-1'}));
+});
+
+test('password-unlocked signed identity works after server expiry without a bearer or editable role',async()=>{
+  assert.equal(typeof unlockService.offlineIdentityFromUnlockedGrant,'function');
+  assert.equal(typeof sessions.setOfflineSession,'function');
+  const pair=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const now=Date.now(),onlineVerifiedAt=new Date(now-9*60*60*1000).toISOString();
+  const envelope=await grant({onlineVerifiedAt,principalType:'user',credentialVersion:3,
+    offlineIdentity:{role:'custom',permissions:{canSell:true,canAccessSettings:false},syncScopeVersion:3},
+    eventPublicJwk:await crypto.subtle.exportKey('jwk',pair.publicKey)});
+  const input={password:'local-fixture-password',...context(),at:new Date(now).toISOString(),pinnedPublicJwk:publicJwk};
+  const record=await enrollOfflineGrant({...input,envelope,eventPrivateJwk:await crypto.subtle.exportKey('jwk',pair.privateKey)});
+  const handle=await unlockOfflineGrant(record,input);
+  const original=globalThis.sessionStorage,items=new Map();
+  Object.assign(globalThis,{sessionStorage:{getItem:key=>items.get(key)??null,setItem:(key,value)=>items.set(key,String(value)),removeItem:key=>items.delete(key)}});
+  try {
+    sessions.setSessionToken('expired-server-fixture');
+    sessions.setSessionUser({id:'cashier-a',tenantId:'tenant-a',sessionExpiresAt:new Date(now-1).toISOString(),role:'super_admin'});
+    assert.equal(sessions.getSessionUser(),null);
+    sessions.setOfflineSession(handle,'branch-1');
+    assert.equal(sessions.getSessionToken(),'');
+    const user=sessions.getSessionUser();
+    assert.equal(user.role,'custom');assert.equal(user.isOfflineSession,true);
+    assert.equal(user.syncScopeVersion,3);assert.equal(user.permissions.canAccessSettings,false);
+    user.role='super_admin';user.branchIds.push('foreign');
+    assert.equal(sessions.getSessionUser().role,'custom');
+    assert.deepEqual(sessions.getSessionUser().branchIds,['branch-1']);
+    assert.throws(()=>sessions.setOfflineSession({},'branch-1'),/مفتاح|تصريح/);
+    assert.throws(()=>unlockService.offlineIdentityFromUnlockedGrant(handle,'branch-1',new Date(Date.parse(onlineVerifiedAt)+24*60*60*1000).toISOString()),/صلاحية/);
+    await assert.rejects(unlockOfflineGrant(record,{...input,password:'wrong'}),/كلمة المرور/);
+    sessions.setSessionToken(null);assert.equal(sessions.getSessionUser(),null);
+  } finally {sessions.setSessionToken(null);Object.assign(globalThis,{sessionStorage:original});}
 });

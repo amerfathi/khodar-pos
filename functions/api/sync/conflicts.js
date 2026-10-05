@@ -4,7 +4,7 @@ import { canSync, validateTenantPayload } from '../../_lib/syncPolicy.js';
 import { canAccessBranch } from '../../../src/services/branchAccess.js';
 import { conflictKeysForEvent } from '../../../src/services/syncConflictPolicy.js';
 import { attachConflictPreconditions } from '../../../src/services/syncConflictPolicy.js';
-import { readReviewSnapshot, resolutionStatements } from '../../_lib/reviewResolution.js';
+import { readReviewSnapshot, readReviewEvidence, resolutionStatements } from '../../_lib/reviewResolution.js';
 import { replayReviewedLedger, reviewedLedgerState } from '../../../src/services/reviewLedgerReplay.js';
 import { onRequestPost as pushEvents } from './push.js';
 export const onRequestOptions = options;
@@ -61,7 +61,9 @@ export async function onRequestGet({request,env}) {
   const denied=requireTenant(auth,tenantId);if(denied)return denied;
   if(auth.principal.type!=='tenant'||!['company_owner','super_admin'].includes(auth.principal.role))return json({success:false,error:'Company owner review required'},403);
   const {results}=await env.DB.prepare("SELECT r.id,r.submitted_by,r.proposed_json,r.server_json,r.heads_json,r.status,r.created_at,d.choice FROM sync_conflict_reviews r LEFT JOIN sync_review_decisions d ON d.review_id=r.id WHERE r.tenant_id=? AND r.status='pending' ORDER BY r.created_at,r.id LIMIT 50").bind(tenantId).all();
-  const snapshot=await readReviewSnapshot(env,tenantId);
+  if(!results.length)return json({success:true,reviews:[]});
+  const keys=results.flatMap(row=>JSON.parse(row.proposed_json).flatMap(conflictKeysForEvent));
+  const snapshot=await readReviewEvidence(env,tenantId,keys);
   return json({success:true,reviews:results.map(row=>{
     const proposedEvents=JSON.parse(row.proposed_json),keys=new Set(proposedEvents.flatMap(conflictKeysForEvent));
     const ids=new Set([...keys].map(key=>snapshot.heads[key]).filter(Boolean));

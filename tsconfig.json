@@ -9,6 +9,7 @@
     "paths": {
       "/atomicStore.js": ["./src/services/atomicStore.js"],
       "/durableAggregate.js": ["./src/services/durableAggregate.js"],
+      "/cashDrawerJournal.js": ["./src/services/cashDrawerJournal.js"],
       "/tenantStorage.js": ["./src/services/tenantStorage.js"]
     },
     "jsx": "react-jsx",

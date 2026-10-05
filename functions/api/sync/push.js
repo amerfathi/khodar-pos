@@ -10,6 +10,8 @@ import { proveLegacyProduct } from '../../../src/services/legacyProductProof.js'
 import { cashReplayEntry } from '../../_lib/cashReplay.js';
 
 export const onRequestOptions = options;
+const cashRecordTypes=new Set(['invoice','customer_payment','expense','purchase','supplier_payment',
+  'worker_transaction','partner_drawing','profit_distribution','sales_return','purchase_return']);
 export async function onRequestPost({ request, env, reviewCommit = null, cashReplay = null }) {
   const auth = await authenticateRequest(request, env);
   if (auth.error) return auth.error;
@@ -35,6 +37,7 @@ export async function onRequestPost({ request, env, reviewCommit = null, cashRep
     const pendingCashReversals = new Set();
     const replayShifts = new Map();
     const pendingCashDeltas = new Map();
+    const managedCashBranches=new Map();
     const cashShiftById = async id => {
       if (replayShifts.has(id)) return replayShifts.get(id);
       const shift = await env.DB.prepare('SELECT * FROM cash_shifts WHERE id = ? AND tenant_id = ?')
@@ -73,6 +76,8 @@ export async function onRequestPost({ request, env, reviewCommit = null, cashRep
     const seenGroups = new Set();
     for (const event of events) {
       const replay = cashReplay ? cashReplayEntry(cashReplay, event) : null;
+      if (!replay && (event?.entityType==='cash_shift' || event?.payload?.cashShiftId))
+        return json({success:false,error:'Cash sources require signed drawer replay'},403);
       const principal = replay?.principal ?? auth.principal;
       if (!event || typeof event.id !== 'string' || event.id.length > 128 || !event.id ||
           typeof event.entityId !== 'string' || !event.entityId || event.entityId.length > 128 ||
@@ -90,6 +95,21 @@ export async function onRequestPost({ request, env, reviewCommit = null, cashRep
       validateTenantPayload(event.payload, tenantId);
       if (event.payload.id && event.payload.id !== event.entityId) return badRequest('Entity ID mismatch');
       const branch = event.branchId ?? branchId ?? null;
+      // A branch with an assigned drawer writer cannot bypass cash control by
+      // simply omitting cashShiftId. Unenrolled branches retain legacy behavior.
+      if(env.CASH_SHIFTS_ENABLED==='true'&&branch&&['create','update'].includes(event.action)&&cashRecordTypes.has(event.entityType)&&
+          !event.payload.cashShiftId) {
+        if(!managedCashBranches.has(branch))managedCashBranches.set(branch,Boolean(await env.DB.prepare(`SELECT 1 FROM cash_drawer_writers w
+          JOIN cash_drawers d ON d.id=w.drawer_id AND d.tenant_id=w.tenant_id
+          WHERE w.tenant_id=? AND d.branch_id=? AND d.status='active' LIMIT 1`).bind(tenantId,branch).first()));
+        if(managedCashBranches.get(branch)) {
+          if(event.action==='update'&&(event.entityType!=='invoice'||Object.keys(event.payload).some(key=>
+            !['id','tenantId','branchId','notes'].includes(key))))
+            return json({success:false,error:'Financial edits require audited drawer reconciliation'},403);
+          if(event.action==='create'&&cashMovementFromRecord(event.entityType,event.payload)!==0)
+            return json({success:false,error:'Cash movement requires a signed open drawer shift'},403);
+        }
+      }
       if (event.entityType === 'settings' && event.payload.timeZone !== undefined) {
         if (branch || principal.type !== 'tenant' || !['company_owner', 'super_admin'].includes(principal.role))
           return json({ success: false, error: 'Only the company owner can change its timezone' }, 403);
@@ -335,6 +355,8 @@ export async function onRequestPost({ request, env, reviewCommit = null, cashRep
     if (statements.length) await env.DB.batch(statements);
     return json({ success: true, acceptedIds: events.map(event => event.id), syncedCount: events.length });
   } catch (error) {
+    if(String(error?.message).includes('UNIQUE constraint failed: cash_shifts.tenant_id, cash_shifts.branch_id, cash_shifts.drawer_id'))
+      return json({success:false,error:'Drawer already has an open shift; retain sources for reconciliation'},409);
     if(String(error?.message).includes('CASH_SOURCE_AUTH_CHANGED'))
       return json({success:false,error:'Cashier or drawer authorization changed; retain local sources'},403);
     if(String(error?.message).includes('SYNC_REVIEW_STALE'))return json({success:false,error:'Review changed; refresh before deciding'},409);

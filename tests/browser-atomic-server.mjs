@@ -1,7 +1,9 @@
 // Local-only storage recovery harness. No production backend, real browser storage.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-const modules=new Set(['atomicStore.js','tenantStorage.js','authSession.js','branchEvents.js','durableAggregate.js','legacyMigrationAudit.js','businessEffects.js','invoiceInventory.js','liquidityMigrationAudit.js','backupValidation.js','syncConflictPolicy.js']);
+const modules=new Set(['atomicStore.js','tenantStorage.js','authSession.js','branchEvents.js','durableAggregate.js','legacyMigrationAudit.js','businessEffects.js','invoiceInventory.js','liquidityMigrationAudit.js','backupValidation.js','syncConflictPolicy.js',
+  'cashDrawerJournal.js','cashShiftEngine.js','cashMovement.js','offlineUnlock.js','verifiedOfflineGrant.js','offlineShiftGrantPolicy.js',
+  'missingDependency.js','independentSales.js','reviewLedgerReplay.js','branchAccess.js','legacyProductProof.js']);
 const html=`<!doctype html><html lang="en"><title>Braka atomic storage verification</title>
 <h1>Isolated atomic storage verification</h1><p id="status">Loading</p>
 <button id="commit">Commit sale fixture</button><button id="fail">Fail before commit</button>
@@ -23,6 +25,14 @@ display();
 const server=createServer(async(req,res)=>{
   const name=req.url.slice(1);
   if(req.url==='/'){res.setHeader('content-type','text/html');res.end(html);return;}
+  if(req.url==='/config/offlineGrantPublicKey.js'){
+    res.setHeader('content-type','application/javascript');
+    res.end(await readFile(new URL('../src/config/offlineGrantPublicKey.js',import.meta.url)));return;
+  }
+  if(req.url==='/data/initialData.js'){
+    res.setHeader('content-type','application/javascript');
+    res.end(await readFile(new URL('../src/data/initialData.js',import.meta.url)));return;
+  }
   if(!modules.has(name)){res.writeHead(404);res.end();return;}
   res.setHeader('content-type','application/javascript');
   res.end(await readFile(new URL('../src/services/'+name,import.meta.url)));

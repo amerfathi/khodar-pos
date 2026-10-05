@@ -32,7 +32,8 @@ try {
   const pageErrors = [];
   first.on('pageerror', error => pageErrors.push(error.message));
   await first.goto(url, { waitUntil: 'networkidle0' });
-  await first.waitForFunction(() => window.ready !== undefined);
+  try { await first.waitForFunction(() => window.ready !== undefined); }
+  catch (error) { throw new Error(`Atomic page did not initialize: ${pageErrors.join('; ') || error.message}`, {cause:error}); }
   assert.match(await first.$eval('body', node => node.innerText), /Isolated atomic storage verification/);
   assert.equal(await first.$('.vite-error-overlay'), null);
   assert.deepEqual(pageErrors, [], 'browser page must render without runtime errors');
@@ -114,8 +115,18 @@ try {
       { key: 'drawer-journal', snapshot: { revision: 1, state: { drawerSequence: 2 } }, expectedRevision: 0 }
     ]);
     const pair = [await durable.read('cashier-ledger'), await durable.read('drawer-journal')];
+    const {replayDrawerJournal}=await import('/cashDrawerJournal.js');
+    const scope={tenantId:'isolated-test',branchId:'main',drawerId:'drawer',deviceId:'isolated-device'};
+    const journalKey='braka:isolated-test:main:drawer:isolated-device:cash_drawer_journal_v1';
+    const sources=[{source:{id:'previous-cashier-source',tenantId:scope.tenantId,branchId:scope.branchId},grant:{},signature:'isolated-contract-fixture'}];
+    await durable.commit(journalKey,{revision:0,...scope,shifts:[],sources},null);
+    if(!await replayDrawerJournal(durable,navigator.locks,scope,async()=>({success:true,acceptedIds:['previous-cashier-source']})))
+      throw Error('Journal-only replay was not acknowledged');
+    const journal=await durable.read(journalKey);
+    if(journal.revision!==1||JSON.stringify(journal.acceptedIds)!==JSON.stringify(['previous-cashier-source']))
+      throw Error('Journal-only acknowledgement did not commit to real IndexedDB');
     durable.close();
-    return { final, pair };
+    return { final, pair, journal };
   }, state) : null;
   const engineSnapshot = engineProbe ? await first.evaluate(async () => {
     const { AtomicStore } = await import('/atomicStore.js');
@@ -207,7 +218,8 @@ try {
       const { DurableAggregate } = await import('/durableAggregate.js');
       const repository = new DurableAggregate(indexedDB, 'braka-strict-probe');
       const snapshot = { final: await repository.read('current'), pair: [
-        await repository.read('cashier-ledger'), await repository.read('drawer-journal')] };
+        await repository.read('cashier-ledger'), await repository.read('drawer-journal')],
+        journal:await repository.read('braka:isolated-test:main:drawer:isolated-device:cash_drawer_journal_v1') };
       repository.close();
       return snapshot;
     });

@@ -3,7 +3,8 @@
 // Production does not provision it yet; offline cashier UI remains hidden.
 import { OfflineGrantStore } from './offlineGrantStore.js';
 import { ensureOfflineDeviceIdentity } from './offlineDeviceIdentity.js';
-import { enrollOfflineGrant, unlockOfflineGrant } from './offlineUnlock.js';
+import { enrollOfflineGrant, unlockOfflineGrant, offlineIdentityFromUnlockedGrant } from './offlineUnlock.js';
+import { setOfflineSession } from './authSession.js';
 import { OFFLINE_GRANT_PUBLIC_JWK } from '../config/offlineGrantPublicKey.js';
 
 const primaryBranch = user => {
@@ -59,4 +60,13 @@ export async function unlockOffline(input) {
     password, tenantId: user.tenantId, cashierId: user.id, deviceId, branchId,
     ...(input.at ? { at: input.at } : {}), pinnedPublicJwk
   });
+}
+
+// The caller must remount its user-scoped store after success (not redirect old
+// pending effects into another account). No first-time offline enrollment.
+export async function openOfflineSession(input) {
+  const handle=await unlockOffline(input);
+  const user=offlineIdentityFromUnlockedGrant(handle,input.branchId);
+  setOfflineSession(handle,input.branchId);
+  return {user,handle};
 }

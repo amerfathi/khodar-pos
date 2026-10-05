@@ -115,10 +115,11 @@ test('actual hook opens, sells, closes and hands over a signed local drawer atom
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false, locks } });
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, location: { origin: 'https://test.invalid' } } });
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, visibilityState: 'hidden' } });
-  const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';export {enrollOfflineGrant} from './src/services/offlineUnlock.js';export {verifyOfflineCashEvent} from './src/services/verifiedOfflineGrant.js';export {OfflineGrantStore,memoryBackend} from './src/services/offlineGrantStore.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: { 'import.meta.env': '{}' }, format: 'cjs', platform: 'node', packages: 'external' });
+  const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser,setOfflineSession,getSessionToken} from './src/services/authSession.js';export {enrollOfflineGrant,unlockOfflineGrant} from './src/services/offlineUnlock.js';export {verifyOfflineCashEvent} from './src/services/verifiedOfflineGrant.js';export {OfflineGrantStore,memoryBackend} from './src/services/offlineGrantStore.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: { 'import.meta.env': '{}' }, format: 'cjs', platform: 'node', packages: 'external' });
   const loaded = { exports: {} };
   new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), loaded, loaded.exports);
-  const { useAppStore, cloudflareSync, setSessionToken, setSessionUser, enrollOfflineGrant, verifyOfflineCashEvent, OfflineGrantStore, memoryBackend } = loaded.exports;
+  const { useAppStore, cloudflareSync, setSessionToken, setSessionUser, setOfflineSession, getSessionToken,
+    enrollOfflineGrant, unlockOfflineGrant, verifyOfflineCashEvent, OfflineGrantStore, memoryBackend } = loaded.exports;
   const identity = { id: 'u', tenantId: 'A', role: 'cashier', branchId: 'branch-main', branchIds: ['branch-main'], sessionExpiresAt: new Date(Date.now() + 60000).toISOString() };
   const shift = openShift();
   const initial = seedAggregate(localStorage, identity, { cash_shifts_v1: [], expenses_v3: [], invoices_v3: [],
@@ -255,12 +256,15 @@ test('actual hook opens, sells, closes and hands over a signed local drawer atom
     const secondKeys = await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
     const secondEnvelope = await issueSignedOfflineGrant(await crypto.subtle.exportKey('jwk',issuer.privateKey),{
       tenantId:'A',cashierId:'cashier-2',deviceId:'device-1',branchIds:['branch-main'],drawerIds:['drawer-1'],onlineVerifiedAt:at,
+      principalType:'user',credentialVersion:0,offlineIdentity:{role:'cashier',permissions:{canSell:true},syncScopeVersion:0},
       eventPublicJwk:await crypto.subtle.exportKey('jwk',secondKeys.publicKey)
     });
     const secondContext = {...context,cashierId:'cashier-2'};
     const secondRecord = await enrollOfflineGrant({...secondContext,envelope:secondEnvelope,eventPrivateJwk:await crypto.subtle.exportKey('jwk',secondKeys.privateKey)});
     await grantStore.saveRecord({tenantId:'A',cashierId:'cashier-2',deviceId:'device-1'},secondRecord);
-    setSessionUser(secondIdentity);
+    setSessionUser({...secondIdentity,sessionExpiresAt:new Date(Date.now()-1).toISOString()});
+    setOfflineSession(await unlockOfflineGrant(secondRecord,secondContext),'branch-main');
+    assert.equal(getSessionToken(),'','handover must not invent or extend a cloud bearer');
     await act(async () => { root=TestRenderer.create(React.createElement(Harness));await new Promise(resolve=>setTimeout(resolve,30)); });
     assert.equal(app.persistence.ready,true,app.persistence.error);
     await act(async()=>{await app.unlockCashDrawer('fixture-only','shift-2');});

@@ -4,6 +4,8 @@ const branchViewCache = new WeakMap();
 const recordViewCache = new WeakMap();
 export function assignedBranchIds(user) {
   if (!user) return [];
+  if(user.isOfflineSession===true)return Array.isArray(user.branchIds)
+    ? [...new Set(user.branchIds.filter(id=>typeof id==='string'&&id&&id!=='all'))]:[];
   if (user.type === 'tenant' || user.userType === 'owner' ||
       (user.role === 'company_owner' && user.isStaff !== true)) return ['all'];
   if (Array.isArray(user.branchIds)) {

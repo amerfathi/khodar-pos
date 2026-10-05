@@ -12,7 +12,7 @@ const keyFor = ({ tenantId, branchId, drawerId, deviceId }) =>
 // Preserve every original proof; acknowledgements never migrate another
 // cashier's sources into this user's financial aggregate.
 export async function replayDrawerJournal(durable,locks,scope,send,{repository=null,assertCurrent=()=>{}}={}) {
-  if (!durable?.read || !durable?.commitBatch || !locks?.request || typeof send!=='function' ||
+  if (!durable?.read || !durable?.commit || !durable?.commitBatch || !locks?.request || typeof send!=='function' ||
       ['tenantId','branchId','drawerId','deviceId'].some(name=>typeof scope?.[name]!=='string'||!scope[name]))
     throw Error('Invalid drawer replay scope');
   if(repository && (repository.durable!==durable || repository.user?.tenantId!==scope.tenantId))
@@ -71,7 +71,7 @@ export async function replayDrawerJournal(durable,locks,scope,send,{repository=n
       await repository.acknowledgeDurable(new Set(own.map(event=>event.id)),wrapper);
     } else if(batch.length) {
       assertCurrent();
-      await durable.commitBatch([{key,snapshot,expectedRevision:current.revision}]);
+      await durable.commit(key,snapshot,current.revision);
     }
     return current.sources.every(proof=>allAccepted.has(proof.source.id));
   });
