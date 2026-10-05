@@ -8,6 +8,7 @@ import { accountingDate } from '../../../src/services/cashShiftEngine.js';
 import { resolutionStatements,readReviewSnapshot } from '../../_lib/reviewResolution.js';
 import { proveLegacyProduct } from '../../../src/services/legacyProductProof.js';
 import { cashReplayEntry } from '../../_lib/cashReplay.js';
+import { assertInvoiceVoidPayload, assertInvoiceUpdatePayload } from '../../../src/services/invoiceMutationPolicy.js';
 
 export const onRequestOptions = options;
 const cashRecordTypes=new Set(['invoice','customer_payment','expense','purchase','supplier_payment',
@@ -94,6 +95,8 @@ export async function onRequestPost({ request, env, reviewCommit = null, cashRep
       if (event.tenantId && event.tenantId !== tenantId) return json({ success: false, error: 'Event tenant mismatch' }, 403);
       validateTenantPayload(event.payload, tenantId);
       if (event.payload.id && event.payload.id !== event.entityId) return badRequest('Entity ID mismatch');
+      if(event.entityType==='invoice' && event.action==='void')assertInvoiceVoidPayload(event.payload);
+      if(event.entityType==='invoice' && event.action==='update')assertInvoiceUpdatePayload(event.payload);
       const branch = event.branchId ?? branchId ?? null;
       // A branch with an assigned drawer writer cannot bypass cash control by
       // simply omitting cashShiftId. Unenrolled branches retain legacy behavior.

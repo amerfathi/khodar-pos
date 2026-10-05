@@ -4,6 +4,7 @@ import { adjustBalance, applyPurchaseInventory, applySalesReturnInvoice, applySa
 import { INITIAL_SETTINGS } from '../data/initialData.js';
 import { BACKUP_ARRAY_FIELDS, backupToState, validateBackup } from './backupValidation.js';
 import { proveLegacyProduct } from './legacyProductProof.js';
+import { assertInvoiceVoidPayload, assertInvoiceUpdatePayload } from './invoiceMutationPolicy.js';
 
 const tables={product:'products',customer:'customers',supplier:'suppliers',invoice:'invoices',purchase:'purchases',
   expense:'expenses',customer_payment:'customerPayments',supplier_payment:'supplierPayments',branch:'branches',
@@ -113,8 +114,9 @@ export function replayReviewedLedger(events,tenantId,{branches=[]}={}){
     if(action==='create'&&existing||action!=='create'&&!existing)throw new Error('Missing or duplicate replay record');
     if(existing&&entityType!=='branch'&&existing.branchId!==branchId)throw new Error('Replay branch ownership changed');
     if(action==='update'&&!['product','customer','supplier','branch','invoice','worker','partner'].includes(entityType))throw new Error('Unsupported financial record update');
-    if(entityType==='invoice'&&action==='update'&&Object.keys(payload).some(key=>!['id','tenantId','branchId','notes'].includes(key)))throw new Error('Unsupported invoice financial update');
+    if(entityType==='invoice'&&action==='update')assertInvoiceUpdatePayload(payload);
     if(action==='void'&&entityType!=='invoice')throw new Error('Unsupported reversal');
+    if(action==='void')assertInvoiceVoidPayload(payload);
     if(entityType==='product'&&event.groupId&&['create','update'].includes(action)&&Number.isFinite(Number(payload.currentStockKg))) {
       const key=`${event.groupId}:${entityId}`;
       if(productChanges.has(key))throw new Error('Repeated transfer stock source');

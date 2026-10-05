@@ -1,10 +1,10 @@
 {
   "baselineCommit": "84022ebb008b06c4802998485f165ae7a14e0261",
   "cashReplayReviewCommit": "1804855f3dd3800682d7272a422866cbd9a30807",
-  "cashReplayReview": "Reviewed staged diff from 1804855: unsigned shift sources are denied, managed cash branches require shift linkage and reject direct financial edits, and drawer uniqueness is classified as a conflict. These paths require staged cash or its schema. Production override still rejects all cash sources, keeps ordinary authenticated push unchanged, and deploys no cash schema.",
+  "cashReplayReview": "Reviewed staged cash guards from 1804855 and subsequent strict invoice void policy. The production override retains cash denial and no cash migrations, but shares the exact invoice cancellation validator. Real local workerd/D1 tests exercise both staged and compatibility push handlers; malformed voids cannot rewrite money or advance heads. Staged commit-time drawer validation belongs to migration0029 and is not remotely applied.",
   "sourceHashes": {
     "functions/_lib/syncPolicy.js": "e275667eacdf95eef30f129c37d07e19f940c13e804fed2c2c61b34d71b58310",
     "functions/api/tenants/lookup.js": "adf613ac45e06da210eb0136577b4ee7812d57e95eb10f139070583dd7838748",
-    "functions/api/sync/push.js": "e7a16dce79ccdda185573e0cd08366ebfd34d3cceb344f01aea7e392a9c5e342"
+    "functions/api/sync/push.js": "430066bcfcbedd34804d7e8021a6c23edf74c9ed01aa2c6b757575d2dbcd99ab"
   }
 }

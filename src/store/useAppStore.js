@@ -525,8 +525,30 @@ export function useAppStore(options = {}) {
   useEffect(() => {
     if (!currentUser?.id) return;
     let disposed = false;
+    let localExpiryClosing = false;
     const token = getSessionToken();
     const revalidate = async () => {
+      if (disposed || token !== getSessionToken()) return;
+      // A password-unlocked 24h grant is local authorization, not a cloud
+      // bearer. Reconnecting must not convert the expected cloud 401 into
+      // revocation of that still-valid local shift. A real login is required
+      // before uploads resume; never synthesize/extend a server session.
+      if (!token) {
+        if (currentUser.isOfflineSession && !getSessionUser() && !localExpiryClosing) {
+          localExpiryClosing = true;
+          unlockGeneration.current++;
+          setUnlockedDrawer(null);
+          cloudflareSync.stopAutoSync();
+          cloudflareSync.currentTenantId = null;
+          cloudflareSync.setUpdateHandler(null);
+          await local.close();
+          if (disposed) return;
+          setSessionToken(null);
+          setCurrentUser(null);
+          window.location.reload();
+        }
+        return;
+      }
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       try {
         const response = await fetch(`${getApiBaseUrl()}/api/auth/me`, { signal: AbortSignal.timeout(10000) });

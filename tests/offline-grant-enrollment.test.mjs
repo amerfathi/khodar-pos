@@ -36,6 +36,21 @@ test('device identity is generated once and reused', async () => {
   assert.match(first.deviceProof, /^[a-f0-9]{64}$/);
 });
 
+test('simultaneous first enrollment shares one durable device identity across store instances',async()=>{
+  const backend=memoryBackend();
+  const identities=await Promise.all(Array.from({length:8},()=>ensureOfflineDeviceIdentity(new OfflineGrantStore(backend))));
+  assert.equal(new Set(identities.map(identity=>identity.deviceId)).size,1);
+  assert.equal(new Set(identities.map(identity=>identity.deviceProof)).size,1);
+  assert.deepEqual(await new OfflineGrantStore(backend).loadDeviceIdentity(),identities[0]);
+});
+
+test('corrupt existing device identity is retained for recovery, never silently replaced',async()=>{
+  const store=new OfflineGrantStore(memoryBackend()),corrupt={deviceId:'old-device',deviceProof:'corrupt'};
+  await store.saveDeviceIdentity(corrupt);
+  await assert.rejects(ensureOfflineDeviceIdentity(store),/هوية.*استرداد/);
+  assert.deepEqual(await store.loadDeviceIdentity(),corrupt);
+});
+
 test('offline grant records are device-scoped and durable', async () => {
   const backend = memoryBackend();
   const store = new OfflineGrantStore(backend);

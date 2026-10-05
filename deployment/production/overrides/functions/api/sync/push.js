@@ -5,6 +5,7 @@ import { conflictKeysForEvent } from '../../../src/services/syncConflictPolicy.j
 import { canAccessBranch } from '../../../src/services/branchAccess.js';
 import { resolutionStatements,readReviewSnapshot } from '../../_lib/reviewResolution.js';
 import { proveLegacyProduct } from '../../../src/services/legacyProductProof.js';
+import { assertInvoiceVoidPayload, assertInvoiceUpdatePayload } from '../../../src/services/invoiceMutationPolicy.js';
 
 export const onRequestOptions = options;
 export async function onRequestPost({ request, env, reviewCommit = null }) {
@@ -72,6 +73,8 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
       if (event.tenantId && event.tenantId !== tenantId) return json({ success: false, error: 'Event tenant mismatch' }, 403);
       validateTenantPayload(event.payload, tenantId);
       if (event.payload.id && event.payload.id !== event.entityId) return badRequest('Entity ID mismatch');
+      if(event.entityType==='invoice' && event.action==='void')assertInvoiceVoidPayload(event.payload);
+      if(event.entityType==='invoice' && event.action==='update')assertInvoiceUpdatePayload(event.payload);
       const branch = event.branchId ?? branchId ?? null;
       if (branch === 'all') return badRequest('Aggregate branch view is read-only');
       const tenantWideEvent = ['branch', 'stock_transfer', 'restore_snapshot', 'settings'].includes(event.entityType);

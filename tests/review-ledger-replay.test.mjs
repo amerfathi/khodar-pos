@@ -23,6 +23,16 @@ test('void replay reverses a sale exactly once and preserves the receipt source'
   assert.equal(result.customers[0].balance,-5);
   assert.equal(result.customerPayments.length,1);
 });
+
+test('invoice void cannot restore stock while leaving the invoice active or rewriting its money',()=>{
+  const original=JSON.stringify(history);
+  for(const payload of [{id:'i'}, {id:'i',status:'active'},
+    {id:'i',status:'voided',finalTotal:999}, {id:'i',status:'voided',items:[]}]) {
+    assert.throws(()=>replayReviewedLedger([...history,event('invalid-void','invoice',payload,'void')],'A'),
+      /Invalid invoice void/);
+  }
+  assert.equal(JSON.stringify(history),original);
+});
 test('foreign tenant, missing dependency, repeated source and unsupported movement reject the whole replay',()=>{
   for(const events of [[{...history[0],tenantId:'B'}],[history[2]],[...history,history[0]],
     [...history,event('bad','cash_shift',{id:'shift'})]])

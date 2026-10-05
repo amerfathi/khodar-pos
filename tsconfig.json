@@ -10,6 +10,8 @@
       "/atomicStore.js": ["./src/services/atomicStore.js"],
       "/durableAggregate.js": ["./src/services/durableAggregate.js"],
       "/cashDrawerJournal.js": ["./src/services/cashDrawerJournal.js"],
+      "/offlineGrantStore.js": ["./src/services/offlineGrantStore.js"],
+      "/offlineDeviceIdentity.js": ["./src/services/offlineDeviceIdentity.js"],
       "/tenantStorage.js": ["./src/services/tenantStorage.js"]
     },
     "jsx": "react-jsx",

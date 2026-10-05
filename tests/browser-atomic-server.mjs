@@ -3,7 +3,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 const modules=new Set(['atomicStore.js','tenantStorage.js','authSession.js','branchEvents.js','durableAggregate.js','legacyMigrationAudit.js','businessEffects.js','invoiceInventory.js','liquidityMigrationAudit.js','backupValidation.js','syncConflictPolicy.js',
   'cashDrawerJournal.js','cashShiftEngine.js','cashMovement.js','offlineUnlock.js','verifiedOfflineGrant.js','offlineShiftGrantPolicy.js',
-  'missingDependency.js','independentSales.js','reviewLedgerReplay.js','branchAccess.js','legacyProductProof.js']);
+  'missingDependency.js','independentSales.js','reviewLedgerReplay.js','branchAccess.js','legacyProductProof.js',
+  'invoiceMutationPolicy.js','offlineGrantStore.js','offlineDeviceIdentity.js']);
 const html=`<!doctype html><html lang="en"><title>Braka atomic storage verification</title>
 <h1>Isolated atomic storage verification</h1><p id="status">Loading</p>
 <button id="commit">Commit sale fixture</button><button id="fail">Fail before commit</button>

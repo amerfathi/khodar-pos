@@ -1,6 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
+import {dirname} from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { AtomicStore } from '../src/services/atomicStore.js';
@@ -28,7 +29,7 @@ const memoryStorage = () => ({ items: new Map(),
 let mf, db, a, b, staff, platform, grantPublicJwk;
 const pass = crypto.randomUUID() + 'Aa!'; // ephemeral fixture, never production credentials
 const deviceProof = () => crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
-async function call(path, method = 'GET', body, token, ip = 'local', scopeEvents = true, replayInput = null) {
+async function call(path, method = 'GET', body, token, ip = 'local', scopeEvents = true, replayInput = null, production = false) {
   if (path === '/api/sync/push' && method === 'POST' && Array.isArray(body?.events) && db) {
     const heads=new Map();
     for (const event of body.events) {
@@ -64,7 +65,8 @@ async function call(path, method = 'GET', body, token, ip = 'local', scopeEvents
     }
     path='/api/cash/replay';body={tenantId:body.tenantId,deviceId:replayInput.deviceId,deviceProof:replayInput.proof,proofs};
   }
-  return mf.dispatchFetch('https://test.invalid' + path, { method,
+  const send=production ? (await mf.getWorker('production')).fetch.bind(await mf.getWorker('production')) : mf.dispatchFetch.bind(mf);
+  return send('https://test.invalid' + path, { method,
     headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}) });
 }
@@ -96,6 +98,14 @@ async function login(code, username, password = pass, ip = `fixture-login-${cryp
   return body.session.token;
 }
 
+async function isolatedOwner(tenantId) {
+  const branchId=`${tenantId}-main`,username=`owner-${tenantId.toLowerCase()}`;
+  await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES(?,?,?,?,?,'active','company_owner')")
+    .bind(tenantId,tenantId,'Isolated policy fixture',username,await hashPassword(pass)).run();
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,is_main,status) VALUES(?,?,?,1,'active')").bind(branchId,tenantId,'Main').run();
+  return {tenantId,branchId,token:await login(tenantId,username)};
+}
+
 test('login rate protection remains enforced for one shared client',async()=>{
   // If the real minute bucket rolls over, start a new isolated client rather
   // than interpreting the deliberate reset as a missing rate limit.
@@ -114,13 +124,23 @@ test('login rate protection remains enforced for one shared client',async()=>{
 });
 before(async () => {
   const bundle = await build({ entryPoints: ['tests/runtime-worker.js'], bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022' });
+  const productionBundle=await build({entryPoints:['tests/runtime-worker.js'],bundle:true,write:false,
+    format:'esm',platform:'browser',target:'es2022',plugins:[{name:'real-production-overrides',setup(builder){
+      builder.onLoad({filter:/functions[\\/](?:api[\\/]sync[\\/]push|_lib[\\/]syncPolicy)\.js$/},async args=>{
+        const relative=args.path.replaceAll('\\','/').split('/functions/').at(-1);
+        return {contents:await readFile('deployment/production/overrides/functions/'+relative,'utf8'),loader:'js',resolveDir:dirname(args.path)};
+      });
+    }}]});
   const grantKeys = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
   const grantPrivateJwk = await crypto.subtle.exportKey('jwk', grantKeys.privateKey);
   grantPublicJwk = await crypto.subtle.exportKey('jwk', grantKeys.publicKey);
+  const bindings={ AUTH_SECRET: crypto.randomUUID() + crypto.randomUUID(), CASH_SHIFTS_ENABLED:'true',OFFLINE_GRANT_PRIVATE_JWK:JSON.stringify(grantPrivateJwk) };
   mf = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: 'test', modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2024-09-01',
     durableObjects: { PASSWORD_CRYPTO: { className: 'PasswordCrypto', useSQLite: true } },
-    d1Databases: ['DB', 'BOOTSTRAP', 'LEGACY'], bindings: { AUTH_SECRET: crypto.randomUUID() + crypto.randomUUID(),
-      CASH_SHIFTS_ENABLED: 'true', OFFLINE_GRANT_PRIVATE_JWK: JSON.stringify(grantPrivateJwk) } }] }));
+    d1Databases: {DB:'fixture-db',BOOTSTRAP:'fixture-bootstrap',LEGACY:'fixture-legacy'},bindings },
+    {name:'production',modules:true,script:productionBundle.outputFiles[0].text,compatibilityDate:'2024-09-01',
+      durableObjects:{ PASSWORD_CRYPTO:{className:'PasswordCrypto',useSQLite:true}},
+      d1Databases:{DB:'fixture-db',BOOTSTRAP:'fixture-bootstrap',LEGACY:'fixture-legacy'},bindings}] }));
   db = await mf.getD1Database('DB');
   for (const name of (await readdir('d1/migrations')).filter(n => n.endsWith('.sql')).sort()) {
     const sql = (await readFile('d1/migrations/' + name, 'utf8')).replace(/--[^\n]*/g, '');
@@ -359,6 +379,72 @@ test('unsigned legacy drawer writes cannot bypass signed replay', async () => {
   const result=await call('/api/sync/push','POST',{tenantId:'A',events:[event]},a);
   assert.equal(result.status,403,await result.text());
   assert.equal(await db.prepare("SELECT id FROM cash_shifts WHERE id='unsigned-shift'").first(),null);
+});
+
+for(const production of [false,true])test(`${production?'production compatibility':'staged'} sync rejects malformed invoice voids without committing sources or advancing heads`,async()=>{
+  const {tenantId,branchId,token}=await isolatedOwner(`VOIDPOLICY-${production?'PROD':'STAGED'}`),id=`void-policy-invoice-${production}`;
+  const created={id:`void-policy-create-${production}`,entityType:'invoice',entityId:id,action:'create',branchId,
+    payload:{id,tenantId,branchId,status:'active',saleType:'bank',paidAmount:20,finalTotal:20,items:[]},timestamp:Date.now()};
+  assert.equal((await call('/api/sync/push','POST',{tenantId,events:[created]},token,'local',true,null,production)).status,200);
+  const heads=await db.prepare('SELECT conflict_key,last_event_id FROM sync_conflict_heads WHERE tenant_id=? ORDER BY conflict_key').bind(tenantId).all();
+  let index=0;
+  for(const payload of [{id},{id,status:'active'},{id,status:'voided',finalTotal:999},{id,status:'voided',items:[]}]) {
+    const event={id:`void-policy-invalid-${production}-${index++}`,entityType:'invoice',entityId:id,action:'void',branchId,payload,timestamp:Date.now()};
+    const result=await call('/api/sync/push','POST',{tenantId,events:[event]},token,'local',true,null,production);
+    assert.equal(result.status,400,await result.text());
+    assert.equal(await db.prepare('SELECT id FROM sync_events_v2 WHERE tenant_id=? AND id=?').bind(tenantId,event.id).first(),null);
+    assert.deepEqual((await db.prepare('SELECT conflict_key,last_event_id FROM sync_conflict_heads WHERE tenant_id=? ORDER BY conflict_key').bind(tenantId).all()).results,heads.results);
+  }
+});
+
+test('signed cash commit rechecks active drawer scope and rolls back an intervening scope change',async()=>{
+  const tenantId='COMMITAUTH',branchId='commit-auth-main',drawerId='commit-auth-drawer';
+  await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES(?,?,?,?,?,'active','company_owner')")
+    .bind(tenantId,tenantId,'Commit auth fixture','commit-auth-owner',await hashPassword(pass)).run();
+  for(const id of [branchId,'commit-auth-other'])await db.prepare("INSERT INTO branches(id,tenant_id,name,is_main,status) VALUES(?,?,?,?,'active')")
+    .bind(id,tenantId,id,id===branchId?1:0).run();
+  await db.prepare('INSERT INTO cash_drawers(id,tenant_id,branch_id,name) VALUES(?,?,?,?)').bind(drawerId,tenantId,branchId,'Commit auth drawer').run();
+  const token=await login(tenantId,'commit-auth-owner'),fixture=await signedCashFixture(tenantId,token,[{id:drawerId,branchId}]);
+  let index=0;
+  for(const change of ["status='inactive'","branch_id='commit-auth-other'"]) {
+    const at=new Date(Math.max(Date.now(),Date.parse(fixture.grant.claims.onlineVerifiedAt))).toISOString();
+    const id=`commit-auth-shift-${index++}`,sourceId=`commit-auth-source-${index}`;
+    // D1 trigger injects a change after API reads, inside the actual batch.
+    // Only the production commit-time guard can reject and roll back all rows.
+    await db.prepare(`CREATE TRIGGER fixture_drawer_scope_change BEFORE INSERT ON sync_events_v2
+      WHEN NEW.tenant_id='COMMITAUTH' BEGIN UPDATE cash_drawers SET ${change} WHERE id='commit-auth-drawer'; END;`).run();
+    try {
+      const result=await fixture.push({tenantId,events:[fixture.source(sourceId,'cash_shift',{
+        id,tenantId,branchId,drawerId,actorId:tenantId,offlineDeviceId:fixture.deviceId,openingCash:100,
+        timeZone:'Asia/Riyadh',openedAt:at,accountingDate:accountingDate(at,'Asia/Riyadh'),status:'open'})]});
+      assert.equal(result.status,403,await result.text());
+      assert.equal(await db.prepare('SELECT id FROM cash_shifts WHERE id=?').bind(id).first(),null);
+      assert.equal(await db.prepare('SELECT id FROM sync_events_v2 WHERE tenant_id=? AND id=?').bind(tenantId,sourceId).first(),null);
+      assert.equal(await db.prepare('SELECT event_id FROM cash_source_proofs WHERE tenant_id=? AND event_id=?').bind(tenantId,sourceId).first(),null);
+      assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM sync_conflict_heads WHERE tenant_id=?').bind(tenantId).first()).n,0);
+      assert.deepEqual(await db.prepare('SELECT branch_id,status FROM cash_drawers WHERE id=?').bind(drawerId).first(),{branch_id:branchId,status:'active'});
+    } finally {await db.prepare('DROP TRIGGER fixture_drawer_scope_change').run();}
+  }
+});
+
+for(const production of [false,true])test(`${production?'production compatibility':'staged'} invoice update permits notes only, not financial rewrites`,async()=>{
+  const {tenantId,branchId,token}=await isolatedOwner(`SALEPOLICY-${production?'PROD':'STAGED'}`),id=`immutable-sale-${production}`;
+  const event=(eventId,payload,action='update')=>({id:eventId,entityType:'invoice',entityId:id,branchId,action,payload,timestamp:Date.now()});
+  const send=events=>call('/api/sync/push','POST',{tenantId,events},token,'local',true,null,production);
+  assert.equal((await send([event(`immutable-sale-create-${production}`,{id,tenantId,branchId,status:'active',saleType:'bank',paidAmount:20,finalTotal:20,remainingDebt:0,items:[]},'create')])).status,200);
+  const readHeads=async()=>(await db.prepare('SELECT conflict_key,last_event_id FROM sync_conflict_heads WHERE tenant_id=? ORDER BY conflict_key').bind(tenantId).all()).results;
+  const before=await readHeads();
+  for(const [index,changes] of [{finalTotal:99},{paidAmount:999},{remainingDebt:99},{items:[]},{status:'voided'},{customerId:'another'}, {notes:42}].entries()) {
+    const invalid=event(`immutable-sale-edit-${production}-${index}`,{id,...changes});
+    const result=await send([invalid]);
+    assert.equal(result.status,400,await result.text());
+    assert.equal(await db.prepare('SELECT id FROM sync_events_v2 WHERE tenant_id=? AND id=?').bind(tenantId,invalid.id).first(),null);
+    assert.deepEqual(await readHeads(),before);
+  }
+  const notes=event(`immutable-sale-notes-${production}`,{id,notes:'Approved note only'});
+  assert.equal((await send([notes])).status,200);
+  assert.equal((await send([notes])).status,200,'identical note retry remains idempotent');
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM sync_events_v2 WHERE tenant_id=? AND id=?').bind(tenantId,notes.id).first()).n,1);
 });
 
 test('cash drawers isolate branches and reject competing open shifts', async () => {

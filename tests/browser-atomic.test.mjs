@@ -164,6 +164,19 @@ try {
   assert.equal(await second.evaluate(() => window.ready), false, 'concurrent tab cannot own writer lock');
   assert.match(await second.evaluate(() => { try { window.store.transact(() => window.store.set('stock', 0)); return 'wrote'; } catch (error) { return error.message; } }), /الحفظ غير متاح/);
   assert.equal(await first.evaluate(() => window.store.value.outbox.length), 1);
+  let deviceIdentity=null;
+  if(idbProbe) {
+    const results=await Promise.all([first,second].map(page=>page.evaluate(async()=>{
+      const {OfflineGrantStore,indexedDbBackend}=await import('/offlineGrantStore.js');
+      const {ensureOfflineDeviceIdentity}=await import('/offlineDeviceIdentity.js');
+      return Promise.all(Array.from({length:8},()=>ensureOfflineDeviceIdentity(
+        new OfflineGrantStore(indexedDbBackend(indexedDB,'braka-device-identity-probe')))));
+    })));
+    const identities=results.flat();
+    assert.equal(new Set(identities.map(row=>row.deviceId)).size,1,'two tabs must enroll exactly one physical device');
+    assert.equal(new Set(identities.map(row=>row.deviceProof)).size,1,'all enrollments must retain the same possession proof');
+    deviceIdentity=identities[0];
+  }
   const abrupt = process.argv.includes('--crash') || idbProbe || engineProbe || migrateProbe;
   if (abrupt) {
     const chromeProcess = browser.process();
@@ -179,6 +192,14 @@ try {
   await reopened.goto(url, { waitUntil: 'networkidle0' });
   await reopened.waitForFunction(() => window.ready !== undefined);
   assert.equal(await reopened.evaluate(() => window.ready), true);
+  if(idbProbe) {
+    const identityAfterRestart=await reopened.evaluate(async()=>{
+      const {OfflineGrantStore,indexedDbBackend}=await import('/offlineGrantStore.js');
+      const {ensureOfflineDeviceIdentity}=await import('/offlineDeviceIdentity.js');
+      return ensureOfflineDeviceIdentity(new OfflineGrantStore(indexedDbBackend(indexedDB,'braka-device-identity-probe')));
+    });
+    assert.deepEqual(identityAfterRestart,deviceIdentity,'process termination cannot rotate the enrolled device identity');
+  }
   const recovered = await reopened.evaluate(() => window.store.value);
   if (migrateProbe) {
     const recoveredMigration = await reopened.evaluate(async () => {

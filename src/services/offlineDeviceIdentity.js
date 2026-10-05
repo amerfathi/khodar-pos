@@ -6,12 +6,16 @@ import { OfflineGrantStore } from './offlineGrantStore.js';
 
 const proofPattern = /^[a-f0-9]{64}$/;
 const deviceProof = () => crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
+const validate = identity => {
+  if(typeof identity?.deviceId!=='string' || !identity.deviceId || !proofPattern.test(identity.deviceProof||''))
+    throw new Error('هوية الجهاز المحفوظة غير صالحة؛ يلزم استرداد متحقق دون استبدالها');
+  return identity;
+};
 
 export async function ensureOfflineDeviceIdentity(store) {
   if (!(store instanceof OfflineGrantStore)) throw new Error('تخزين هوية الجهاز غير متاح');
   const existing = await store.loadDeviceIdentity();
-  if (existing?.deviceId && proofPattern.test(existing.deviceProof || '')) return existing;
+  if (existing!==undefined && existing!==null) return validate(existing);
   const identity = { deviceId: crypto.randomUUID(), deviceProof: deviceProof(), createdAt: new Date().toISOString() };
-  await store.saveDeviceIdentity(identity);
-  return identity;
+  return validate(await store.createDeviceIdentityIfAbsent(identity));
 }

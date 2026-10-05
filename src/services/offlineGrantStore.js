@@ -13,6 +13,10 @@ export function memoryBackend() {
   return {
     async get(key) { return items.has(key) ? structuredClone(items.get(key)) : null; },
     async set(key, value) { items.set(key, structuredClone(value)); },
+    async putIfAbsent(key,value) {
+      if(!items.has(key))items.set(key,structuredClone(value));
+      return structuredClone(items.get(key));
+    },
     async delete(key) { items.delete(key); },
     async clear() { items.clear(); }
   };
@@ -41,7 +45,21 @@ export function indexedDbBackend(indexedDb = globalThis.indexedDB, name = DB_NAM
     get: key => run('readonly', store => store.get(key)),
     set: (key, value) => run('readwrite', store => store.put(value, key)),
     delete: key => run('readwrite', store => store.delete(key)),
-    clear: () => run('readwrite', store => store.clear())
+    clear: () => run('readwrite', store => store.clear()),
+    putIfAbsent: (key,candidate) => open().then(db => new Promise((resolve,reject) => {
+      // Reading and creation share one readwrite transaction across windows.
+      // Resolve only after commit; never enroll a device that was not saved.
+      const tx=db.transaction(STORE_NAME,'readwrite',{durability:'strict'});
+      const records=tx.objectStore(STORE_NAME),request=records.get(key);
+      let value;
+      request.onsuccess=()=>{
+        value=request.result;
+        if(value===undefined){value=candidate;records.add(candidate,key);}
+      };
+      tx.oncomplete=()=>resolve(value);
+      tx.onerror=()=>reject(tx.error||new Error('تعذر تثبيت هوية الجهاز'));
+      tx.onabort=()=>reject(tx.error||new Error('أُلغي تثبيت هوية الجهاز'));
+    }))
   };
 }
 
@@ -64,4 +82,8 @@ export class OfflineGrantStore {
   async clearRecord(scope) { await this.backend.delete(offlineGrantRecordKey(scope)); }
   async saveDeviceIdentity(identity) { await this.backend.set(DEVICE_IDENTITY_KEY, structuredClone(identity)); }
   async loadDeviceIdentity() { return this.backend.get(DEVICE_IDENTITY_KEY); }
+  async createDeviceIdentityIfAbsent(identity) {
+    if(typeof this.backend.putIfAbsent!=='function')throw new Error('الحفظ الذري لهوية الجهاز غير متاح');
+    return this.backend.putIfAbsent(DEVICE_IDENTITY_KEY,structuredClone(identity));
+  }
 }
