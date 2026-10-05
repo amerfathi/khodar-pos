@@ -1,5 +1,19 @@
 # Five-item remediation checkpoint — 2026-10-04
 
+## Authoritative live checkpoint — 2026-10-05, source2b1c563
+
+This supersedes remote-schema, CI and live-test statuses below. Exact source2b1c56318a9a3c129c19866c8c6d9e541dde68d0 passed305 final automated tests, separate17 formula checks, lint/full/core typecheck/build/compatibility. Hosted37335989044 succeeded; non-publishing native artifact build37337156635 succeeded, publish skipped. Public2.6.14 assets and installed application were not replaced.
+
+Owner renewed Cloudflare OAuth; private pre-DDL export438770bytes is retained outsideGit. Migration0030 only was applied remotely and registered after verifying its5objects. Cash0027/28/29 remain unapplied and cash disabled. Clean independent clone built151-file bundle; QA08667048-c607-4822-b7ec-569010e4f691 uses that exact committed source. Production remains4b84634/5889a64c; no promotion yet.
+
+Real browser owner choice and server recovery on a disposable tenant with2104 sources pass:10validating202 responses, final200/posted, stock17, customer debt10, chosen price12, one replacement proof, other tenant denied403, no page errors. Small-owner live review/source preservation/recovery also pass. This verifies a particular live large-history scenario, not arbitrary company size or the native matrix.
+
+OPEN operational blocker: initial seeding stopped after1504accepted sources; a subsequent login returned503HTML/Cloudflare1102. Sources were preserved and safely resumed to2104. Later filtered tail reports login200/outcomeok/cpu14,4,5ms. Passing retries do not certify elimination of the intermittent resource error. A scoped10/100 empty-settings comparison probe retains metadata only; no weakened authentication or paid subscription. The fixture resume409 was corrected in the harness by not reconstructing already accepted financial sources and using terminal-page heads; it was not a production conflict-policy repair. Production publication is held while the resource issue is investigated.
+
+Still OPEN: full cash App UI/provisioning/offline remount/full drawer backup/restore/lost-device, unsupported complex reversals and actual platform journeys. Signed invoice reversal is staged and tested, not enabled. Windows2.6.14 opens/navigates updates but has no higher candidate; native helper/build success is not a completed in-app upgrade. Latest quota56% five-hour/94% weekly; historical evidence retained, no deletion/reset/purchase.
+
+Controlled live comparison in the separate disposableCB tenant added110 empty-settings sources only: batch10 returned200/outcomeok/cpu12ms; batch100 returned200/outcomeok/cpu58ms; logins11/5ms. This proves costly push execution, not the failed request's exact cause. [Cloudflare limits](https://developers.cloudflare.com/workers/platform/limits/) document Free10ms and occasional-overrun flexibility, so successful58ms is not an operational guarantee.1102 can also indicate memory exhaustion; retain that uncertainty until failed-outcome metadata is captured. Next free-tier remediation is profiling/bounded work or private DO execution, with existing tenant authorization/atomic commits retained; no authentication weakening or subscription.
+
 ## Latest resumed verification — 2026-10-05
 
 Local tests additionally prove the200-source boundary does not split a3-source transfer, SQL final claim rejects a new legacy source even without head changes, actual sync recovery retains the queue on storage failure/account switch, and Chrome restart preserves v2 checkpoint/archive/fence without duplicate replay. Large legacy replay and a later foreign-branch reference are covered. Full suite305 tests passes before the final expanded hook/API fixture, which passes separately. Lint/full/core typecheck/build/docs/compatibility pass; hosted CI/live publication remain next.

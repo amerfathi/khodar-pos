@@ -1,5 +1,13 @@
 # Authoritative release blocker register
 
+## Authoritative live checkpoint — 2026-10-05
+
+Exact source2b1c563 passed305 final tests and hosted37335989044; native artifact workflow37337156635 succeeded without publishing. Clean151-file QA08667048 from a fresh clone and remote0030-only migration/registry are verified. Cash migrations remain unapplied, gate disabled, production remains4b84634/5889a64c and public native2.6.14 unchanged.
+
+Large-company settlement: FIXED_NOT_VERIFIED for general release; a real disposable2104-source owner UI/recovery scenario passes10progress202 then200, stock17/debt10/price12, immutable source preservation/one replacement, cross-tenant403. This does not certify all sizes/platforms. Initial seed interruption and subsequent login503/1102 remain OPEN despite successful continuation and later200 traces14/4/5ms CPU. Production promotion is held for resource diagnosis.
+
+Cash closing and complete complex financial conflict support remain OPEN. Signed invoicevoid and notes are staged/tested, not cash enablement. Windows update remains FIXED_NOT_VERIFIED: application opens but current/latest2.6.14 provides no higher in-app upgrade target; no new installation or security bypass. Exact evidence/remaining work: docs/current/FIVE_ITEM_REMEDIATION.md and current handoff.
+
 ## Five-item implementation checkpoint — 2026-10-04
 
 This section supersedes optimistic interpretations of earlier implementation evidence, not the scope of historical tests. Compatible server/Web deployment 5b8efbd8 occurred from clean source d5b31bc; no new public binary release or cash enablement occurred.

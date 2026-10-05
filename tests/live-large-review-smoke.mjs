@@ -29,29 +29,53 @@ if(process.argv[2]==='--prepare'){
   const tenantId=config.companies.CA,branchId=tenantId+'-branch-1',productId=tenantId+'-p',customerId=tenantId+'-c';
   let token;
   const send=(path,method='GET',body,bearer=token)=>fetch(origin+path,{method,headers:{'Content-Type':'application/json',...(bearer?{Authorization:'Bearer '+bearer}:{})},...(body?{body:JSON.stringify(body)}:{})});
-  const call=async(path,method='GET',body,bearer=token)=>{const response=await send(path,method,body,bearer),data=await response.json();assert.equal(response.status,200,path+': '+response.status+' '+(data.error||''));return data;};
+  const call=async(path,method='GET',body,bearer=token)=>{
+    const response=await send(path,method,body,bearer),raw=await response.text();
+    let data;
+    try{data=JSON.parse(raw);}catch{throw Error(path+': HTTP '+response.status+' non-JSON; edge resource error='+/\b1102\b/.test(raw));}
+    assert.equal(response.status,200,path+': '+response.status+' '+(data.error||''));return data;
+  };
   const login=async company=>(await call('/api/tenants/lookup','POST',{storeCode:company,username:'owner-'+company,password:config.password},undefined)).session.token;
+  const readComplete=async()=>{
+    let page,cursor=0;const events=[];
+    do{page=await call('/api/sync/pull?tenantId='+tenantId+'&cursor='+cursor+'&limit=1000');cursor=page.nextCursor;events.push(...page.events);}while(page.hasMore);
+    assert.ok(page.conflictHeads,'Only the terminal pull page supplies current heads');
+    return {...page,events};
+  };
   token=await login(tenantId);
-  if(process.argv[2]==='--seed'){
-    const seedSnapshot=await call('/api/sync/pull?tenantId='+tenantId);
-    assert.equal(seedSnapshot.events.length,0,'Never restart an interrupted seed blindly');
-    const heads=seedSnapshot.conflictHeads;
+  if(process.argv[2]==='--status'){
+    const history=await readComplete();
+    console.log(JSON.stringify({acceptedSources:history.events.length,acceptedHistory:history.events.filter(row=>row.id.startsWith(tenantId+'-history-')).length}));
+  }else if(['--seed','--resume-seed'].includes(process.argv[2])){
+    const seedSnapshot=await readComplete();
+    if(process.argv[2]==='--seed')assert.equal(seedSnapshot.events.length,0,'Never restart an interrupted seed blindly');
+    const heads={...seedSnapshot.conflictHeads};
     const source=(id,type,payload,action='create',scope=branchId)=>attachConflictPreconditions({id,tenantId,branchId:scope,entityType:type,entityId:payload.id||'settings',action,timestamp:Date.now(),payload:{tenantId,...(scope?{branchId:scope}:{}),...payload}},heads);
-    const events=[source(tenantId+'-product','product',{id:productId,name:'Carrot',currentStockKg:20,branchStock:{[branchId]:20},costPerKg:2,defaultPricePerKg:5}),
+    const recorded=new Set(seedSnapshot.events.map(row=>row.id));
+    if(recorded.size){
+      assert.ok(['product','customer','invoice','receipt'].every(suffix=>recorded.has(tenantId+'-'+suffix)),'Financial seed incomplete; inspect before continuing');
+    }else{
+      const events=[source(tenantId+'-product','product',{id:productId,name:'Carrot',currentStockKg:20,branchStock:{[branchId]:20},costPerKg:2,defaultPricePerKg:5}),
       source(tenantId+'-customer','customer',{id:customerId,name:'QA customer',balance:0}),
       source(tenantId+'-invoice','invoice',{id:tenantId+'-invoice',customerId,status:'active',saleType:'credit',finalTotal:15,paidAmount:0,remainingDebt:15,items:[{productId,netWeight:3,pricePerKg:5}]}),
       source(tenantId+'-receipt','customer_payment',{id:tenantId+'-receipt',customerId,amount:5,method:'cash'})];
-    await call('/api/sync/push','POST',{tenantId,events});
-    for(let start=0;start<2100;start+=100){
-      const batch=Array.from({length:100},(_,index)=>source(tenantId+'-history-'+(start+index),'settings',{},'update',null));
+      await call('/api/sync/push','POST',{tenantId,events});
+    }
+    const acceptedHistory=seedSnapshot.events.filter(row=>row.id.startsWith(tenantId+'-history-'));
+    assert.ok(acceptedHistory.every(row=>row.entityType==='settings'&&row.action==='update'&&row.payload.tenantId===tenantId&&Object.keys(row.payload).length===1));
+    for(let index=0;index<acceptedHistory.length;index++)assert.ok(recorded.has(tenantId+'-history-'+index),'Non-contiguous accepted prefix');
+    const size=10;
+    for(let start=acceptedHistory.length;start<2100;start+=size){
+      const batch=Array.from({length:Math.min(size,2100-start)},(_,index)=>source(tenantId+'-history-'+(start+index),'settings',{},'update',null));
       await call('/api/sync/push','POST',{tenantId,events:batch});
+      if((start+size)%100===0)console.log(JSON.stringify({acceptedHistory:start+size}));
       await new Promise(resolve=>setTimeout(resolve,250));
     }
     console.log(JSON.stringify({seeded:true,acceptedSources:2104,isolatedTenant:true}));
   }else{
     const other=await login(config.companies.CB);
     assert.equal((await send('/api/sync/conflicts?tenantId='+tenantId,'GET',undefined,other)).status,403);
-    const snapshot=await call('/api/sync/pull?tenantId='+tenantId);
+    const snapshot=await readComplete();
     const make=(id,price)=>attachConflictPreconditions({id,tenantId,branchId,entityType:'product',entityId:productId,action:'update',timestamp:Date.now(),payload:{id:productId,defaultPricePerKg:price}},{...snapshot.conflictHeads});
     const local=make('large-live-local-'+crypto.randomUUID(),12),remote=make('large-live-remote-'+crypto.randomUUID(),11);
     await call('/api/sync/push','POST',{tenantId,events:[remote]});

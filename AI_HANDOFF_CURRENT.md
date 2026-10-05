@@ -1,5 +1,27 @@
 # براكه — نقطة التسليم الحالية
 
+## الأحدث الملزم — 2026-10-05، QA حي من المصدر2b1c563
+
+يتقدم هذا القسم على اللقطات التاريخية أدناه. Current Git HEAD:2b1c56318a9a3c129c19866c8c6d9e541dde68d0؛ branch:main؛ المصدر مدفوعorigin/main. آخر full suite للشيفرة النهائية305=5security+280integration+17review+3native، بلاfailed/skipped، scratch/five-items-oct05-final-candidate.log؛17formula منفصلة ليستE2E. lint/full/core typecheck/build/production compatibility/docs نجحت. Hosted Quality gates37335989044 succeeded لنفسSHA. Production release37337156635 succeeded فيverify/windows/android، publish skipped؛ artifacts فقط، لا استبدال immutable v2.6.14.
+
+بعد تفويضOAuth من المالك: snapshot D1 خاصة438770bytes خارجGit في scratch/artifacts/d1-before-review-checkpoint-20261005.sql؛ لا تنقل محتواها أو رابطها المؤقت. طُبقت0030_review_checkpoint_jobs.sql فقط عن بعد، تحققت الجداول/index/triggers الخمسة، وسُجل اسمها فيd1_migrations بعد التحقق. cash0027/28/29 لم تُطبق وgate معطلة.
+
+Fresh مستقل scratch/production-clean-2b1c563 منGitHub بنفسSHA، npmci/build و151-file production manifest نجحت، وكانgitstatusفارغًا. QA deployment08667048-c607-4822-b7ec-569010e4f691 على https://qa-2614.khodar-pos.pages.dev من نفسbundle. لا production promotion: الإنتاج يبقى4b8463464368a8cfbb36d105b102f145c229c515/deployment5889a64c، والثنائيات العامة/المثبتة2.6.14 لم تتغير.
+
+اختبار حي داخلBrowser الحقيقي/الخادم المشترك، شركتان معزولتان: زُرع2104مصدر فيCA، منها4مالية و2100settingsفارغة. actual owner UI اعتمد السعر12 بعد10ردود202 ثم200؛ checkpoint/recoverystock17/debt10، proof واحدة، رفض شركةCB403، pageErrors[]. Small-owner live UI/source preservation/receipt recovery نجحت أيضًا. صورة خاصة scratch/artifacts/live-large-review/owner-reviewed-live.png. هذا تحقق لسيناريو كبير محدد، لا كل أحجام الشركة أو مصفوفة الأجهزة.
+
+مانع تشغيل ما زال مفتوحًا: أول seed توقف بعد1504مصادر بردnonJSON مجهولالمسار؛ status أكد حفظ1504، ثمlogin عاد503HTML/1102. الاستكمال لم يعاود المصادر القديمة، وصل2104، وقرارالمالك نجح. trace لاحق للدخول outcome=ok وCPU14/4/5ms/200؛ هذا لا ينفي الخطأ المتقطع أو يثبت ضمان Free/1000مستخدم. المقارنة الحية فيCB أضافت110settingsفارغة فقط: دفعة10نجحتCPU12ms، دفعة100نجحتCPU58ms؛ lookup11/5ms. التفاصيل المفلترة محفوظة scratch/artifacts/live-large-review/auth-resource-metadata.json عندهذهاللقطة؛ لا أجسام/اعتمادات. بعدالتعديلالتالي تحفظالمقارنة push-comparison-metadata.json لمنعطمسقياسالدخول. tailReady=false لا ينفيالسجلاتالملتَقطة؛ CLI json لميرسلبannerالجاهزية. هذا دليلارتفاعCPU، لاtraceلفشل1102نفسه؛ لا تنسبالفشلإلىCPUحصراً دونoutcome لأن1102يمكنأنيشيرأيضاًإلىmemory. Cloudflareيوثق10msFree ومرونةلتجاوزاتعرضية، مايفسّرإمكاننجاح58msوليسسلامةاعتمادها: https://developers.cloudflare.com/workers/platform/limits/ . الإصلاحالمجانيالتالي: profiling و تقليل/تفويضالعملالمكلفإلىDOخاص معالحفاظعلىحدودالشركةوatomiccommit؛ لاخفضbcrypt أوإلغاءrate-limit. لذلكالنشرالجديدمؤجل.
+
+إصلاح409 عند استكمالfixture كان فيscript فقط: إعادة بناء مصادرمالية موجودة كانت تحركheads المحلية قبل إرسالremainingsettings. صُحح عدم إعادة بنائها وقراءة conflictHeads منآخرpullpage. تقليلseedbatch إلى10 ليس إصلاحًا معتمدًا للنظام ولا اختبار حمل.
+
+الخمسة لم تكتمل: staged signed invoicevoid/notes والحفظ/replay نجحت ماليًا100-12+6-6=88، لكن App drawer provisioning/UI/offline remount/full backup/restore/lost-device وباقيreversals ومصفوفة الأجهزة OPEN. Windows انفتح والتنقل للتحديث نجح، لكنه يعرضcurrent/latest2.6.14؛ لاupgradeأعلى ولاin-app installation جديدة. يحتاجcandidateأعلى موثوق وتأكيدتثبيت عندالفعل. لا تفعيلcash أو ادعاءنشرالبنودجميعًا.
+
+آخرقراءةquota56%5h/94%weekly؛ لاreset/شراء. شرطحذفالتسليماتالقديمةقرب5h لم يتحقق، فحُفظتكلالأدلة. لا أسرار أو كلماتمرور أو رموز أو مفاتيحخاصة فيالوثيقة؛ privatefixtures/SQL/exports ignored فقط.
+
+آخرمهمة: تحقق ونشرمرشحالتسويةالكبيرة، توقفترقيةالإنتاجعند1102، معاكتمالQAالمالي. أولخطوةللنموذجالتالي: اقرأهذاالقسم وgitstatus، راجع auth-resource-metadata الخاصة/مقارنةالدفعات وسجل CPU لـlookup/push لتحديد سبب1102 قبلpromotion؛ لا تعاود--seedولا--prepareعلىfixturesالموجودة، ولاmigrationsapplyللجميع.
+
+git status قبلcommitالتالي: modified tests/live-large-review-smoke.mjs وAI_HANDOFF_CURRENT.md وdocs/current/FIVE_ITEM_REMEDIATION.md وRELEASE_BLOCKERS.md؛ new intended tests/live-review-resource-probe.mjs. untrackedتاريخيةمحفوظةوخارجcommit: docs/multi-company-live-ui-audit-2026-10-03.md وtests/live-account-plan-probe.mjs وtests/live-android-auth-probe.mjs وtests/live-auth-resource-probe.mjs وtests/live-auth-validation.mjs وtests/live-test-provision.mjs. لاstagedملفاتعندهذهاللقطة. بعدcommit استخدمgitrev-parseHEAD؛ الشيفرة المنشورةQA تبقى2b1c563حتىلوتغيرHEADالتوثيق.
+
 ## الأحدث الملزم — 2026-10-05، استئناف بعد Escape بالخطأ
 
 يتقدم هذا القسم على الأقسام أدناه. أحدث استخدام41%5h/91%weekly، لاreset/شراء. لا حذف للأدلة أو التسليمات: شرط قرب5h لم يتحقق. اختبار API/D1 يحفظ transfer3 عند حد200 (أول تقدم199)، ويمنع SQL claim بعد مصدرlegacy يغيرcursor دونheads. actual sync+AtomicStore v2 يبقيoutbox عندquota ويرفض الرد بعد تبديلtoken. Chrome --review-checkpoint نجح بعد قتل العملية: archive/fence/checkpoint محفوظة، القديم لا يتكرر والجديد مرة واحدة. idb probe/engine/migrate نجحت. legacy>2100 يعاد بناؤهstock17، ومرجع فرع آخر يلغيproof؛ رفض403 Entity belongs to another branch هو العقد الفعلي (توقع400 فيfixture صُحح، لا تغييرpolicy).
