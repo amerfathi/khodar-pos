@@ -115,10 +115,10 @@ test('actual hook opens, sells, closes and hands over a signed local drawer atom
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { onLine: false, locks } });
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, location: { origin: 'https://test.invalid' } } });
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { addEventListener() {}, removeEventListener() {}, visibilityState: 'hidden' } });
-  const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';export {enrollOfflineGrant} from './src/services/offlineUnlock.js';export {verifyOfflineCashEvent} from './src/services/verifiedOfflineGrant.js';export {OfflineGrantStore,memoryBackend} from './src/services/offlineGrantStore.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: { 'import.meta.env': '{}' }, format: 'cjs', platform: 'node', packages: 'external' });
+  const bundle = await build({ stdin: { contents: "export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';export {enrollOfflineGrant} from './src/services/offlineUnlock.js';export {verifyOfflineCashEvent} from './src/services/verifiedOfflineGrant.js';export {OfflineGrantStore,memoryBackend} from './src/services/offlineGrantStore.js';", resolveDir: process.cwd() }, bundle: true, write: false, define: { 'import.meta.env': '{}' }, format: 'cjs', platform: 'node', packages: 'external' });
   const loaded = { exports: {} };
   new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), loaded, loaded.exports);
-  const { useAppStore, setSessionToken, setSessionUser, enrollOfflineGrant, verifyOfflineCashEvent, OfflineGrantStore, memoryBackend } = loaded.exports;
+  const { useAppStore, cloudflareSync, setSessionToken, setSessionUser, enrollOfflineGrant, verifyOfflineCashEvent, OfflineGrantStore, memoryBackend } = loaded.exports;
   const identity = { id: 'u', tenantId: 'A', role: 'cashier', branchId: 'branch-main', branchIds: ['branch-main'], sessionExpiresAt: new Date(Date.now() + 60000).toISOString() };
   const shift = openShift();
   const initial = seedAggregate(localStorage, identity, { cash_shifts_v1: [], expenses_v3: [], invoices_v3: [],
@@ -162,6 +162,7 @@ test('actual hook opens, sells, closes and hands over a signed local drawer atom
     setSessionToken('test'); setSessionUser(identity);
     await act(async () => { root = TestRenderer.create(React.createElement(Harness)); await new Promise(resolve => setTimeout(resolve, 30)); });
     assert.equal(app.persistence.ready, true, app.persistence.error);
+    assert.ok(cloudflareSync.drawerReplay,'opt-in drawer account must not fall back to unsigned sync');
     await act(async()=>{assert.deepEqual(await app.unlockCashDrawer('fixture-only',shift.id),{shiftId:shift.id,deviceId:'device-1'});});
     const opening = {id:shift.id,tenantId:'A',branchId:'branch-main',drawerId:'drawer-1',actorId:'u',offlineDeviceId:'device-1',openingCash:100,at:new Date().toISOString(),timeZone:'Asia/Riyadh'};
     const beforeOpen = structuredClone([...rows]);
@@ -172,11 +173,15 @@ test('actual hook opens, sells, closes and hands over a signed local drawer atom
     fail = false;
     await act(async () => { await app.openShift(opening); });
     assert.equal(rows.get(journalKey).sources.length, 1);
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10));});
+    assert.deepEqual(cloudflareSync.drawerReplay.scope,{tenantId:'A',branchId:'branch-main',drawerId:'drawer-1',deviceId:'device-1'});
+    assert.equal(cloudflareSync.drawerReplay.deviceProof,deviceIdentity.deviceProof);
     const before = structuredClone([...rows]);
     await grantStore.saveDeviceIdentity({deviceId:'other-device',deviceProof:'b'.repeat(64)});
     await act(async()=>{await assert.rejects(app.unlockCashDrawer('fixture-only',shift.id),/تحقق سابق/);});
     await grantStore.saveDeviceIdentity(deviceIdentity);
     await act(async()=>{await assert.rejects(app.unlockCashDrawer('wrong-password',shift.id),/كلمة المرور/);});
+    assert.equal(cloudflareSync.drawerReplay.scope,null,'failed unlock must retain a blocked signed mode');
     assert.throws(()=>app.addExpense({id:'locked-expense',amount:12}),/افتح تصريح/);
     const expiredEnvelope=await issueSignedOfflineGrant(await crypto.subtle.exportKey('jwk',issuer.privateKey),{
       ...envelope.claims,onlineVerifiedAt:new Date(Date.now()-25*60*60*1000).toISOString()
@@ -243,6 +248,7 @@ test('actual hook opens, sells, closes and hands over a signed local drawer atom
     assert.equal((await verifyOfflineCashEvent(closed.sources.at(-1),publicJwk,{tenantId:'A',deviceId:'device-1'})).cashierId, 'u');
     const firstRecord = structuredClone(rows.get(userKey));
     await act(async () => { root.unmount(); });
+    assert.equal(cloudflareSync.drawerReplay,null,'unmount clears the previous account transport');
     const secondIdentity = {...identity,id:'cashier-2'};
     const secondInitial = seedAggregate(localStorage,secondIdentity,{cash_shifts_v1:[],expenses_v3:[],invoices_v3:[]});
     rows.set('braka:A:cashier-2:atomic_v1',secondInitial);

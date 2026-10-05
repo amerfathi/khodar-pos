@@ -12,6 +12,10 @@ import legacyReset from '../scripts/prepare-legacy-reset.cjs';
 import { attachConflictPreconditions, conflictKeysForEvent, SYNC_HEADS_STATE_KEY } from '../src/services/syncConflictPolicy.js';
 import { verifySignedOfflineGrant, assertVerifiedOfflineGrant } from '../src/services/verifiedOfflineGrant.js';
 import { accountingDate } from '../src/services/cashShiftEngine.js';
+import {createRequire} from 'node:module';
+import React from 'react';
+import TestRenderer,{act} from 'react-test-renderer';
+import {seedAggregate} from './aggregate-fixture.mjs';
 
 const memoryStorage = () => ({ items: new Map(),
   getItem(key) { return this.items.get(key) ?? null; },
@@ -655,6 +659,78 @@ test('signed drawer replay preserves original cashiers across account handover a
   await db.prepare("UPDATE users SET auth_version=auth_version-1 WHERE id='signed-1'").run();
   await db.prepare("UPDATE cash_devices SET revoked_at=datetime('now') WHERE tenant_id='SIGNED' AND id=?").bind(deviceId).run();
   assert.equal((await call('/api/cash/replay','POST',body,second)).status,403);
+});
+
+test('actual hook drawer expense reaches real API and survives lost local acknowledgement',async()=>{
+  await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES('HOOKCASH','HOOKCASH','Hook cash','hookowner',?,'active','company_owner')").bind(await hashPassword(pass)).run();
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,is_main,status) VALUES('hook-main','HOOKCASH','Main',1,'active')").run();
+  const token=await login('HOOKCASH','hookowner'),deviceId='hook-device',proof=deviceProof();
+  assert.equal((await call('/api/sync/push','POST',{tenantId:'HOOKCASH',events:[{id:'hook-branch-source',entityType:'branch',entityId:'hook-main',action:'create',
+    payload:{id:'hook-main',tenantId:'HOOKCASH',name:'Main',isMain:true,status:'active'}}]},token)).status,200);
+  await call('/api/cash/devices','POST',{tenantId:'HOOKCASH',deviceId,deviceProof:proof},token);
+  await call('/api/cash/drawers','POST',{tenantId:'HOOKCASH',branchId:'hook-main',id:'hook-drawer',name:'Drawer'},token);
+  await call('/api/cash/drawers','PATCH',{tenantId:'HOOKCASH',branchId:'hook-main',drawerId:'hook-drawer',deviceId},token);
+  const keys=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const response=await call('/api/cash/grants','POST',{tenantId:'HOOKCASH',deviceId,deviceProof:proof,eventPublicJwk:await crypto.subtle.exportKey('jwk',keys.publicKey)},token);
+  assert.equal(response.status,200);
+  const envelope=(await response.json()).grant;
+  const original={localStorage:globalThis.localStorage,sessionStorage:globalThis.sessionStorage,fetch:globalThis.fetch,
+    window:globalThis.window,document:globalThis.document,navigator:Object.getOwnPropertyDescriptor(globalThis,'navigator')};
+  globalThis.localStorage=memoryStorage();globalThis.sessionStorage=memoryStorage();
+  const locks={async request(_key,_options,callback){return callback({});}};
+  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{onLine:false,locks}});
+  Object.assign(globalThis,{window:{addEventListener(){},removeEventListener(){},location:{origin:'https://test.invalid'}},
+    document:{addEventListener(){},removeEventListener(){},visibilityState:'hidden'}});
+  globalThis.fetch=(url,init)=>{const target=new URL(url);return mf.dispatchFetch('https://test.invalid'+target.pathname+target.search,init);};
+  const bundle=await build({stdin:{contents:"export {useAppStore} from './src/store/useAppStore.js';export {cloudflareSync} from './src/services/cloudflareSync.js';export {setSessionToken,setSessionUser} from './src/services/authSession.js';export {enrollOfflineGrant} from './src/services/offlineUnlock.js';export {OfflineGrantStore,memoryBackend} from './src/services/offlineGrantStore.js';",resolveDir:process.cwd()},bundle:true,write:false,format:'cjs',platform:'node',packages:'external',define:{'import.meta.env':'{}'}});
+  const loaded={exports:{}};
+  new Function('require','module','exports',bundle.outputFiles[0].text)(createRequire(import.meta.url),loaded,loaded.exports);
+  const {useAppStore,cloudflareSync,setSessionToken,setSessionUser,enrollOfflineGrant,OfflineGrantStore,memoryBackend}=loaded.exports;
+  const identity={id:'HOOKCASH',tenantId:'HOOKCASH',role:'company_owner',branchIds:['all'],sessionExpiresAt:new Date(Date.now()+60000).toISOString()};
+  const initial=seedAggregate(localStorage,identity,{branches_v1:[{id:'hook-main',tenantId:'HOOKCASH',name:'Main',isMain:true,status:'active'}],
+    active_branch_id_v1:'hook-main',cash_shifts_v1:[],expenses_v3:[],products_v3:[],customers_v3:[],suppliers_v3:[],invoices_v3:[]});
+  const rows=new Map([['braka:HOOKCASH:HOOKCASH:atomic_v1',initial]]);
+  let fail=false;
+  const disk={async read(key){return structuredClone(rows.get(key)??null);},
+    async commit(key,snapshot,revision){assert.equal(rows.get(key)?.revision??null,revision);rows.set(key,structuredClone(snapshot));return structuredClone(snapshot);},
+    async commitBatch(entries){if(fail)throw Error('Local replay acknowledgement quota');for(const entry of entries)assert.equal(rows.get(entry.key)?.revision??null,entry.expectedRevision);
+      for(const entry of entries)rows.set(entry.key,structuredClone(entry.snapshot));return entries.map(entry=>structuredClone(entry.snapshot));}};
+  const grantStore=new OfflineGrantStore(memoryBackend());
+  await grantStore.saveDeviceIdentity({deviceId,deviceProof:proof});
+  const enrolled=await enrollOfflineGrant({tenantId:'HOOKCASH',cashierId:'HOOKCASH',deviceId,branchId:'hook-main',password:pass,envelope,
+    pinnedPublicJwk:grantPublicJwk,eventPrivateJwk:await crypto.subtle.exportKey('jwk',keys.privateKey),at:envelope.claims.onlineVerifiedAt});
+  await grantStore.saveRecord({tenantId:'HOOKCASH',cashierId:'HOOKCASH',deviceId},enrolled);
+  let app,root;
+  function Harness(){app=useAppStore({durableRepository:disk,cashGrantStore:grantStore,offlineGrantPublicJwk:grantPublicJwk});return null;}
+  try {
+    setSessionToken(token);setSessionUser(identity);
+    await act(async()=>{root=TestRenderer.create(React.createElement(Harness));await new Promise(resolve=>setTimeout(resolve,30));});
+    const deadline=Date.now()+2000;
+    while(!app.persistence.ready&&!app.persistence.error&&Date.now()<deadline)
+      await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10));});
+    assert.equal(app.persistence.ready,true,app.persistence.error);
+    await act(async()=>{await app.unlockCashDrawer(pass,'hook-shift');});
+    await act(async()=>{await app.openShift({id:'hook-shift',tenantId:'HOOKCASH',branchId:'hook-main',drawerId:'hook-drawer',actorId:'HOOKCASH',
+      offlineDeviceId:deviceId,openingCash:100,timeZone:'Asia/Riyadh',at:new Date().toISOString()});});
+    await act(async()=>{await app.addExpense({id:'hook-expense',title:'Rent',amount:12,paymentMethod:'cash'});});
+    await act(async()=>{await app.closeShift({shiftId:'hook-shift',actorId:'HOOKCASH',deviceId,countedCash:88,at:new Date().toISOString()});});
+    globalThis.fetch=(url,init)=>{const target=new URL(url);return mf.dispatchFetch('https://test.invalid'+target.pathname+target.search,init);};
+    cloudflareSync.isOnline=true;fail=true;
+    assert.equal(await cloudflareSync.flushQueue({pullAfterFlush:false}),false);
+    assert.match(cloudflareSync.lastError,/quota/);
+    assert.ok(cloudflareSync.repository.current.outbox.length>0);
+    fail=false;
+    assert.equal(await cloudflareSync.flushQueue({pullAfterFlush:false}),true,cloudflareSync.lastError);
+    assert.equal(cloudflareSync.repository.current.outbox.length,0);
+    const shift=await db.prepare("SELECT status,expected_cash_cents,counted_cash_cents FROM cash_shifts WHERE id='hook-shift'").first();
+    assert.deepEqual(shift,{status:'closed',expected_cash_cents:8800,counted_cash_cents:8800});
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM cash_shift_movements WHERE tenant_id='HOOKCASH'").first()).n,1);
+    assert.equal(app.expenses.length,1);
+  } finally {
+    await act(async()=>{root?.unmount();});cloudflareSync.stopAutoSync();
+    Object.assign(globalThis,{localStorage:original.localStorage,sessionStorage:original.sessionStorage,fetch:original.fetch,window:original.window,document:original.document});
+    if(original.navigator)Object.defineProperty(globalThis,'navigator',original.navigator);else delete globalThis.navigator;
+  }
 });
 
 test('sync sequence migration preserves events from the preceding schema', async () => {

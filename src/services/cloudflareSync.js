@@ -565,9 +565,10 @@ export class CloudflareSyncService {
   }
 
   // Rare recovery fallback. Normal inbound refresh is triggered by user activity.
-  startAutoSync(tenantId, onUpdatesReceived = null, intervalMs = FALLBACK_SYNC_MIN_MS) {
+  startAutoSync(tenantId, onUpdatesReceived = null, intervalMs = FALLBACK_SYNC_MIN_MS, drawerReplay = null) {
     this.stopAutoSync();
     this.currentTenantId = tenantId;
+    this.drawerReplay=drawerReplay;
     if (onUpdatesReceived) {
       this.updateHandler = onUpdatesReceived;
     }

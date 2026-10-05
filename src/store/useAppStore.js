@@ -862,9 +862,34 @@ export function useAppStore(options = {}) {
     cloudflareSync.repository = local;
     const tenantId = currentUser.tenantId;
     
-    cloudflareSync.startAutoSync(tenantId, handleInboundSyncEvents);
+    cloudflareSync.startAutoSync(tenantId, handleInboundSyncEvents, undefined,
+      options.cashGrantStore ? {scope:null,locks:globalThis.navigator?.locks,deviceProof:null} : null);
     return () => { cloudflareSync.stopAutoSync(); if (cloudflareSync.repository === local) cloudflareSync.repository = null; };
-  }, [currentUser?.tenantId, handleInboundSyncEvents, persistence.ready, local]);
+  }, [currentUser?.tenantId, handleInboundSyncEvents, persistence.ready, local, options.cashGrantStore]);
+
+  const drawerSyncShift = cashShifts?.find(shift=>shift.id===cashDrawerContext?.shiftId &&
+    shift.actorId===currentUser?.id && shift.tenantId===currentUser?.tenantId);
+  const drawerSyncBranch = local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID);
+  useEffect(()=>{
+    if(!options.cashGrantStore || !persistence.ready || cloudflareSync.repository!==local)return;
+    let disposed=false;
+    const blocked={scope:null,locks:globalThis.navigator?.locks,deviceProof:null};
+    cloudflareSync.drawerReplay=blocked;
+    if(cashDrawerContext && drawerSyncShift && drawerSyncBranch===drawerSyncShift.branchId) {
+      const scope={tenantId:currentUser.tenantId,branchId:drawerSyncShift.branchId,
+        drawerId:drawerSyncShift.drawerId,deviceId:cashDrawerContext.deviceId};
+      void ensureOfflineDeviceIdentity(options.cashGrantStore).then(identity=>{
+        if(disposed || cloudflareSync.repository!==local || cloudflareSync.drawerReplay!==blocked)return;
+        const session=getSessionUser();
+        if(identity.deviceId!==scope.deviceId || session?.id!==currentUser.id ||
+            session?.tenantId!==scope.tenantId || local.read(STORAGE_KEYS.ACTIVE_BRANCH_ID)!==scope.branchId)return;
+        cloudflareSync.drawerReplay={scope,locks:globalThis.navigator?.locks,deviceProof:identity.deviceProof};
+        if(cloudflareSync.isOnline)void cloudflareSync.flushQueue();
+      }).catch(()=>{/* Fail closed; do not enable unsigned fallback. */});
+    }
+    return ()=>{disposed=true;if(cloudflareSync.repository===local)cloudflareSync.drawerReplay=blocked;};
+  },[options.cashGrantStore,persistence.ready,local,currentUser?.id,currentUser?.tenantId,
+    cashDrawerContext,drawerSyncShift?.drawerId,drawerSyncShift?.branchId,drawerSyncBranch]);
 
   // Live Sync Status subscription
   const [syncStatus, setSyncStatus] = useState(() => ({

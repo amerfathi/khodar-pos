@@ -1,5 +1,19 @@
 # براكه — نقطة التسليم الحالية
 
+## أحدث نقطة — 2026-10-05، ربط الوردية بالتطبيق والخادم المحلي
+
+هذا القسم يتقدم على الحالات التاريخية أدناه. HEAD قبل حفظ هذه المرحلة: 81dbbb3338cee49e8d313136a39b18b92c772238، الفرع main مطابق origin/main. Hosted Quality gates37232198477 نجحت لذلك HEAD، وليس للـcommit التالي الذي لم يُنشأ بعد.
+
+تم ربط useAppStore بخدمة النقل الموقّع عند توفير cashGrantStore: تبدأ المزامنة بحالة محجوبة قبل أي تحديث فوري، ثم تُفعّل فقط لوردية المستخدم وفرعه وجهازه بعد التحقق من الهوية الدائمة. فشل الفتح أو تبديل الفرع لا يسمح بالرجوع إلى الإرسال غير الموقّع. App.jsx لا يفعّل الميزة في الإنتاج.
+
+اختبار جديد يمر عبر React hook الفعلي وCloudflareSyncService والخادم المحلي/D1 وتصريح صادر من الخادم: فتح100، مصروف12، إقفال88. فشل حفظ تأكيد المزامنة يترك الطابور محفوظًا؛ إعادة المحاولة تقرّ المصدر مرة واحدة وتُبقي حركة واحدة بالخادم. خلل أولي في محول HTTP للاختبار أسقط query string وأنتج403 عند قراءة الفروع؛ إصلاح المحول حفظ المعاملات دون تغيير صلاحيات الإنتاج.
+
+التحقق المحلي: npm test خرج0، 281 اختبارًا (5security+260integration+13review+3native)، صفر فشل/تجاوز. 17formula منفصلة وليست E2E. lint وtypecheck وWeb build نجحت؛ تحذير حجم الحزمة قائم. اختبار API محلي وليس شهادة تشغيل مالي على الأجهزة أو الخادم الحي.
+
+آخر مهمة: ربط الوردية الموقّعة بالتطبيق واختبار فقد التأكيد حتى API. أول خطوة تالية: استكمال provisioning/UI وتصريح الدخول المحلي24h بعد انتهاء جلسة8h، ثم backup/restore/lost-device ومنع جميع مسارات cash غير الموقّعة قبل تفعيل الميزة. تاريخ التعارضات>2000 والتعارضات المالية المعقدة ومسار تحديثWindows الداخلي الكامل ما زالت مفتوحة. لا نشر إصدار جديد ولا تغيير schema عن بعد؛ المنشور2.6.14 وإقفال الدرج غير مفعّل.
+
+git status عند كتابة القسم: modified مقصودة src/services/cloudflareSync.js،src/store/useAppStore.js،tests/api-integration.test.mjs،tests/cash-shift-hooks.test.mjs،وملفا التوثيق الحاليان. untracked القديمة محفوظة وخارج الحفظ: docs/multi-company-live-ui-audit-2026-10-03.md وtests/live-account-plan-probe.mjs وtests/live-android-auth-probe.mjs وtests/live-auth-resource-probe.mjs وtests/live-auth-validation.mjs وtests/live-test-provision.mjs. بعد الحفظ استخدم git rev-parse HEAD لمعرفة commit هذه النقطة. لا تُضمّن ملفات scratch الخاصة أو قيم اعتماد في Git.
+
 ## ربط النقل الموقّع بخدمة المزامنة — 2026-10-04، محلي غير منشور
 
 النتيجة النهائية لهذه المتابعة تتقدم علىpending أدناه: npm test خرج0 (5security+259integration+13review+3native=280،0failed/0skipped)،17formula منفصلة،production-bundleguard1مرّمنفصلًا،lint/typecheck/docs/Webbuild وFunctions compilation نجحت؛ تحذيرchunkكبيرقائم. ستُحفظالملفاتالسبعةالمذكورةمعtests/api-integration.test.mjs فيGit،ولاrelease/deploy. لا تنسب hosted CI للمصدرالتالي قبلقراءةنتيجته. أولخطوةالتاليةAPI-to-real-hookintegration ثمprovisioning/UI/recovery كمافُصل،لاإعادةتنفيذtransport. لا أسرار بهذاالقسم.

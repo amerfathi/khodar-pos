@@ -82,3 +82,10 @@ Hosted follow-up: run37221158729 failed246/247 on a shared-fixture login rate bu
 أكد المستخدم ظهور البيانات السابقة بعد التثبيت اليدوي؛ لا يُغلق ذلك اختبار التحديث من داخل البرنامج أو يثبت الأرصدة مستقلًا. Hosted quality gates37221574777 نجحت للمصدرd836010.
 
 كشف اختبار useAppStore الحقيقي أن اختيار أول وردية في الفرع يمنع مصروف صاحب وردية ثانية عندما تسبقها وردية محاسب آخر، ويختار عشوائيًا عند وجود ورديتين لصاحب الحساب. أُصلحت مطابقة الشركة/الفرع/المحاسب ورفض الحالة الملتبسة دون حفظ مصروف. السيناريوهان فشلا قبل الإصلاح؛ 15 اختبارًا مركزًا نجحت بعده. هذا إصلاح محلي غير منشور، لا اكتمال لإقفال الدرج أو ربط الحفظ الموقّع بالمسار الفعلي. يلزم استمرار تفويض الجهاز والحفظ المشترك وإعادة التشغيل والنسخ والاستعادة؛ البوابة معطلة.
+# Latest checkpoint — 2026-10-05 (local, not a release)
+
+Hook provisioning now installs a blocked signed-transport configuration before the initial sync refresh, then activates only for the current actor's drawer shift, branch and durable device identity. Failed unlock and scope changes cannot fall back to unsigned upload. App.jsx production provisioning remains absent.
+
+A new actual React-hook → CloudflareSyncService → local API/D1 test uses a server-issued grant: opening100, expense12, closing88. Failed paired acknowledgement retains the queue; retry clears exact originals without duplicate cash movements. The HTTP fixture preserves query parameters; no production branch authorization was relaxed.
+
+Local npm test passes281 tests (5security,260integration,13review,3native), zero failed/skipped;17 formula checks are separate, not E2E. Lint, full typecheck and Web build pass, with the existing chunk-size warning. Hosted CI37232198477 succeeds for preceding HEAD81dbbb3, not yet for this change. Cash stays disabled remotely; no migrations or new release. Next: provisioning/UI,24-hour offline identity after session expiry, backup/restore/recovery, unsigned endpoint closure; large-history review, complex financial operations and full Windows in-app upgrade remain open.
