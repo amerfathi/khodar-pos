@@ -1,5 +1,28 @@
 # براكه — نقطة التسليم الحالية
 
+## الحالة المرجعية — 2026-10-05، هوية محلية24h وحماية مصادر الدرج
+
+هذا القسم يتقدم على الأرقام والحالات التاريخية أدناه. المرجع المنشور ما زال2.6.14؛ لا إصدار أو تفعيل درج أو migrations إنتاج في هذه المرحلة. طلب المستخدم هو إكمال البنود الخمسة حتى النشر؛ لم تُغلق كلها بعد، ولا يجوز اعتبار حفظ هذه الشيفرة نشرًا للميزة.
+
+المُنجز المحلي:
+
+- تُشتق هوية الدخول المحلي وصلاحياتها وفروعها من تصريح الخادم الموقّع بعد فتح مخزن المفتاح بكلمة المرور؛ تعمل ضمن24h حتى بعد انتهاء جلسة الخادم8h، دون إنشاء bearer مزيف أو ترقية بيانات مستخدم قابلة للتحرير. الهوية ذاكرة فقط؛ إعادة التشغيل تتطلب فتحًا جديدًا. فرع owner المحلي محصور بالفروع الموقّعة. openOfflineSession هو مسار خدمة، وليس شاشة دخول مكتملة في App.
+- أُغلقت POST القديمة لفتح/إقفال الوردية، ومصادر cash_shift غير الموقّعة. الفرع المسجل به writer يرفض create نقديًا بلا وردية، ويرفض تعديل السجلات المالية مباشرةً باستثناء ملاحظات الفاتورة. اختبار حقيقي API/D1 أثبت قبول تحويل مصروف بنكي إلى نقدي قبل الإصلاح ورفضه بعده دون كتابة المصدر. لا يُدّعى إغلاق جميع races: فحص أول تعيين writer ما زال قراءة تطبيقية، وتستلزم الاستعادة وتسوية العكس بروتوكولًا مدققًا.
+- إقرار سجل المحاسب السابق حين يكون طابور المحاسب الحالي فارغًا يستخدم durable.commit لسجل واحد، لا commitBatch الذي يتطلب سجلين. إقرار مصادر صاحب الطابور يظل paired commit. المصادر الأصلية محفوظة.
+- قائمة تعارضات المالك لا تعيد تشغيل تاريخ الشركة؛ تقرأ الرؤوس والمنافسين المطلوبين في D1batch. شركة اختبار2201 حركة كانت تعيد503 ونجحت بعد الإصلاح مع عزل الشركة. تنفيذ القرار والاسترداد المالي الكامل لا يزالان محدودين2000؛ هذه ليست تسوية مالية للشركات الكبيرة.
+
+الأدلة: Chrome مع profile مؤقت وIndexedDB فعلية نجح في اختبار journal-only ACK وبقاء السجل بعد إنهاء العملية، واختبار engine failure/restart، واختبار adoption مع حفظ المصدر السابق. ليست شهادة power-loss أو Android/Windows مالية. public offline session wiring، الصلاحيات الموقّعة، كلمة المرور الخاطئة والفرع الأجنبي مرّت. فشل إعداد أول browser harness لغياب modules أصلح بقائمة صريحة فقط؛ لا وصول لملفات المستخدم. فشل typecheck أولًا لتعريف route وStorage fixture وأصلح دون تعطيل checkJs.
+
+التحقق النهائي بعد آخر guard: npm test خرج0 ومرّ287 اختبارًا (5security+266integration+13review+3native)، صفر فشل/تجاوز،17formula منفصلة ليست E2E. السجل scratch/five-item-oct05-signed-edits-final.log. lint/full typecheck/core typecheck/Web build والتوثيق نجحت؛ chunk warning قائم. حارس production override رفض drift قبل تحديث pin المراجع ونجح بعده؛ overrides ما زالت cash-disabled. حزمة147 ملفًا scratch/production-bundle-qbQb3L بُنيت وWrangler compiled Worker successfully بلاdeploy؛ هذه من worktree، ليست clean-clone release.
+
+أولوية الاستكمال: App provisioning/UI وهوية الحساب المحلي/remount الآمن، backup/restore/lost-device مع حماية المصادر، checkpoint/job مدقق لتسوية التاريخ الكبير، العكس المالي المدعوم ومطابقة مستقلة، ثم رحلات Web/Windows/Android والتحديث الداخلي الكامل. لا تفعّل cash أو تطبق schema عن بعد بناءً على primitive/اختبار محلي. Hosted Quality gates37287096697 انتهتsuccess للمصدرedd3ee63a78a0fe5d9d9c139b87a8d80569aec61؛ نتيجة فُحصت وليست افتراضًا.
+
+حُفظت21 ملفات الشيفرة/الفحوص ورفعت إلى main في edd3ee63a78a0fe5d9d9c139b87a8d80569aec61. الاستخدام عند آخر قراءة44% نافذة5h و78% أسبوعي، بلا شراء أو إعادة ضبط. يُحفظ هذا checkpoint لتجنب إعادة العمل واستهلاك الرصيد.
+
+استنسخ المصدر من GitHub في scratch/production-clean-edd3ee6، طابق HEAD والحالة النظيفة، ثم npm ci وWeb build وحارس الإنتاج وmanifest147 ملفًا وWrangler compilation نجحت. المعاينة qa-2614 رفعت إلى deployment d83e181f، ونجح actual owner UI choice/receipt recovery دون page errors. بعدها نُشرت الحزمة نفسها إلى main: deployment8cb1bae2، ورحلتا المالك على المعاينة والإنتاج نجحتا مع حفظ الأصل وcanonicalPrice12 واستردادreceipt، ثم أعاد الاختبار سعر fixture إلى10. جميع الكتابات في شركة QA المحددة فقط؛ لا حساب المستخدم الحقيقي. Web وhealth200 وpull غير الموثق401، وcash/shifts لحساب owner موثّق503 يؤكد gate disabled. هذا نشر Web/server متوافق لإصلاح قائمة التعارضات، دون schema أو binary release؛ ليس نشر/إكمال إقفال الدرج أو البنود الخمسة.
+
+npm audit كامل أعاد8 advisories (7high+1moderate) في سلسلة أدوات التطوير والبناء؛ npm audit --omit=dev أعاد0. لا تحديثforce أو تجاهل: braces بلاpatched version معلنة وقت الفحص، وإزالة السلسلة المقترحة تتطلب Tailwind major migration مدققًا. مراجع الفحص: GHSA-vfj7-8cjw-p6xm وGHSA-ch52-4w7c-c8xp وGHSA-w293-vg96-wgc3. تبقى أدوات التطوير قيد المعالجة ولا يجوز وصف audit0 التشغيلي شهادة أمان كامل.
+
 ## أحدث نقطة — 2026-10-05، ربط الوردية بالتطبيق والخادم المحلي
 
 هذا القسم يتقدم على الحالات التاريخية أدناه. HEAD قبل حفظ هذه المرحلة: 81dbbb3338cee49e8d313136a39b18b92c772238، الفرع main مطابق origin/main. Hosted Quality gates37232198477 نجحت لذلك HEAD، وليس للـcommit التالي الذي لم يُنشأ بعد.
@@ -552,3 +575,12 @@ M ACCOUNTING_AUDIT_PLAN.md
 ```
 
 ملفاتdocs/multi-company-live-ui-audit-2026-10-03.md وtests/live-*التاريخية السابقة خارجالمهمة ولن تُضم للـcommit. باقيالوثائق الجديدة/المؤشرة وفاحصdocsمقصودة للنشر. فحصالاعتمادات لا يسجلالقيم؛configوexportsومفاتيحخاصة تبقى خارجGit.
+
+## آخر لقطة Git والمتابعة — 2026-10-05
+
+- Current Git HEAD عند التقاط لقطة الشيفرة: edd3ee63a78a0fe5d9d9c139b87a8d80569aec61؛ commit التوثيق التالي لا يغير هذه الشيفرة. افحص git rev-parse HEAD لمعرفة رأس التوثيق بعد حفظه.
+- Current branch: main، مطابق origin/main.
+- git status: modified AI_HANDOFF_CURRENT.md وdocs/current/FIVE_ITEM_REMEDIATION.md فقط؛ لا شيفرة غير ملتزمة ولا staged files. untracked السابقة محفوظة: docs/multi-company-live-ui-audit-2026-10-03.md، tests/live-account-plan-probe.mjs، tests/live-android-auth-probe.mjs، tests/live-auth-resource-probe.mjs، tests/live-auth-validation.mjs، tests/live-test-provision.mjs. ليست ضمن commit هذه المهمة.
+- آخر مهمة: حماية الدخول المحلي الموقّع ومصادر الدرج وإقرار journal على IndexedDB حقيقية، وإصلاح قائمة التعارضات وبناء حزمة متوافقة من Git نظيف.
+- أول خطوة تالية: اقرأ نتيجة المعاينة/النشر النهائية أعلاه ثم استكمل App provisioning/UI/remount مع24h offline identity؛ لا تعِد تنفيذ primitives المغطاة. تليها recovery/restore/lost-device وcheckpoint/job والعكس المالي ورحلات المنصات قبل إصدار شامل وتفعيل cash.
+- لا كلمات مرور أو قيم secrets/tokens/private keys في هذا التسليم. config الخاصة والتصديرات ومفاتيح التوقيع خارج Git؛ لا تنقلها إلى نموذج آخر أو تطبعها.

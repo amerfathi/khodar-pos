@@ -1,5 +1,23 @@
 # Five-item remediation checkpoint — 2026-10-04
 
+## Authoritative local follow-up — 2026-10-05
+
+Signed, password-unlocked local identity now survives the eight-hour cloud-session limit within its24-hour grant, without a cloud bearer or trusting editable cached roles. Server-derived permissions and explicit branches bind it; app restart requires another unlock. The public enrollment/session service is tested, but App login selection/remount and provisioning are not enabled.
+
+Legacy unsigned shift open/close endpoints and unsigned shift push sources are denied. Managed branches reject cash creates without shift linkage and direct financial updates (invoice notes remain supported). A real API/D1 regression demonstrated bank-to-cash edit acceptance before repair and denial afterward. This is not complete financial-correction/recovery support or an atomic first-writer-policy certification.
+
+Journal-only acknowledgement now uses the actual single-record durable primitive; the own-queue path still pairs aggregate and journal. Real isolated Chrome IndexedDB tests pass after abrupt process termination, including journal ACK, engine recovery and immutable migration source preservation. No user browser profile was used; no power-loss or native financial certification.
+
+Large-company inbox evidence lookup no longer replays the whole history: a2201-event fixture failed503 before repair and lists only relevant competing sources afterward, preserving tenant access. Executing and recovering a financial decision still require the existing complete replay capped at2000. Large-company settlement remains OPEN until an audited bounded checkpoint/job replaces that restriction.
+
+Final local full verification after the financial edit guard passes287 tests (5security+266integration+13review+3native), zero failed/skipped;17 inherited formula checks are separate, not E2E. Lint, both typechecks, documentation, Web build and production compatibility guard pass; the large chunk warning remains. Twenty-one code/test/config files were committed and pushed as edd3ee63a78a0fe5d9d9c139b87a8d80569aec61; hosted Quality gates37287096697 completes successfully for that exact commit. A compatible Web/server deployment followed as recorded below; no migration or binary release, and cash remains disabled.
+
+Remaining requested work is not external authorization: App UI/provisioning, full backup/restore/lost-device handling, large-history execution/recovery, complex reversals, latest native financial journeys and the full Windows in-app update. The previously verified clean-Git server deployment remains narrow evidence. Public version2.6.14 remains immutable; do not certify all five items or enable the cash gate from these results.
+
+Fresh GitHub clone at edd3ee6 is clean and passes npm ci, Web build, compatibility guard and147-file manifest/Functions compilation. QA deployment d83e181f passed the actual owner UI choice and receipt recovery, then the same bundle was deployed to production as8cb1bae2. The production owner UI journey also passes with source retention, canonicalPrice12 and receipt recovery, without page errors; fixture price is reset to10 in the test cleanup. Writes are confined to the disposable QA tenant. Production Web/health200, unauthenticated pull401 and authenticated owner cash/shifts503 confirm the scoped smoke and disabled cash gate. This is a compatible inbox fix, not large-history execution/recovery or a five-item release certification.
+
+Current dependency audit reports8 development/build advisories (7high+1moderate); production-only npm audit reports0. This distinction is not a complete security certification, and no forced major upgrade was applied. Braces currently has no patched version listed in GHSA-vfj7-8cjw-p6xm; development-tool remediation remains open.
+
 ## Signed transport follow-up
 
 Final local verification supersedes pending statements below: npm test exit0 with280 tests (5security,259integration,13review,3native), no failures/skips;17 inherited formula checks remain separate. Independent compatibility guard1, lint, typecheck, docs, Web build and Functions compilation pass. The staged transport is not App-level enablement or a five-item release certification. No live deployment.
