@@ -1,5 +1,25 @@
 # Five-item remediation checkpoint — 2026-10-04
 
+## Authoritative follow-up — 2026-10-05, source4b84634
+
+297 local tests pass (5security,275integration,14review,3native), no failed/skipped;17 formula checks remain separate, not E2E. Final log: scratch/five-item-oct05-policy-final.log. Lint, full/core typechecks, Web build and the compatibility guard pass; chunk-size warning remains. Chrome IDB probe/engine/migration tests pass. Hosted37292310620 completed successfully for exact source4b8463464368a8cfbb36d105b102f145c229c515; confirmed with gh run view.
+
+Invoice cancellation now requires explicit voided status and cannot rewrite immutable money/items. Ordinary invoice updates accept textual notes only. The same validator is used in the actual staging and production-compatibility handlers and owner ledger replay; real local workerd/D1 tests prove malformed requests preserve rows and heads. Device identity creation is atomic across16 concurrent first enrollments on two real browser tabs and survives process termination. Existing corrupt identity is retained, not silently rotated. Reconnecting a valid local cashier does not revoke its24h signed authorization through an expected unauthenticated cloud401; expiry closes the local writer without deleting its aggregate, once even under repeated focus. Uploads still require a genuine cloud session.
+
+Staged migration0029 adds commit-time active-drawer/branch validation to immutable source proof insertion. Actual D1 injected scope-change tests fail before the repair and pass afterward, rolling back the complete batch. Bootstrap parity passes. No cash migration is applied remotely.
+
+| Requested item | State / exact remaining scope |
+|---|---|
+| Drawer close | OPEN: production App provisioning/UI and safe offline remount, complete journal backup/restore/lost-device handling, platform financial journeys. Do not enable cash. |
+| Large-company settlement | OPEN: bounded inbox reads work beyond2000; execution/recovery still stop at2000 and need an audited checkpoint/job, not a larger LIMIT. |
+| Complex financial conflicts | OPEN: invoice contracts hardened; signed client cash reversals and broader dependent reconciliation are not complete. |
+| Clean-Git server | VERIFIED for4b84634/5889a64c: clean independent clone,148-file compatibility bundle, successful CI/Functions compilation, QA and production owner UI/receipt smoke. No migrations or cash enablement. |
+| Windows in-app upgrade | FIXED_NOT_VERIFIED: preceding manual install is not a full download→install journey. Installed2.6.14 window activation failed twice after fresh selection; no UI input or replacement attempted. Owner asked to open it. |
+
+First full regression had3 fixture-contamination failures: new policy records in tenantA violated legacy migration fixtures' complete-history expectations. Tests moved to four dedicated companies; production validation was not relaxed and final full run passes. Source pushed to main; new public version/binaries and drawer rollout have not been published. Latest handoff contains the next step and usage checkpoint.
+
+Latest compatible deployment: clean GitHub clone scratch/production-clean-4b84634 at exact source4b8463464368a8cfbb36d105b102f145c229c515 has empty git status before/after npm ci/build; compatibility guard and148-file manifest pass, Wrangler compiles the Worker. QA967a49b2 and production5889a64c use the same bundle. Actual owner UI approval, original-source preservation, canonicalPrice12 and receipt recovery pass on both without page errors; writes are only in the disposable QA company and fixture price returns to10. Production Web/health200, unauthenticated pull401 and authenticated cash/shifts503 confirm the scoped smoke and disabled feature. Public2.6.14 native binaries are unchanged. The five-item request is not complete: drawer rollout, large-history execution/recovery, broader complex financial workflows and full Windows in-app installation remain open. Stop requested before5h exhaustion; last pre-documentation reading87% primary/85% weekly.
+
 ## Authoritative local follow-up — 2026-10-05
 
 Signed, password-unlocked local identity now survives the eight-hour cloud-session limit within its24-hour grant, without a cloud bearer or trusting editable cached roles. Server-derived permissions and explicit branches bind it; app restart requires another unlock. The public enrollment/session service is tested, but App login selection/remount and provisioning are not enabled.

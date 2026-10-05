@@ -1,5 +1,26 @@
 # براكه — نقطة التسليم الحالية
 
+## الأحدث الملزم — 2026-10-05، المصدر 4b8463464368a8cfbb36d105b102f145c229c515
+
+هذه متابعة للبنود الخمسة، وليست إغلاقًا لها أو تفعيلًا للدرج. طلب المالك التوقف بهامش أمان قبل نفاد نافذة الاستخدام ذات الخمس ساعات. القراءة الأخيرة عند هذا التوثيق85% primary و84% weekly؛ لا reset أو شراء رصيد.
+
+إصلاحات هذه المتابعة، مع اختبارات فشلت على الخلل قبل الإصلاح:
+
+- توحيد عقد إلغاء الفاتورة: status=voided صريحة، دون تعديل المال/الأصناف. التعديل العادي للملاحظات النصية فقط؛ لا تغيير إجمالي/مدفوع/دين/عميل أو تحويل الإلغاء إلى update. نفس validator في push الأصلي وproduction override وإعادة التشغيل المالي للمراجعة. اختبارات workerd/D1 الفعلية للمسارين تثبت رفض الطلب دون حفظ مصادر أو تحريك heads، وتكرار الملاحظة idempotent.
+- عند رجوع الإنترنت لا تُعامل هوية الكاشير المحلية الموقعة كأنها cloud bearer؛ 401 بلا token لا يلغي تصريحًا صالحًا. انتهاء24h يغلق الكاتب ويعيد الدخول مرة واحدة مع بقاء السجل. الرفع يتطلب جلسة سحابية حقيقية؛ لا تمديد token أو تفويض مفتوح. اختبارات React hook الحقيقي وcrypto حقيقية، لا رحلة UI/native كاملة.
+- هوية الجهاز تُنشأ مرة واحدة بـIndexedDB readwrite transaction لا read ثم overwrite.16 محاولة من نافذتين في Chrome تشترك في الهوية والإثبات بعد قتل العملية وإعادة الفتح. الهوية الموجودة التالفة لا تُستبدل بصمت؛ تبقى للاسترداد. لا شهادة power-loss.
+- migration0029 تعيد التحقق من درج نشط ومطابقة فرعه لمصدر الحركة عند كتابة proof داخل D1batch. اختبار trigger معزول يغير الحالة/الفرع بين القراءة والكتابة ويثبت403 وrollback الوردية/المصدر/proof/heads والتغيير المدخل. schema bootstrap/migrations متطابقة. migration0029، وكذلك0027/0028، لم تُطبّق عن بعد.
+
+التحقق النهائي: npm test exit0:297=5security+275integration+14review+3native، صفر فشل/تجاوز؛17formula منفصلة ليست E2E. السجل scratch/five-item-oct05-policy-final.log. lint/full typecheck/core typecheck/Web build/production compatibility guard ناجحة. browser-idb-probe/engine/migrate ناجحة. warning حجم chunk قائم. أول full run فشل3 بسبب مشاركة اختبارات السياسة الجديدة tenantA مع fixtures ترحيل قديمة؛ عُزلت الاختبارات في شركات مستقلة، دون تخفيف تحقق البيانات، ثم نجح التشغيل الكامل. pin إنتاجي مراجع بعد رصد drift، وليس تجاوزًا للفاحص.
+
+البنود: الدرج OPEN (App provisioning/UI/remount، full backup/restore/lost-device، الأجهزة)، large-company settlement OPEN (GET2201 نجح سابقًا؛ PATCH/recovery ما زالا2000 ولا يوجد job)، complex financial conflicts OPEN رغم إصلاح عقد الفاتورة؛ client signed reversals ما زالت غير مدعومة. server from clean Git VERIFIED للمصدر4b84634 والنشر5889a64c ضمن النطاق المتوافق أدناه. Windows FIXED_NOT_VERIFIED: manual2.6.12→local2.6.14 سابقًا ليس in-app upgrade.
+
+Windows الحالي مثبت2.6.14. مهارة computer-use فشلت في تنشيط النافذة المصغرة: failed to activate captured window بعد إعادة اختيارها وإعادة المحاولة. توقف إدخال UI وطُلب من المالك فتح النافذة، دون تجاوز الحماية أو تثبيت جديد. لا توجد رحلة Windows مالية أو Android جديدة لهذه المتابعة. public binaries/version2.6.14 لم تتغير.
+
+Hosted Quality gates37292310620 للمصدر4b84634 انتهى completed/success؛ تحقق gh run view من headSha المطابق. نتيجة37288225611 ناجحة لرأس التوثيق السابق4f602fc. المراجع التاريخية أدناه لا تتقدم على هذه الفقرة وأي ملحق تحقق أحدث.
+
+النشر الحالي المتحقق: استنساخ GitHub مستقل scratch/production-clean-4b84634 عند HEAD4b8463464368a8cfbb36d105b102f145c229c515 وgit status --porcelain فارغ قبل/بعد البناء؛ npm ci، Web build، production-bundle guard ناجحة. الحزمة scratch/production-clean-4b84634/scratch/production-bundle-Q3PLTI ذات148 ملفًا وmanifest مطابق، وWrangler compiled Worker successfully. المعاينة967a49b2 (qa-2614) نجحت في actual owner UI approval مع sourcePreserved، canonicalPrice12، receiptRecovery ودون pageErrors، ثم نفس الحزمة نشرت إلى production5889a64c. الرحلة نفسها نجحت على https://khodar-pos.pages.dev، وبقيت الكتابات في شركة QA المحددة وأعيد السعر إلى10 في cleanup. فحوص الإنتاج: Web200، health200، unauthenticatedPull401، authenticated owner cash/shifts503 (gate disabled). لا schema migrations أو إصدار Windows/Android أو تغيير رقم2.6.14. هذا يغلق بند إعادة نشر الخادم من Git جديد ضمن نطاقه فقط، لا البنود الخمسة كلها.
+
 ## الحالة المرجعية — 2026-10-05، هوية محلية24h وحماية مصادر الدرج
 
 هذا القسم يتقدم على الأرقام والحالات التاريخية أدناه. المرجع المنشور ما زال2.6.14؛ لا إصدار أو تفعيل درج أو migrations إنتاج في هذه المرحلة. طلب المستخدم هو إكمال البنود الخمسة حتى النشر؛ لم تُغلق كلها بعد، ولا يجوز اعتبار حفظ هذه الشيفرة نشرًا للميزة.
@@ -584,3 +605,11 @@ M ACCOUNTING_AUDIT_PLAN.md
 - آخر مهمة: حماية الدخول المحلي الموقّع ومصادر الدرج وإقرار journal على IndexedDB حقيقية، وإصلاح قائمة التعارضات وبناء حزمة متوافقة من Git نظيف.
 - أول خطوة تالية: اقرأ نتيجة المعاينة/النشر النهائية أعلاه ثم استكمل App provisioning/UI/remount مع24h offline identity؛ لا تعِد تنفيذ primitives المغطاة. تليها recovery/restore/lost-device وcheckpoint/job والعكس المالي ورحلات المنصات قبل إصدار شامل وتفعيل cash.
 - لا كلمات مرور أو قيم secrets/tokens/private keys في هذا التسليم. config الخاصة والتصديرات ومفاتيح التوقيع خارج Git؛ لا تنقلها إلى نموذج آخر أو تطبعها.
+
+## لقطة المتابعة النهائية الملزمة — 2026-10-05، بعد نشر5889a64c
+
+- Current Git HEAD عند التقاط الشيفرة والنشر: 4b8463464368a8cfbb36d105b102f145c229c515. Current branch: main مطابق origin/main. commit التوثيق اللاحق لا يغير الشيفرة المنشورة؛ git rev-parse HEAD يعرض رأس التوثيق النهائي بعد حفظه.
+- git status عند هذه اللقطة: modified AI_HANDOFF_CURRENT.md وdocs/current/FIVE_ITEM_REMEDIATION.md فقط، لا شيفرة غير ملتزمة ولا ملفات staged. هذان الملفان مقصودان في commit التوثيق التالي. تبقى untracked السابقة دون مساس: docs/multi-company-live-ui-audit-2026-10-03.md؛ tests/live-account-plan-probe.mjs؛ tests/live-android-auth-probe.mjs؛ tests/live-auth-resource-probe.mjs؛ tests/live-auth-validation.mjs؛ tests/live-test-provision.mjs. لا تضمها تلقائيًا أو تفترض أنها هذه المتابعة.
+- آخر مهمة: إصلاح عقود إلغاء/تعديل الفاتورة وهوية الجهاز وعودة الإنترنت/انتهاء تصريح الكاشير وحماية proof وقت commit، ثم297 اختبارًا وChrome/CI ونشر Web/server المتوافق من clean Git. المعاينة967a49b2 والإنتاج5889a64c نجحا؛ لا إصدار شامل للبنود الخمسة.
+- أول خطوة للنموذج التالي: لا تعِد إنشاء primitives المغطاة. أكمل App provisioning/واجهة الدخول المحلي وفتح الدرج/remount مع grant24h، ثم backup/restore/lost-device للسجل المشترك قبل أي تفعيل. تسوية الشركات الكبيرة تتطلب checkpoint/job مدقق بدل رفع LIMIT2000، والعكس النقدي يحتاج مسار client موقّع وربط الأصل. رحلة Windows download→install تحتاج نافذة قابلة للتنشيط ومرشح إصدار أعلى موثوق؛ محاولة التنشيط فشلت مرتين وهذه ليست موافقة لتجاوز تحذير أمني. تبقى رحلات Web/Windows/Android المالية مطلوبة قبل التفعيل الشامل.
+- حد الاستخدام: آخر قراءة قبل توثيق النشر87% primary/85% weekly؛ التوقف مقصود بهامش قبل نفاد5h، لا reset أو شراء. افحص الحد قبل بدء متابعة طويلة. لا Password/Secret/Token/Private Key values في هذا الملف؛ الملفات الخاصة ومفاتيح التوقيع وتصديرات D1 خارج Git ولا تُطبع أو تُنقل.
