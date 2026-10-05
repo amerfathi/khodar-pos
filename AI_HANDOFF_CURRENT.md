@@ -675,3 +675,11 @@ M ACCOUNTING_AUDIT_PLAN.md
 - untracked السابقة ليست هذه المهمة: docs/multi-company-live-ui-audit-2026-10-03.md وtests/live-account-plan-probe.mjs وtests/live-android-auth-probe.mjs وtests/live-auth-resource-probe.mjs وtests/live-auth-validation.mjs وtests/live-test-provision.mjs. لا تضفها تلقائيًا.
 - آخر مهمة: تنفيذ واختبار bounded owner replay/recovery وواجهة تقدم صحيحة وbranch proof دون cutoff، ثم توثيق توقف التحكم بالكمبيوتر بواسطة Escape. أول خطوة تالية: اقرأ القسم الأول ثم اختبارات الحدود/races/recovery وfull regression للشيفرة الحالية قبل حفظ Git/QA والنشر؛ لا تعِد إنشاء primitives أو تظن أن302 شهادة للشيفرة الأخيرة. لا تستأنف Computer Use في الجولة الموقوفة.
 - فحص الوثائق لا يطبع أسرارًا. لا Password أو Secret أو Token أو Private Key values في هذا التسليم؛ fixtures الخاصة وD1 exports/OAuth/signing secrets خارج Git. لم تُحذف بيانات أو ملفات؛ اللقطات التاريخية لا تتقدم على القسم الأول.
+
+## آخر لقطة Git الفعلية — بعد QA الحي وحفظ الأدلة، 2026-10-05
+
+- Current Git HEAD عندكتابةهذهاللقطة:e1fcd5d6efd006ef990056fc20d3ad92231e5887؛ Current branch:main؛ مدفوعorigin/main. هذاcommit للأدلة/harness، مصدرQAالمالي2b1c563 unchanged. commitالتوثيق التالي يغيرHEAD؛ استخدمgitrev-parseHEADلتحديده، لا تعتبرSHAداخلملفذاتيهويتهبعدالحفظ.
+- git status عندالقراءة: لاtrackedmodified ولاstaged؛ untrackedالقديمةالمذكورةأعلاهفقط. بعدإضافةهذاالقسم AI_HANDOFF_CURRENT.md وحدهmodifiedإلىcommitالتوثيق. لاشيفرةمنتجغيرcommitted.
+- آخرمهمة: OAuth/backup/0030-only/fresh-GitQA/real2104-sourceownerreview، ثم قياسCPU10/100وتوثيقمانع1102؛ لاproductionpromotionولاcashenableولاnativeinstall. أولخطوة: profilingللدخولوالرفع/التقاطoutcomeلفشل1102واختيارboundedأوprivateDOتنفيذيحافظعلىtenantauthorizationوatomiccommit؛ ثمQAونشرمنSHAمتَحقق. لا تعاودfixtureseedكاملًا أوتمسّمصادره.
+- Hosted37339176463 للأدلةe1fcd5d كانin_progressعندالقراءة، لا تزعمsuccessبلاquery؛ hosted37335989044 للشيفرة2b1c563 وnativeartifact37337156635 succeeded. آخرquota59%5h/94%weekly، weeklyهامشصغيرفحُفظتالتسليموالأدلة؛ ليستقريبةمننفاد5hولمحذفملفات.
+- فحصdocsنجحدونأنماطاعتماد؛ لاPassword/Secret/Token/PrivateKeyvalues. privatefixture/export/CPUmetadataخارجGit، ولمتُحذفبياناتمستخدمينأوتسليماتتاريخية.
