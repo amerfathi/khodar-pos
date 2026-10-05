@@ -17,6 +17,7 @@ import { isIndependentSalesQueue } from './independentSales.js';
 import { INBOUND_REVIEW_KEY } from './atomicStore.js';
 import {replayDrawerJournal} from './cashDrawerJournal.js';
 import {canAccessBranch} from './branchAccess.js';
+import {requestReviewedOperation} from './reviewProgress.js';
 
 const QUEUE_STORAGE_KEY = 'khodar_offline_sync_queue';
 const ACTIVITY_REFRESH_MIN_MS = 5 * 60_000;
@@ -284,12 +285,15 @@ export class CloudflareSyncService {
         const details=await response.json().catch(()=>null);
         if(response.status===409&&details?.error==='Source resolved by company owner; recover reviewed checkpoint'&&
           this.repository&&typeof this.updateHandler==='function'){
-          const recovery=await fetch(`${baseUrl}/api/sync/resolutions`,{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
-            body:JSON.stringify({tenantId,events:queue})});
-          const proposal=await recovery.json().catch(()=>null);
+          const result=await requestReviewedOperation(()=>fetch(`${baseUrl}/api/sync/resolutions`,{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
+            body:JSON.stringify({tenantId,events:queue,checkpointProtocol:2})}),{isCurrent:()=>token===getSessionToken()&&generation===this.generation,
+            onProgress:data=>this.notifyListeners('review_validating',{processedCount:data.processedCount,totalCount:data.totalCount})});
+          if(!result)return false;
+          const {response:recovery,data:proposal}=result;
           if(token!==getSessionToken()||generation!==this.generation)return false;
           if(!recovery.ok||!proposal?.success)throw Object.assign(new Error('تعذر استرداد التسوية؛ حُفظت الحركات المحلية دون تغيير'),{nonRetryable:recovery.status===409});
           if(!proposal.ready){
+            if(recovery.status===202){this.schedulePendingRetry();return false;}
             const unresolved=new Set(proposal.unresolvedEventIds||[]),remaining=queue.filter(event=>unresolved.has(event.id));
             if(remaining.length){
               await fetch(`${baseUrl}/api/sync/conflicts`,{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
@@ -298,7 +302,7 @@ export class CloudflareSyncService {
             }
             throw Object.assign(new Error('توجد حركات مترابطة لم يعتمدها المالك بعد؛ لم تتغير البيانات المحلية'),{nonRetryable:true});
           }
-          if(proposal.protocol!=='owner-reviewed-ledger-v1'||proposal.tenantId!==tenantId||JSON.stringify(proposal.queue)!==JSON.stringify(queue))throw new Error('Invalid reviewed recovery receipt');
+          if(!['owner-reviewed-ledger-v1','owner-reviewed-checkpoint-v2'].includes(proposal.protocol)||proposal.tenantId!==tenantId||JSON.stringify(proposal.queue)!==JSON.stringify(queue))throw new Error('Invalid reviewed recovery receipt');
           await this.updateHandler(proposal.history,proposal.nextCursor,proposal.conflictHeads,true,proposal);
           if(token!==getSessionToken()||generation!==this.generation)return false;
           this.lastError=null;this.retryDelayMs=5_000;

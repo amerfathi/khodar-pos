@@ -2,6 +2,7 @@ import { openShift, postCashEvent, closeShift } from './cashShiftEngine.js';
 import { assertVerifiedOfflineGrant } from './verifiedOfflineGrant.js';
 import {signOfflineCashEvent} from './offlineUnlock.js';
 import {cashMovementFromRecord} from './cashMovement.js';
+import {assertInvoiceVoidPayload,assertInvoiceUpdatePayload} from './invoiceMutationPolicy.js';
 
 const SHIFT_KEY = 'khodar_pos_cash_shifts_v1';
 const part = value => encodeURIComponent(value);
@@ -106,22 +107,34 @@ export async function commitDrawerFinancialAction(store, durable, locks, context
       const created = snapshot.outbox.filter(event=>!known.has(event.id));
       const cashSources = [];
       for (const event of created.filter(event=>cashTypes.has(event.entityType))) {
-        if (event.action !== 'create') throw new Error('عكس الحركة المالية يحتاج تسوية درج مدعومة؛ لم تُحفظ العملية');
-        const amount = cashMovementFromRecord(event.entityType,event.payload);
-        if (amount !== 0) cashSources.push({event,amount});
+        let amount,entryId=`cash:${event.payload.clientTransactionId||event.payload.id}`;
+        if(event.entityType==='invoice'&&event.action==='void'){
+          assertInvoiceVoidPayload(event.payload);
+          const original=store.value.state.khodar_pos_invoices_v3?.find(row=>row.id===event.entityId);
+          if(!original||original.status==='voided'||original.branchId!==scope.branchId)
+            throw new Error('أصل الفاتورة غير صالح لعكس النقد؛ لم تُحفظ العملية');
+          amount=-cashMovementFromRecord('invoice',original);
+          entryId=`cash:void:${original.clientTransactionId||original.id}`;
+        }else if(event.entityType==='invoice'&&event.action==='update'){
+          assertInvoiceUpdatePayload(event.payload);amount=0;
+        }else{
+          if (event.action !== 'create') throw new Error('عكس الحركة المالية يحتاج تسوية درج مدعومة؛ لم تُحفظ العملية');
+          amount = cashMovementFromRecord(event.entityType,event.payload);
+        }
+        if (amount !== 0) cashSources.push({event,amount,entryId});
       }
       if (cashSources.length > 1) throw new Error('مصادر نقدية متعددة غير مدعومة في معاملة الدرج');
       const cashEvents = created.filter(event=>event.entityType==='cash_shift');
       let expected = owned;
       if (cashSources.length) {
-        const {event,amount} = cashSources[0];
+        const {event,amount,entryId} = cashSources[0];
         const nextShift = snapshot.state[SHIFT_KEY]?.find(row=>row.id===shift.id);
         const entry = nextShift?.events?.at(-1);
         if (event.tenantId!==scope.tenantId || event.branchId!==scope.branchId ||
             event.payload.cashShiftId!==shift.id || cashEvents.length!==1 ||
             cashEvents[0].entityId!==shift.id || cashEvents[0].action!=='update' ||
             cashEvents[0].groupId!==event.groupId || !entry ||
-            entry.id!==`cash:${event.payload.clientTransactionId||event.payload.id}` || entry.amount!==amount)
+            entry.id!==entryId || entry.amount!==amount)
           throw new Error('مصدر الحركة لا يطابق حركة الدرج؛ لم تُحفظ العملية');
         expected = postCashEvent(owned,{shiftId:shift.id,id:entry.id,actorId:store.user.id,
           deviceId:context.deviceId,amount,at:entry.at});

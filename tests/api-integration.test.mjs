@@ -279,6 +279,175 @@ test('owner executes a reviewed update atomically; fresh heads, authenticated re
     .bind('missing-review').run(),/SYNC_REVIEW_STALE/);
 });
 
+test('large-company owner decisions and recovery resume bounded replay without accepting a partial checkpoint',async()=>{
+  const token=await login('LARGE','large-owner',pass,'large-decision-fixture');
+  const listing=await (await call('/api/sync/conflicts?tenantId=LARGE','GET',undefined,token)).json();
+  const item=listing.reviews.find(row=>row.proposedEvents[0].id==='large-local');
+  const input={tenantId:'LARGE',reviewId:item.id,choice:'server',execute:true,expectedHeads:item.heads,checkpointProtocol:2};
+  assert.equal((await call('/api/sync/conflicts','PATCH',{...input,checkpointProtocol:undefined},token)).status,409);
+  let response=await call('/api/sync/conflicts','PATCH',input,token);
+  assert.equal(response.status,202,await response.clone().text());
+  let progress=await response.json();assert.equal(progress.posted,false);assert.equal(progress.status,'validating');
+  assert.ok(progress.processedCount>0&&progress.processedCount<=200);
+  assert.equal(await db.prepare('SELECT review_id FROM sync_review_resolutions WHERE review_id=?').bind(item.id).first(),null);
+  for(let step=0;step<30&&response.status===202;step++)response=await call('/api/sync/conflicts','PATCH',input,token);
+  assert.equal(response.status,200,await response.clone().text());
+  const result=await response.json();assert.equal(result.posted,true);
+  assert.deepEqual((await (await call('/api/sync/conflicts','PATCH',input,token)).json()).receipt,result.receipt);
+  const queue=item.proposedEvents;
+  response=await call('/api/sync/resolutions','POST',{tenantId:'LARGE',events:queue,checkpointProtocol:2},token);
+  assert.equal(response.status,202,await response.clone().text());
+  progress=await response.json();assert.equal(progress.ready,false);assert.equal(progress.status,'validating');
+  assert.equal(progress.checkpoint,undefined);
+  assert.equal((await call('/api/sync/resolutions','POST',{tenantId:'LARGE',events:queue},b)).status,403);
+  for(let step=0;step<30&&response.status===202;step++)response=await call('/api/sync/resolutions','POST',{tenantId:'LARGE',events:queue,checkpointProtocol:2},token);
+  assert.equal(response.status,200,await response.clone().text());
+  const recovered=await response.json();assert.equal(recovered.ready,true);
+  assert.equal(recovered.protocol,'owner-reviewed-checkpoint-v2');
+  assert.equal(recovered.completeHistory,false);
+  assert.equal(recovered.validatedThroughCursor,recovered.nextCursor);
+  assert.equal(recovered.checkpoint.products.find(row=>row.id==='large-product').name,'Server');
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM sync_events_v2 WHERE tenant_id='LARGE'").first()).n,2201);
+  assert.equal(recovered.history.length,0);
+});
+
+test('large-company reviewed financial checkpoint rejects stale decisions and keeps exact stock, debt and replacement proof',async()=>{
+  const {tenantId,branchId,token}=await isolatedOwner('LARGEFIN');
+  const source=(id,type,payload,action='create')=>({id,tenantId,branchId,entityType:type,entityId:payload.id,action,payload:{tenantId,branchId,...payload}});
+  const product=source('lf-product','product',{id:'lf-p',name:'Carrot',currentStockKg:20,branchStock:{[branchId]:20},costPerKg:2,defaultPricePerKg:5});
+  const customer=source('lf-customer','customer',{id:'lf-c',name:'Customer',balance:0});
+  const invoice=source('lf-sale','invoice',{id:'lf-i',customerId:'lf-c',status:'active',finalTotal:15,paidAmount:0,remainingDebt:15,
+    items:[{productId:'lf-p',netWeight:3,pricePerKg:5}]});
+  const receipt=source('lf-payment','customer_payment',{id:'lf-r',customerId:'lf-c',amount:5,paymentMethod:'cash'});
+  assert.equal((await call('/api/sync/push','POST',{tenantId,events:[product,customer,invoice,receipt]},token)).status,200);
+  let state=await (await call('/api/sync/pull?tenantId='+tenantId,'GET',undefined,token)).json();
+  await db.prepare(`WITH RECURSIVE n(value) AS(SELECT 1 UNION ALL SELECT value+1 FROM n WHERE value<2050)
+    INSERT INTO sync_events_v2(id,tenant_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp)
+    SELECT 'lf-history-'||value,?,'settings','settings','update','{}',0,0 FROM n`).bind(tenantId).run();
+  const proposed=attachConflictPreconditions(source('lf-local','product',{id:'lf-p',defaultPricePerKg:9},'update'),{...state.conflictHeads});
+  const remote=attachConflictPreconditions({...proposed,id:'lf-remote',payload:{...proposed.payload,defaultPricePerKg:8}},{...state.conflictHeads});
+  assert.equal((await call('/api/sync/push','POST',{tenantId,events:[remote]},token)).status,200);
+  const review=await (await call('/api/sync/conflicts','POST',{tenantId,events:[proposed]},token)).json();
+  const load=async()=>(await (await call('/api/sync/conflicts?tenantId='+tenantId,'GET',undefined,token)).json()).reviews.find(row=>row.id===review.reviewId);
+  let item=await load(),input={tenantId,reviewId:review.reviewId,choice:'local',execute:true,checkpointProtocol:2,expectedHeads:item.heads};
+  assert.equal((await call('/api/sync/conflicts','PATCH',input,token)).status,202);
+  state={conflictHeads:item.heads};
+  const newer=attachConflictPreconditions({...remote,id:'lf-newer',payload:{...remote.payload,defaultPricePerKg:7}},{...state.conflictHeads});
+  assert.equal((await call('/api/sync/push','POST',{tenantId,events:[newer]},token)).status,200);
+  assert.equal((await call('/api/sync/conflicts','PATCH',input,token)).status,409);
+  assert.equal(await db.prepare('SELECT review_id FROM sync_review_resolutions WHERE review_id=?').bind(review.reviewId).first(),null);
+  item=await load();input={...input,expectedHeads:item.heads};
+  const concurrent=await Promise.all([call('/api/sync/conflicts','PATCH',input,token),call('/api/sync/conflicts','PATCH',input,token)]);
+  assert.deepEqual(concurrent.map(row=>row.status),[202,202]);
+  let response;
+  for(let step=0;step<30;step++){response=await call('/api/sync/conflicts','PATCH',input,token);if(response.status!==202)break;}
+  assert.equal(response.status,200,await response.clone().text());
+  const resolved=await response.json();assert.equal(resolved.receipt.acceptedEventIds.length,1);
+  const recoveryInput={tenantId,events:[proposed],checkpointProtocol:2};
+  for(let step=0;step<30;step++){response=await call('/api/sync/resolutions','POST',recoveryInput,token);if(response.status!==202)break;}
+  assert.equal(response.status,200,await response.clone().text());
+  const recovered=await response.json();
+  assert.equal(recovered.checkpoint.products[0].currentStockKg,17);
+  assert.equal(recovered.checkpoint.products[0].branchStock[branchId],17);
+  assert.equal(recovered.checkpoint.products[0].defaultPricePerKg,9);
+  assert.equal(recovered.checkpoint.customers[0].balance,10);
+  assert.deepEqual(recovered.history.map(row=>row.id),resolved.receipt.acceptedEventIds);
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM sync_events_v2 WHERE tenant_id=? AND id=?').bind(tenantId,proposed.id).first()).n,0);
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM sync_review_resolutions WHERE tenant_id=?').bind(tenantId).first()).n,1);
+});
+
+test('large-company legacy product proof examines its complete references without a whole-history cutoff',async()=>{
+  const {tenantId,branchId,token}=await isolatedOwner('LARGELEGACY');
+  const payload={id:'large-old-p',name:'Legacy carrot',currentStockKg:20,costPerKg:2};
+  const sale={id:'large-old-i',tenantId,branchId,customerId:'walk_in',status:'active',finalTotal:15,paidAmount:15,remainingDebt:0,
+    items:[{productId:payload.id,netWeight:3,pricePerKg:5}]};
+  for(const {id,type,branch,row} of [{id:'large-old-source',type:'product',branch:null,row:payload},{id:'large-old-parent',type:'invoice',branch:branchId,row:sale}])
+    await db.prepare("INSERT INTO sync_events_v2(id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp) VALUES(?,?,?,?,?,'create',?,1,1)")
+      .bind(id,tenantId,branch,type,row.id,JSON.stringify(row)).run();
+  await db.prepare(`WITH RECURSIVE n(value) AS(SELECT 1 UNION ALL SELECT value+1 FROM n WHERE value<2100)
+    INSERT INTO sync_events_v2(id,tenant_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp)
+    SELECT 'large-old-history-'||value,?,'settings','settings','update','{}',0,0 FROM n`).bind(tenantId).run();
+  const input={tenantId,references:[{parentId:'large-old-parent',productId:payload.id}]};
+  const response=await call('/api/sync/dependencies','POST',input,token);
+  assert.equal(response.status,200,await response.clone().text());
+  const proof=(await response.json()).proofs[0];assert.equal(proof.branchId,branchId);assert.equal(proof.source.branchId,null);
+  assert.equal((await call('/api/sync/dependencies','POST',input,b)).status,403);
+  const update={id:'large-old-new-price',tenantId,branchId,entityType:'product',entityId:payload.id,action:'update',payload:{id:payload.id,defaultPricePerKg:6}};
+  const pushed=await call('/api/sync/push','POST',{tenantId,events:[update]},token);
+  assert.equal(pushed.status,200,await pushed.clone().text());
+  assert.equal((await db.prepare('SELECT branch_id FROM sync_events_v2 WHERE tenant_id=? AND id=?').bind(tenantId,'large-old-source').first()).branch_id,null);
+  const proposed=attachConflictPreconditions({...update,id:'large-old-proposed',payload:{...update.payload,defaultPricePerKg:7}},{});
+  const saved=await (await call('/api/sync/conflicts','POST',{tenantId,events:[proposed]},token)).json();
+  const item=(await (await call('/api/sync/conflicts?tenantId='+tenantId,'GET',undefined,token)).json()).reviews.find(row=>row.id===saved.reviewId);
+  const decision={tenantId,reviewId:item.id,choice:'server',execute:true,expectedHeads:item.heads,checkpointProtocol:2};
+  let settled;
+  for(let step=0;step<30;step++){settled=await call('/api/sync/conflicts','PATCH',decision,token);if(settled.status!==202)break;}
+  assert.equal(settled.status,200,await settled.clone().text());
+  const audited=await db.prepare("SELECT ledger_json FROM sync_review_checkpoint_jobs WHERE tenant_id=? AND status='ready'").bind(tenantId).first();
+  const auditedProduct=JSON.parse(audited.ledger_json).products.find(row=>row.id===payload.id);
+  assert.equal(auditedProduct.branchId,branchId);assert.equal(auditedProduct.currentStockKg,17);assert.equal(auditedProduct.defaultPricePerKg,6);
+  // A foreign-branch reference after the former 2000-source cutoff invalidates
+  // proof: indexed lookup must not silently ignore the rest of the prefix.
+  const second='large-old-second';
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,status) VALUES(?,?,?,'active')").bind(second,tenantId,'Other').run();
+  await db.prepare("INSERT INTO sync_events_v2(id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp) VALUES(?,?,?,'invoice',?,'create',?,1,1)")
+    .bind('large-old-ambiguous',tenantId,second,'large-old-ambiguous',JSON.stringify({...sale,id:'large-old-ambiguous',branchId:second})).run();
+  const ambiguous=await call('/api/sync/dependencies','POST',input,token);
+  assert.equal(ambiguous.status,200);assert.deepEqual((await ambiguous.json()).proofs,[]);
+  const rejected=await call('/api/sync/push','POST',{tenantId,events:[{...update,id:'large-old-invalid-after-proof',conflictPolicyVersion:undefined,preconditions:undefined}]},token);
+  assert.equal(rejected.status,403);assert.equal((await rejected.json()).error,'Entity belongs to another branch');
+  assert.equal(await db.prepare('SELECT id FROM sync_events_v2 WHERE tenant_id=? AND id=?').bind(tenantId,'large-old-invalid-after-proof').first(),null);
+});
+
+test('checkpoint page boundary keeps a three-source stock transfer together and claims reject newly arrived legacy sources',async()=>{
+  const {tenantId,branchId,token}=await isolatedOwner('LARGEGROUP');
+  const second='largegroup-second';
+  await db.prepare("INSERT INTO branches(id,tenant_id,name,status) VALUES(?,?,?,'active')").bind(second,tenantId,'Second').run();
+  const product={id:'lg-product',tenantId,branchId,entityType:'product',entityId:'lg-p',action:'create',
+    payload:{id:'lg-p',tenantId,branchId,name:'Carrot',currentStockKg:20,costPerKg:2,branchStock:{[branchId]:20}}};
+  assert.equal((await call('/api/sync/push','POST',{tenantId,events:[product]},token)).status,200);
+  const fill=async(prefix,n)=>db.prepare(`WITH RECURSIVE n(value) AS(SELECT 1 UNION ALL SELECT value+1 FROM n WHERE value<?)
+    INSERT INTO sync_events_v2(id,tenant_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp)
+    SELECT ?||value,?,'settings','settings','update','{}',0,0 FROM n`).bind(n,prefix,tenantId).run();
+  await fill('lg-before-',198);
+  const transfer=[
+    {...product,id:'lg-from',action:'update',payload:{...product.payload,currentStockKg:17,branchStock:{[branchId]:17}}},
+    {...product,id:'lg-to',branchId:second,entityId:'lg-q',payload:{...product.payload,id:'lg-q',branchId:second,currentStockKg:3,branchStock:{[second]:3}}},
+    {id:'lg-transfer',branchId:null,entityType:'stock_transfer',entityId:'lg-transfer',action:'create',payload:{id:'lg-transfer',tenantId,
+      scopedProducts:true,sourceProductId:'lg-p',destinationProductId:'lg-q',productId:'lg-p',fromBranchId:branchId,toBranchId:second,quantityKg:3}}
+  ];
+  for(const event of transfer)await db.prepare(`INSERT INTO sync_events_v2
+    (id,tenant_id,branch_id,entity_type,entity_id,action,payload_json,client_timestamp,server_timestamp,group_id) VALUES(?,?,?,?,?,?,?,1,1,'lg-atomic')`)
+    .bind(event.id,tenantId,event.branchId,event.entityType,event.entityId,event.action,JSON.stringify(event.payload)).run();
+  await fill('lg-after-',1900);
+  const proposed=attachConflictPreconditions({...product,id:'lg-local',payload:{...product.payload,name:'Local'}},{});
+  const review=await (await call('/api/sync/conflicts','POST',{tenantId,events:[proposed]},token)).json();
+  const item=(await (await call('/api/sync/conflicts?tenantId='+tenantId,'GET',undefined,token)).json()).reviews.find(row=>row.id===review.reviewId);
+  const input={tenantId,reviewId:item.id,choice:'server',execute:true,expectedHeads:item.heads,checkpointProtocol:2};
+  let response=await call('/api/sync/conflicts','PATCH',input,token);
+  assert.equal(response.status,202,await response.clone().text());assert.equal((await response.json()).processedCount,199);
+  let job=await db.prepare('SELECT * FROM sync_review_checkpoint_jobs WHERE tenant_id=?').bind(tenantId).first();
+  assert.equal(JSON.parse(job.ledger_json).products[0].currentStockKg,20);
+  response=await call('/api/sync/conflicts','PATCH',input,token);assert.equal(response.status,202);
+  job=await db.prepare('SELECT * FROM sync_review_checkpoint_jobs WHERE tenant_id=?').bind(tenantId).first();
+  const ledger=JSON.parse(job.ledger_json);
+  assert.equal(ledger.products.find(row=>row.id==='lg-p').currentStockKg,17);
+  assert.equal(ledger.products.find(row=>row.id==='lg-q').currentStockKg,3);assert.equal(ledger.stockTransfers.length,1);
+  for(let step=0;step<30&&response.status===202;step++)response=await call('/api/sync/conflicts','PATCH',input,token);
+  assert.equal(response.status,200,await response.clone().text());
+  job=await db.prepare("SELECT * FROM sync_review_checkpoint_jobs WHERE tenant_id=? AND status='ready'").bind(tenantId).first();
+  // Reuse the fully audited job only in a new pending review. A legacy source
+  // changes MAX(sequence) without touching policy heads: the SQL claim itself
+  // must reject it, not rely on a race-prone application read of those heads.
+  const next={...proposed,id:'lg-next'};
+  const nextReview=await (await call('/api/sync/conflicts','POST',{tenantId,events:[next]},token)).json();
+  await fill('lg-race-',1);
+  await assert.rejects(db.prepare(`INSERT INTO sync_review_resolutions
+    (review_id,tenant_id,decided_by,choice,expected_heads_json,receipt_json) VALUES(?,?,?,'server',?,?)`)
+    .bind(nextReview.reviewId,tenantId,tenantId,JSON.stringify(item.heads),JSON.stringify({checkpointJobId:job.id})).run(),/SYNC_REVIEW_STALE/);
+  assert.equal(await db.prepare('SELECT * FROM sync_review_resolutions WHERE review_id=?').bind(nextReview.reviewId).first(),null);
+});
+
 test('legacy invoice dependency proof is branch-scoped and permits future sales without rewriting its old source',async()=>{
   const token=await login('REVIEW','review-owner',pass,'review-legacy-owner'),cashier=await login('REVIEW','review-cashier',pass,'review-legacy-cashier');
   const tenantId='REVIEW',branchId='review-main',payload={id:'legacy-proof-product',name:'Legacy carrot',currentStockKg:12,costPerKg:3};
@@ -837,7 +1006,7 @@ test('signed drawer replay preserves original cashiers across account handover a
   assert.equal((await call('/api/cash/replay','POST',body,second)).status,403);
 });
 
-test('actual hook drawer expense reaches real API and survives lost local acknowledgement',async()=>{
+test('actual hook drawer sale, signed void and expense reach real API and survive lost local acknowledgement',async()=>{
   await db.prepare("INSERT INTO tenants(id,store_code,company_name,username,password_hash,status,role) VALUES('HOOKCASH','HOOKCASH','Hook cash','hookowner',?,'active','company_owner')").bind(await hashPassword(pass)).run();
   await db.prepare("INSERT INTO branches(id,tenant_id,name,is_main,status) VALUES('hook-main','HOOKCASH','Main',1,'active')").run();
   const token=await login('HOOKCASH','hookowner'),deviceId='hook-device',proof=deviceProof();
@@ -889,6 +1058,12 @@ test('actual hook drawer expense reaches real API and survives lost local acknow
     await act(async()=>{await app.openShift({id:'hook-shift',tenantId:'HOOKCASH',branchId:'hook-main',drawerId:'hook-drawer',actorId:'HOOKCASH',
       offlineDeviceId:deviceId,openingCash:100,timeZone:'Asia/Riyadh',at:new Date().toISOString()});});
     await act(async()=>{await app.addExpense({id:'hook-expense',title:'Rent',amount:12,paymentMethod:'cash'});});
+    await act(async()=>{await app.addProduct({id:'hook-product',name:'Carrot',currentStockKg:10,costPerKg:2,defaultPricePerKg:3});});
+    await act(async()=>{await app.saveInvoice({id:'hook-invoice',customerId:'walk_in',items:[{productId:'hook-product',netWeight:2,pricePerKg:3}],
+      saleType:'cash',paymentMethod:'cash',paidAmount:6,finalTotal:6,remainingDebt:0});});
+    assert.equal(app.products.find(row=>row.id==='hook-product').currentStockKg,8);
+    await act(async()=>{await app.voidInvoice('hook-invoice');});
+    assert.equal(app.products.find(row=>row.id==='hook-product').currentStockKg,10);
     await act(async()=>{await app.closeShift({shiftId:'hook-shift',actorId:'HOOKCASH',deviceId,countedCash:88,at:new Date().toISOString()});});
     globalThis.fetch=(url,init)=>{const target=new URL(url);return mf.dispatchFetch('https://test.invalid'+target.pathname+target.search,init);};
     cloudflareSync.isOnline=true;fail=true;
@@ -900,7 +1075,11 @@ test('actual hook drawer expense reaches real API and survives lost local acknow
     assert.equal(cloudflareSync.repository.current.outbox.length,0);
     const shift=await db.prepare("SELECT status,expected_cash_cents,counted_cash_cents FROM cash_shifts WHERE id='hook-shift'").first();
     assert.deepEqual(shift,{status:'closed',expected_cash_cents:8800,counted_cash_cents:8800});
-    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM cash_shift_movements WHERE tenant_id='HOOKCASH'").first()).n,1);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM cash_shift_movements WHERE tenant_id='HOOKCASH'").first()).n,3);
+    const reversed=await db.prepare(`SELECT reversal.amount_cents,original.amount_cents original_cents FROM cash_shift_movements reversal
+      JOIN cash_shift_movements original ON original.tenant_id=reversal.tenant_id AND original.source_event_id=reversal.reverses_source_event_id
+      WHERE reversal.tenant_id='HOOKCASH'`).first();
+    assert.deepEqual(reversed,{amount_cents:-600,original_cents:600});
     assert.equal(app.expenses.length,1);
   } finally {
     await act(async()=>{root?.unmount();});cloudflareSync.stopAutoSync();

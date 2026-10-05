@@ -889,7 +889,8 @@ export class AtomicStore {
     for (const event of events) {
       if (!event?.id || event.tenantId !== this.user.tenantId) throw new Error('Inbound tenant or identity mismatch');
       if (event.action === 'create' && event.payload?.id !== event.entityId) throw new Error('Inbound create identity mismatch');
-      if (this.draft.applied[event.id]) continue;
+      if (this.draft.applied[event.id] || (Number.isSafeInteger(event.sequence) &&
+          event.sequence<=Number(this.draft.state.braka_reviewed_cursor_fence_v1||0))) continue;
       if (cursor === this.draft.cursor) throw new Error('New inbound event requires a newer sync cursor');
       // Pre-policy history remains readable during upgrade. The first v1 event
       // starts the causal chain; thereafter missing policy is always rejected.
@@ -938,7 +939,8 @@ export class AtomicStore {
     const known = new Map(pending.flatMap(group => group.events.map(event => [event.id,event])));
     const groups = [...pending];
     for (const event of events) {
-      if (previousApplied[event.id]) continue;
+      if (previousApplied[event.id] || (Number.isSafeInteger(event.sequence) &&
+          event.sequence<=Number(this.draft.state.braka_reviewed_cursor_fence_v1||0))) continue;
       if (known.has(event.id)) {
         if (JSON.stringify(known.get(event.id)) !== JSON.stringify(event)) throw new Error('Inbound retained identity changed');
         continue;
@@ -1050,7 +1052,9 @@ export class AtomicStore {
   }
   async installReviewedResolution(proposal){
     if(this.pendingCommit||this.draft)throw new Error('Reviewed checkpoint writer busy');
-    if(proposal?.protocol!=='owner-reviewed-ledger-v1'||proposal.tenantId!==this.user.tenantId||proposal.completeHistory!==true||
+    const paginated=proposal?.protocol==='owner-reviewed-checkpoint-v2';
+    if((paginated?(proposal.completeHistory!==false||proposal.validatedThroughCursor!==proposal.nextCursor||!proposal.checkpoint):
+      (proposal?.protocol!=='owner-reviewed-ledger-v1'||proposal.completeHistory!==true))||proposal.tenantId!==this.user.tenantId||
       JSON.stringify(proposal.queue)!==JSON.stringify(this.value.outbox)||!this.value.outbox.length)
       throw new Error('Pending queue changed during reviewed recovery');
     if(!Number.isSafeInteger(proposal.nextCursor)||proposal.nextCursor<this.value.cursor||!Array.isArray(proposal.history)||
@@ -1074,6 +1078,7 @@ export class AtomicStore {
     if(!proposal.conflictHeads||typeof proposal.conflictHeads!=='object'||Array.isArray(proposal.conflictHeads)||
       Object.values(proposal.conflictHeads).some(value=>value!==null&&(typeof value!=='string'||!value)))throw new Error('Invalid reviewed conflict heads');
     state[SYNC_HEADS_STATE_KEY]=clone(proposal.conflictHeads);state[INBOUND_REVIEW_KEY]=[];
+    if(paginated)state.braka_reviewed_cursor_fence_v1=proposal.nextCursor;
     if(selected==='all'&&canAccessBranch(this.accessUser,'all'))state.khodar_pos_active_branch_id_v1='all';
     const original=clone(this.value);
     // Previous archives are kept once, not recursively duplicated in every

@@ -4,7 +4,8 @@ import { canSync, validateTenantPayload } from '../../_lib/syncPolicy.js';
 import { canAccessBranch } from '../../../src/services/branchAccess.js';
 import { conflictKeysForEvent } from '../../../src/services/syncConflictPolicy.js';
 import { attachConflictPreconditions } from '../../../src/services/syncConflictPolicy.js';
-import { readReviewSnapshot, readReviewEvidence, resolutionStatements } from '../../_lib/reviewResolution.js';
+import { readReviewEvidence, resolutionStatements } from '../../_lib/reviewResolution.js';
+import { readAuditedReview } from '../../_lib/reviewCheckpoint.js';
 import { replayReviewedLedger, reviewedLedgerState } from '../../../src/services/reviewLedgerReplay.js';
 import { onRequestPost as pushEvents } from './push.js';
 export const onRequestOptions = options;
@@ -75,7 +76,7 @@ export async function onRequestGet({request,env}) {
 export async function onRequestPatch({request,env}) {
   const auth=await authenticateRequest(request,env);if(auth.error)return auth.error;
   try {
-    const {tenantId,reviewId,choice,execute=false,expectedHeads}=await readJson(request,256*1024);
+    const {tenantId,reviewId,choice,execute=false,expectedHeads,checkpointProtocol}=await readJson(request,256*1024);
     const denied=requireTenant(auth,tenantId);if(denied)return denied;
     if(auth.principal.type!=='tenant'||!['company_owner','super_admin'].includes(auth.principal.role))return json({success:false,error:'Company owner review required'},403);
     if(typeof reviewId!=='string'||reviewId.length>128||!['local','server'].includes(choice))return badRequest('Invalid review decision');
@@ -84,9 +85,10 @@ export async function onRequestPatch({request,env}) {
       if(resolved)return resolved.choice===choice?json({success:true,choice,posted:true,status:'resolved',receipt:JSON.parse(resolved.receipt_json)}):json({success:false,error:'Decision already executed'},409);
       const row=await env.DB.prepare("SELECT proposed_json FROM sync_conflict_reviews WHERE id=? AND tenant_id=? AND status='pending'").bind(reviewId,tenantId).first();
       if(!row||!expectedHeads||typeof expectedHeads!=='object'||Array.isArray(expectedHeads))return badRequest('Review snapshot required');
-      const snapshot=await readReviewSnapshot(env,tenantId);
+      const snapshot=await readAuditedReview(env,tenantId,auth.principal.id,JSON.stringify(['decision',reviewId,choice,expectedHeads]),checkpointProtocol);
       const normalize=heads=>JSON.stringify(Object.entries(heads).sort(([a],[b])=>a.localeCompare(b)));
       if(normalize(expectedHeads)!==normalize(snapshot.heads))return json({success:false,error:'Review changed; refresh before deciding'},409);
+      if(!snapshot.ready)return json({success:true,posted:false,status:'validating',processedCount:snapshot.processedCount,totalCount:snapshot.totalCount},202);
       const events=JSON.parse(row.proposed_json),heads={...snapshot.heads},groups=new Map();
       const replacements=choice==='local'?events.map((event,index)=>{
         if(event.groupId&&!groups.has(event.groupId))groups.set(event.groupId,crypto.randomUUID());
@@ -96,9 +98,10 @@ export async function onRequestPatch({request,env}) {
       // Validate full financial replay before any acceptance. Unsupported old
       // records block review, retaining every source rather than guessing.
       const history=[...snapshot.history,...replacements.map((event,index)=>({...event,sequence:snapshot.cursor+index+1}))];
-      const ledger=replayReviewedLedger(history,tenantId,{branches:snapshot.branches});
+      const ledger=replayReviewedLedger(history,tenantId,{branches:snapshot.branches,checkpoint:snapshot.ledger||null});
       reviewedLedgerState(ledger,tenantId,snapshot.cursor,snapshot.branches[0]?.id);
-      const receipt={tenantId,reviewId,choice,events,acceptedEventIds:replacements.map(event=>event.id)};
+      const receipt={tenantId,reviewId,choice,events,acceptedEventIds:replacements.map(event=>event.id),
+        ...(snapshot.jobId?{checkpointJobId:snapshot.jobId}:{})};
       const commit={tenantId,reviewId,choice,actorId:auth.principal.id,heads:snapshot.heads,receipt};
       if(replacements.length){
         const posted=await pushEvents({request:new Request(request.url,{method:'POST',headers:request.headers,

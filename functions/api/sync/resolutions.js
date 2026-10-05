@@ -2,7 +2,8 @@ import { authenticateRequest, requireTenant } from '../../_lib/auth.js';
 import { badRequest,json,options,readJson } from '../../_lib/http.js';
 import { canSync,validateTenantPayload } from '../../_lib/syncPolicy.js';
 import { canAccessBranch } from '../../../src/services/branchAccess.js';
-import { readReviewSnapshot } from '../../_lib/reviewResolution.js';
+import { sourceEvent } from '../../_lib/reviewResolution.js';
+import { readAuditedReview } from '../../_lib/reviewCheckpoint.js';
 import { replayReviewedLedger,reviewedLedgerState } from '../../../src/services/reviewLedgerReplay.js';
 import { INITIAL_SETTINGS } from '../../../src/data/initialData.js';
 export const onRequestOptions=options;
@@ -13,7 +14,7 @@ const types={products:'product',customers:'customer',suppliers:'supplier',invoic
 export async function onRequestPost({request,env}){
   const auth=await authenticateRequest(request,env);if(auth.error)return auth.error;
   try{
-    const {tenantId,events}=await readJson(request,256*1024),denied=requireTenant(auth,tenantId);if(denied)return denied;
+    const {tenantId,events,checkpointProtocol}=await readJson(request,256*1024),denied=requireTenant(auth,tenantId);if(denied)return denied;
     if(!Array.isArray(events)||!events.length||events.length>1000||new Set(events.map(event=>event.id)).size!==events.length)return badRequest('Invalid recovery queue');
     for(const event of events){
       if(event.tenantId!==tenantId||!canAccessBranch(auth.principal,event.branchId)||!canSync(auth.principal,event.entityType,event.action))return json({success:false,error:'Recovery scope denied'},403);
@@ -33,9 +34,16 @@ export async function onRequestPost({request,env}){
       receipt.events.forEach(event=>covered.add(event.id));receipts.push(receipt);
     }
     if(covered.size!==events.length)return json({success:true,ready:false,unresolvedEventIds:events.filter(event=>!covered.has(event.id)).map(event=>event.id)});
-    const snapshot=await readReviewSnapshot(env,tenantId);
-    const ledger=replayReviewedLedger(snapshot.history,tenantId,{branches:snapshot.branches});
+    const snapshot=await readAuditedReview(env,tenantId,auth.principal.id,JSON.stringify(['recovery',events,receipts.map(row=>row.reviewId)]),checkpointProtocol);
+    if(!snapshot.ready)return json({success:true,ready:false,status:'validating',processedCount:snapshot.processedCount,totalCount:snapshot.totalCount},202);
+    const ledger=snapshot.ledger||replayReviewedLedger(snapshot.history,tenantId,{branches:snapshot.branches});
     reviewedLedgerState(ledger,tenantId,snapshot.cursor,snapshot.branches[0]?.id);
+    if(snapshot.jobId){
+      const proofs=await env.DB.prepare(`SELECT * FROM sync_events_v2 WHERE tenant_id=? AND sequence<=?
+        AND id IN(SELECT value FROM json_each(?)) ORDER BY sequence`)
+        .bind(tenantId,snapshot.cursor,JSON.stringify(receipts.flatMap(row=>row.acceptedEventIds))).all();
+      snapshot.history=proofs.results.map(sourceEvent);
+    }
     // Calculate from the complete tenant ledger server-side, then redact before
     // transmitting. Hidden purchases must not produce incorrect stock totals.
     ledger.branches=ledger.branches.filter(row=>canAccessBranch(auth.principal,row.id));
@@ -49,7 +57,8 @@ export async function onRequestPost({request,env}){
     // can omit financial relations the cashier is not permitted to read.
     const history=snapshot.history.filter(event=>canSync(auth.principal,event.entityType)&&
       (event.branchId?canAccessBranch(auth.principal,event.branchId):auth.principal.branchIds?.includes('all')));
-    return json({success:true,ready:true,protocol:'owner-reviewed-ledger-v1',tenantId,completeHistory:true,
+    return json({success:true,ready:true,protocol:snapshot.jobId?'owner-reviewed-checkpoint-v2':'owner-reviewed-ledger-v1',tenantId,
+      completeHistory:!snapshot.jobId,...(snapshot.jobId?{validatedThroughCursor:snapshot.cursor}:{ }),
       checkpoint:ledger,history,branches:ledger.branches,queue:events,receipts,nextCursor:snapshot.cursor,conflictHeads:snapshot.heads});
   }catch{return json({success:false,error:'Recovery cannot safely replay complete history; local sources retained'},409);}
 }

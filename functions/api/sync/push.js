@@ -5,8 +5,8 @@ import { conflictKeysForEvent } from '../../../src/services/syncConflictPolicy.j
 import { canAccessBranch } from '../../../src/services/branchAccess.js';
 import { cashMovementFromRecord } from '../../../src/services/cashMovement.js';
 import { accountingDate } from '../../../src/services/cashShiftEngine.js';
-import { resolutionStatements,readReviewSnapshot } from '../../_lib/reviewResolution.js';
-import { proveLegacyProduct } from '../../../src/services/legacyProductProof.js';
+import { resolutionStatements } from '../../_lib/reviewResolution.js';
+import { readLegacyProductProof } from '../../_lib/legacyProductReference.js';
 import { cashReplayEntry } from '../../_lib/cashReplay.js';
 import { assertInvoiceVoidPayload, assertInvoiceUpdatePayload } from '../../../src/services/invoiceMutationPolicy.js';
 
@@ -33,7 +33,6 @@ export async function onRequestPost({ request, env, reviewCommit = null, cashRep
     const statements = [];
     const creatingBranches = new Set();
     const entityBranches = new Map();
-    let legacyHistory;
     const pendingCashCreates = new Map();
     const pendingCashReversals = new Set();
     const replayShifts = new Map();
@@ -53,9 +52,8 @@ export async function onRequestPost({ request, env, reviewCommit = null, cashRep
         .bind(tenantId, type, id).first();
       let result = row ? row.branch_id : undefined;
       if(type==='product'&&result===null){
-        legacyHistory??=(await readReviewSnapshot(env,tenantId)).history;
-        const parent=legacyHistory.find(event=>event.entityType==='invoice'&&event.action==='create'&&event.payload.items?.some(item=>item.productId===id));
-        const proof=parent&&proveLegacyProduct(legacyHistory,parent.id,id);
+        const revision=await env.DB.prepare('SELECT COALESCE(MAX(sequence),0) cursor FROM sync_events_v2 WHERE tenant_id=?').bind(tenantId).first();
+        const proof=await readLegacyProductProof(env,tenantId,id,revision.cursor);
         if(proof)result=proof.branchId;
       }
       entityBranches.set(key, result);

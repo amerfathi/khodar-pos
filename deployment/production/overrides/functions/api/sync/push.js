@@ -3,8 +3,8 @@ import { badRequest, json, options, readJson } from '../../_lib/http.js';
 import { canSync, validateTenantPayload } from '../../_lib/syncPolicy.js';
 import { conflictKeysForEvent } from '../../../src/services/syncConflictPolicy.js';
 import { canAccessBranch } from '../../../src/services/branchAccess.js';
-import { resolutionStatements,readReviewSnapshot } from '../../_lib/reviewResolution.js';
-import { proveLegacyProduct } from '../../../src/services/legacyProductProof.js';
+import { resolutionStatements } from '../../_lib/reviewResolution.js';
+import { readLegacyProductProof } from '../../_lib/legacyProductReference.js';
 import { assertInvoiceVoidPayload, assertInvoiceUpdatePayload } from '../../../src/services/invoiceMutationPolicy.js';
 
 export const onRequestOptions = options;
@@ -27,7 +27,6 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
     const statements = [];
     const creatingBranches = new Set();
     const entityBranches = new Map();
-    let legacyHistory;
     const knownEntityBranch = async (type, id) => {
       const key = `${type}:${id}`;
       if (entityBranches.has(key)) return entityBranches.get(key);
@@ -35,9 +34,8 @@ export async function onRequestPost({ request, env, reviewCommit = null }) {
         .bind(tenantId, type, id).first();
       let result = row ? row.branch_id : undefined;
       if(type==='product'&&result===null){
-        legacyHistory??=(await readReviewSnapshot(env,tenantId)).history;
-        const parent=legacyHistory.find(event=>event.entityType==='invoice'&&event.action==='create'&&event.payload.items?.some(item=>item.productId===id));
-        const proof=parent&&proveLegacyProduct(legacyHistory,parent.id,id);
+        const revision=await env.DB.prepare('SELECT COALESCE(MAX(sequence),0) cursor FROM sync_events_v2 WHERE tenant_id=?').bind(tenantId).first();
+        const proof=await readLegacyProductProof(env,tenantId,id,revision.cursor);
         if(proof)result=proof.branchId;
       }
       entityBranches.set(key, result);

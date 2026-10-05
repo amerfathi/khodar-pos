@@ -17,6 +17,15 @@ test('review replay recomputes actual inventory/debt from accepted sources, pres
   assert.deepEqual(replayReviewedLedger(history,'A'),result);
   assert.equal(JSON.stringify(history),original);
 });
+
+test('server checkpoint continuation preserves inventory and debt across replay batches',()=>{
+  const seed=replayReviewedLedger(history.slice(0,2),'A');
+  const before=JSON.stringify(seed);
+  const continued=replayReviewedLedger(history.slice(2),'A',{checkpoint:seed});
+  assert.deepEqual(continued,replayReviewedLedger(history,'A'));
+  assert.equal(JSON.stringify(seed),before);
+  assert.throws(()=>replayReviewedLedger([history[0]],'A',{checkpoint:seed}),/duplicate/);
+});
 test('void replay reverses a sale exactly once and preserves the receipt source',()=>{
   const result=replayReviewedLedger([...history,event('v0','invoice',{id:'i',status:'voided'},'void')],'A');
   assert.equal(result.products[0].currentStockKg,20);

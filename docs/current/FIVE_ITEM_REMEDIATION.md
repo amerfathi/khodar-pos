@@ -1,5 +1,21 @@
 # Five-item remediation checkpoint — 2026-10-04
 
+## Latest resumed verification — 2026-10-05
+
+Local tests additionally prove the200-source boundary does not split a3-source transfer, SQL final claim rejects a new legacy source even without head changes, actual sync recovery retains the queue on storage failure/account switch, and Chrome restart preserves v2 checkpoint/archive/fence without duplicate replay. Large legacy replay and a later foreign-branch reference are covered. Full suite305 tests passes before the final expanded hook/API fixture, which passes separately. Lint/full/core typecheck/build/docs/compatibility pass; hosted CI/live publication remain next.
+
+Signed invoice void now works in the staged actual hook and paired journal: derives the negative amount from the committed original, keeps sale money unchanged, rolls back storage failure and prevents duplicate reversal. Actual hook→sync→API/D1 checks100-12+6-6=88 with original/reversal linkage and lost-ACK retry. Notes-only updates do not move cash. This does not enable drawers or close all financial operations/device/backup recovery requirements. Windows currently opens and navigates updates, but2.6.14 has no higher test target yet; in-app upgrade remains unverified.
+
+Cloudflare OAuth was renewed by the owner after7403/10000; private pre-migration D1 export438770bytes succeeded. Remote0030 and cash0027/28/29 are not yet applied. Next: exact committed CI,0030-only with registry, fresh-Git QA and disposable>2100-source live review, then compatible production. No immutable native asset replacement or cash gate change.
+
+## Latest uncommitted continuation — 2026-10-05, after bb6a336
+
+This supersedes historical pending-limit details below, not the production gates. Local bounded D1 checkpoint jobs process up to200 sources/request without splitting groups; owner choice/recovery >2000 now pass isolated workerd/D1 fixtures, with stale-head rejection, stock17/debt10, original preservation and one immutable replacement/receipt. HTTP202 is progress, never posting/ACK; UI waits, sync recovery retains queues until durable install, and v2 installs a covered-cursor fence. Explicit checkpointProtocol2 protects old clients. Migration0030 has no cash dependency but is NOT remotely applied; new helper/source changes are uncommitted and unpublished.
+
+Legacy product branch proof now uses identity reads and full-prefix SQL existence checks rather than a2000-history cap. A2100+ fixture fails before dependency/push repairs and succeeds afterward without modifying the old branch-null source. Production override remains cash-disabled with a reviewed source pin. Latest lint/typecheck/compatibility/Web build pass; chunk warning remains. Full302-test run passed BEFORE the final legacy changes and must be rerun; no new hosted/browser/native certification. A selectively run historical REVIEW test failed because its setup test was excluded by name-pattern, not because authentication regressed.
+
+Windows2.6.14 window activation now works. No installer, login or business write was attempted. User physically pressed Escape; Computer Use stopped, and no further Computer Use in that turn is permitted. Current handoff records exact dirty/new files and next verification. All five are still not complete: cash App UI/provisioning/remount, full drawer recovery, signed cash reversals, complete native journeys and Windows in-app upgrade remain. Public version/binaries unchanged; last live source4b84634/deployment5889a64c. Last usage19% primary/88% weekly, not approaching5h exhaustion. No files/data were deleted.
+
 ## Authoritative follow-up — 2026-10-05, source4b84634
 
 297 local tests pass (5security,275integration,14review,3native), no failed/skipped;17 formula checks remain separate, not E2E. Final log: scratch/five-item-oct05-policy-final.log. Lint, full/core typechecks, Web build and the compatibility guard pass; chunk-size warning remains. Chrome IDB probe/engine/migration tests pass. Hosted37292310620 completed successfully for exact source4b8463464368a8cfbb36d105b102f145c229c515; confirmed with gh run view.

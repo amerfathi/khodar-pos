@@ -4,6 +4,7 @@ import { CloudflareSyncService } from '../src/services/cloudflareSync.js';
 import { setSessionToken, setSessionUser } from '../src/services/authSession.js';
 import { AtomicStore } from '../src/services/atomicStore.js';
 import { attachConflictPreconditions, SYNC_HEADS_STATE_KEY } from '../src/services/syncConflictPolicy.js';
+import { replayReviewedLedger } from '../src/services/reviewLedgerReplay.js';
 
 const memoryStorage = () => {
   const rows = new Map();
@@ -36,6 +37,54 @@ test('an owner-resolved original triggers authenticated recovery and waits for l
     assert.equal(await service.flushQueue({pullAfterFlush:false}),true);assert.equal(repository.current.outbox.length,0);
     assert.equal(repository.read('braka_review_recovery_archive_v1')[0].original.outbox[0].id,'reviewed-original');
   }finally{service.stopAutoSync();await repository.close();globalThis.fetch=oldFetch;globalThis.sessionStorage=oldSession;}
+});
+
+test('paginated owner recovery preserves the outbox on quota failure and cancels a stale account response',async()=>{
+  const previousSession=globalThis.sessionStorage,previousFetch=globalThis.fetch;
+  globalThis.sessionStorage=memoryStorage();
+  const identity={id:'large-recovery-user',tenantId:'large-recovery-tenant',branchIds:['main']};
+  setSessionToken('fixture-token');setSessionUser({...identity,sessionExpiresAt:new Date(Date.now()+60000).toISOString()});
+  const branch={id:'main',tenantId:identity.tenantId,name:'Main'};
+  const repository=new AtomicStore(identity,{khodar_pos_branches_v1:[branch],khodar_pos_active_branch_id_v1:'main'},memoryStorage());
+  await repository.acquire();
+  repository.transact(()=>repository.enqueue({id:'large-recovery-original',tenantId:identity.tenantId,branchId:'main',entityType:'expense',entityId:'exp',action:'create',payload:{id:'exp',branchId:'main',amount:8}}));
+  const queue=structuredClone(repository.current.outbox),before=JSON.stringify(repository.value);
+  const proposal={success:true,ready:true,protocol:'owner-reviewed-checkpoint-v2',tenantId:identity.tenantId,
+    completeHistory:false,validatedThroughCursor:2201,history:[],queue,branches:[branch],nextCursor:2201,conflictHeads:{},
+    checkpoint:replayReviewedLedger([],identity.tenantId,{branches:[branch]}),
+    receipts:[{reviewId:'large-resolved',tenantId:identity.tenantId,choice:'server',events:queue,acceptedEventIds:[]}]};
+  const service=new CloudflareSyncService();service.repository=repository;service.isOnline=true;service.currentTenantId=identity.tenantId;
+  service.updateHandler=(_events,_cursor,_heads,_partial,value)=>repository.installReviewedResolution(value);
+  const statuses=[];service.subscribe(value=>statuses.push(value.status));
+  let pages=0;
+  globalThis.fetch=async(url,options)=>{
+    if(!url.endsWith('/resolutions'))return Response.json({error:'Source resolved by company owner; recover reviewed checkpoint'},{status:409});
+    assert.equal(JSON.parse(options.body).checkpointProtocol,2);
+    pages++;
+    assert.deepEqual(repository.current.outbox,queue);
+    return pages%2===1?Response.json({success:true,ready:false,status:'validating',processedCount:200,totalCount:2201},{status:202}):Response.json(proposal);
+  };
+  try{
+    repository.durable={commit:async()=>{throw Error('paginated review quota');}};
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),false);assert.equal(pages,2);
+    assert.equal(JSON.stringify(repository.value),before);assert.equal(service.lastError,'paginated review quota');
+    assert.equal(statuses.includes('review_resolved'),false);assert.equal(statuses.includes('review_validating'),true);
+    let pendingResponse;
+    globalThis.fetch=async url=>url.endsWith('/resolutions')?new Promise(resolve=>{pendingResponse=resolve;}):
+      Response.json({error:'Source resolved by company owner; recover reviewed checkpoint'},{status:409});
+    const stale=service.flushQueue({pullAfterFlush:false});
+    for(let i=0;i<20&&!pendingResponse;i++)await new Promise(resolve=>setTimeout(resolve,0));
+    assert.ok(pendingResponse);setSessionToken('replacement-account-token');
+    pendingResponse(Response.json(proposal));assert.equal(await stale,false);
+    assert.equal(JSON.stringify(repository.value),before);assert.equal(statuses.includes('review_resolved'),false);
+    setSessionToken('fixture-token');repository.durable=null;
+    globalThis.fetch=async url=>url.endsWith('/resolutions')?Response.json(proposal):
+      Response.json({error:'Source resolved by company owner; recover reviewed checkpoint'},{status:409});
+    assert.equal(await service.flushQueue({pullAfterFlush:false}),true);
+    assert.equal(repository.current.outbox.length,0);assert.equal(repository.current.cursor,2201);
+    assert.equal(repository.read('braka_review_recovery_archive_v1')[0].original.outbox[0].id,queue[0].id);
+    assert.equal(statuses.filter(value=>value==='review_resolved').length,1);
+  }finally{service.stopAutoSync();await repository.close();globalThis.fetch=previousFetch;globalThis.sessionStorage=previousSession;}
 });
 
 test('stale nonadditive mutations reach owner review without acknowledging or rewriting the local ledger', async()=>{

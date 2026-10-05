@@ -10,6 +10,7 @@
       "/atomicStore.js": ["./src/services/atomicStore.js"],
       "/durableAggregate.js": ["./src/services/durableAggregate.js"],
       "/cashDrawerJournal.js": ["./src/services/cashDrawerJournal.js"],
+      "/reviewLedgerReplay.js": ["./src/services/reviewLedgerReplay.js"],
       "/offlineGrantStore.js": ["./src/services/offlineGrantStore.js"],
       "/offlineDeviceIdentity.js": ["./src/services/offlineDeviceIdentity.js"],
       "/tenantStorage.js": ["./src/services/tenantStorage.js"]

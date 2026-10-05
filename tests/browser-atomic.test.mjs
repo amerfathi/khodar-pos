@@ -52,6 +52,7 @@ try {
   const idbProbe = process.argv.includes('--idb-probe');
   const engineProbe = process.argv.includes('--idb-engine');
   const migrateProbe = process.argv.includes('--idb-migrate');
+  const reviewedProbe = process.argv.includes('--review-checkpoint');
   const migratedSnapshot = migrateProbe ? await first.evaluate(async () => {
     const { DurableAggregate } = await import('/durableAggregate.js');
     const repository = new DurableAggregate(indexedDB, 'braka-migration-probe');
@@ -158,6 +159,23 @@ try {
       throw Error('durable sync aggregate not coherent before process stop');
     return structuredClone(store.value);
   }) : null;
+  const reviewedSnapshot=reviewedProbe?await first.evaluate(async()=>{
+    const {AtomicStore}=await import('/atomicStore.js');
+    const {DurableAggregate}=await import('/durableAggregate.js');
+    const {replayReviewedLedger}=await import('/reviewLedgerReplay.js');
+    const identity={id:'reviewed-browser',tenantId:'reviewed-browser-tenant',branchIds:['main']};
+    const branch={id:'main',tenantId:identity.tenantId,name:'Main'};
+    const repository=new DurableAggregate(indexedDB,'braka-reviewed-probe');
+    const store=new AtomicStore(identity,{khodar_pos_branches_v1:[branch],khodar_pos_active_branch_id_v1:'main'});
+    if(!await store.acquire(undefined,repository))throw Error('Reviewed writer unavailable');
+    await store.transactDurable(()=>store.enqueue({id:'reviewed-pending',tenantId:identity.tenantId,branchId:'main',entityType:'expense',entityId:'pending',action:'create',payload:{id:'pending',branchId:'main',amount:8}}));
+    const queue=structuredClone(store.current.outbox);
+    const accepted={id:'reviewed-accepted',tenantId:identity.tenantId,branchId:'main',entityType:'expense',entityId:'accepted',action:'create',sequence:10,payload:{id:'accepted',branchId:'main',amount:3,paymentMethod:'cash'}};
+    await store.installReviewedResolution({protocol:'owner-reviewed-checkpoint-v2',tenantId:identity.tenantId,completeHistory:false,validatedThroughCursor:2201,nextCursor:2201,
+      history:[],checkpoint:replayReviewedLedger([accepted],identity.tenantId,{branches:[branch]}),queue,branches:[branch],conflictHeads:{},
+      receipts:[{reviewId:'reviewed-browser-decision',tenantId:identity.tenantId,choice:'server',events:queue,acceptedEventIds:[]}]});
+    return structuredClone(store.value);
+  }):null;
   const second = await browser.newPage();
   await second.goto(url, { waitUntil: 'networkidle0' });
   await second.waitForFunction(() => window.ready !== undefined);
@@ -177,7 +195,7 @@ try {
     assert.equal(new Set(identities.map(row=>row.deviceProof)).size,1,'all enrollments must retain the same possession proof');
     deviceIdentity=identities[0];
   }
-  const abrupt = process.argv.includes('--crash') || idbProbe || engineProbe || migrateProbe;
+  const abrupt = process.argv.includes('--crash') || idbProbe || engineProbe || migrateProbe || reviewedProbe;
   if (abrupt) {
     const chromeProcess = browser.process();
     const crashDelay = Number(process.env.BRAKA_CRASH_DELAY_MS || 0);
@@ -192,6 +210,28 @@ try {
   await reopened.goto(url, { waitUntil: 'networkidle0' });
   await reopened.waitForFunction(() => window.ready !== undefined);
   assert.equal(await reopened.evaluate(() => window.ready), true);
+  if(reviewedProbe){
+    const result=await reopened.evaluate(async()=>{
+      const {AtomicStore}=await import('/atomicStore.js');
+      const {DurableAggregate}=await import('/durableAggregate.js');
+      const identity={id:'reviewed-browser',tenantId:'reviewed-browser-tenant',branchIds:['main']};
+      const repository=new DurableAggregate(indexedDB,'braka-reviewed-probe');
+      const store=new AtomicStore(identity,{},localStorage,{durableFirst:true});
+      if(!await store.acquire(undefined,repository))throw Error('Reviewed writer unavailable after restart');
+      const before=structuredClone(store.value);
+      const old={id:'reviewed-accepted',tenantId:identity.tenantId,sequence:10};
+      const fresh={id:'reviewed-new',tenantId:identity.tenantId,sequence:2202};
+      let applies=0;
+      await store.receiveDurable([old,fresh],2202,events=>{applies+=events.length;},{},true);
+      await store.receiveDurable([old,fresh],2202,()=>{throw Error('Reviewed source duplicated');},{},true);
+      const after=structuredClone(store.value);await store.close();repository.close();
+      return {before,after,applies};
+    });
+    assert.deepEqual(result.before,reviewedSnapshot);
+    assert.equal(result.applies,1);assert.equal(result.after.state.braka_reviewed_cursor_fence_v1,2201);
+    assert.equal(result.after.state.braka_review_recovery_archive_v1[0].original.outbox[0].id,'reviewed-pending');
+    console.log('Chrome reviewed checkpoint, original archive and cursor fence survived process termination; covered sources did not replay and the new source applied once.');
+  }
   if(idbProbe) {
     const identityAfterRestart=await reopened.evaluate(async()=>{
       const {OfflineGrantStore,indexedDbBackend}=await import('/offlineGrantStore.js');

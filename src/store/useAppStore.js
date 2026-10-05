@@ -392,23 +392,25 @@ export function useAppStore(options = {}) {
 
   // When a shift is open for the record's branch, attribute the cash movement to
   // that shift and append it to the shift journal in the same store transaction.
-  const attributeCashToOpenShift = (record, type) => {
+  const attributeCashToOpenShift = (record, type, reverse = false) => {
     const shifts = Array.isArray(cashShifts) ? cashShifts : [];
     let delta;
     try { delta = cashMovementFromRecord(type, record); } catch { return record; }
+    if(reverse)delta=-delta;
     if (!Number.isFinite(delta) || delta === 0) return record;
     const candidates = shifts.filter(row => row.tenantId === currentUser?.tenantId &&
       row.branchId === record.branchId && row.actorId === currentUser?.id && row.status === 'open');
     if (candidates.length > 1) throw new Error('يوجد أكثر من درج مفتوح لهذا المحاسب؛ يلزم تحديد الدرج قبل تسجيل الحركة');
     const shift = candidates[0];
     if (!shift) return record;
+    const movementId=`cash:${reverse?'void:':''}${record.clientTransactionId || record.id}`;
     const nextShifts = postCashEvent(shifts, {
-      shiftId: shift.id, id: `cash:${record.clientTransactionId || record.id}`,
+      shiftId: shift.id, id: movementId,
       actorId: currentUser?.id, deviceId: shift.offlineDeviceId, amount: delta, at: new Date().toISOString()
     });
     setCashShifts(nextShifts);
     const updatedShift = nextShifts.find(row => row.id === shift.id);
-    local.enqueue({ id: `cash-shift:${shift.id}:cash:${record.clientTransactionId || record.id}`,
+    local.enqueue({ id: `cash-shift:${shift.id}:${movementId}`,
       tenantId: shift.tenantId, branchId: shift.branchId, entityType: 'cash_shift', entityId: shift.id,
       action: 'update', payload: updatedShift, timestamp: Date.now() });
     return { ...record, cashShiftId: shift.id };
@@ -857,7 +859,7 @@ export function useAppStore(options = {}) {
 
   const inboundRef = useRef(null);
   inboundRef.current = (events, cursor, serverHeads, partialVisibility = false, proposal = null) => {
-    if(proposal?.protocol==='owner-reviewed-ledger-v1')return local.installReviewedResolution(proposal).finally(refreshBindings);
+    if(['owner-reviewed-ledger-v1','owner-reviewed-checkpoint-v2'].includes(proposal?.protocol))return local.installReviewedResolution(proposal).finally(refreshBindings);
     const apply = batch => {
       refreshBindings();
       applyInboundSyncEvents(batch);
@@ -1225,6 +1227,7 @@ export function useAppStore(options = {}) {
     if (!target || target.status === 'voided') return;
     requireSameBranch(target);
     if (salesReturns.some(row=>row.invoiceId===invoiceId)) throw new Error('لا يمكن إلغاء فاتورة لها مردود قائم');
+    const reversal=cashDrawerContext?attributeCashToOpenShift(target,'invoice',true):null;
     inboundRecords.current.invoice.set(invoiceId, { ...target, status: 'voided' });
 
     // Reverse customer debt if applicable
@@ -1247,7 +1250,8 @@ export function useAppStore(options = {}) {
 
     try {
       const activeTenantId = currentUser?.tenantId || 'tenant-demo';
-      cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'invoice', invoiceId, 'void', { id: invoiceId, status: 'voided' });
+      cloudflareSync.recordMutation(activeTenantId, targetBranchId, 'invoice', invoiceId, 'void', { id: invoiceId, status: 'voided',
+        ...(reversal?.cashShiftId?{cashShiftId:reversal.cashShiftId}:{}) });
     } catch (e) { throw e; }
   };
 

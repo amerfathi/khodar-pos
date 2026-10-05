@@ -57,12 +57,12 @@ export function reviewedLedgerState(ledger,tenantId,cursor,activeBranchId){
 
 // Pure staging projection only. No storage or API writes. Unsupported sources
 // reject the complete result; callers must never install a partial projection.
-export function replayReviewedLedger(events,tenantId,{branches=[]}={}){
+export function replayReviewedLedger(events,tenantId,{branches=[],checkpoint=null}={}){
   if(!Array.isArray(events)||typeof tenantId!=='string'||!tenantId)throw new Error('Invalid replay input');
-  const result={products:[],customers:[],suppliers:[],invoices:[],purchases:[],expenses:[],customerPayments:[],supplierPayments:[],
+  const result=checkpoint?structuredClone(checkpoint):{products:[],customers:[],suppliers:[],invoices:[],purchases:[],expenses:[],customerPayments:[],supplierPayments:[],
     branches:[],salesReturns:[],purchaseReturns:[],damagedItems:[],workers:[],workerTransactions:[],partners:[],partnerDrawings:[],
     profitDistributions:[],stockTransfers:[],expenseCategories:[],settings:structuredClone(INITIAL_SETTINGS)},seen=new Set();
-  result.branches=structuredClone(branches);
+  if(!checkpoint)result.branches=structuredClone(branches);
   const productChanges=new Map();
   const inspect=(value,depth=0)=>{
     if(depth>30)throw new Error('Invalid replay depth');
